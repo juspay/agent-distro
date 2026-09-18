@@ -10,6 +10,29 @@ SCRIPTS = Path(__file__).resolve().parent
 
 
 class UpdateFlakeTests(unittest.TestCase):
+    def test_read_versions_prints_and_appends_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nix = root / 'nix'
+            nix.write_text('#!/bin/sh\n'
+                           '[ "$1" = eval ] && [ "$2" = --raw ] || exit 1\n'
+                           'case "$3" in\n'
+                           '  .#codex.version) printf 0.153.0 ;;\n'
+                           '  .#claude.version) printf 2.1.273 ;;\n'
+                           '  *) exit 1 ;;\n'
+                           'esac\n')
+            nix.chmod(0o755)
+            output = root / 'outputs'
+            output.write_text('existing=value\n')
+            env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
+                       GITHUB_OUTPUT=str(output))
+            result = subprocess.run(['bash', str(SCRIPTS / 'read-versions.sh')],
+                                    cwd=root, env=env, capture_output=True, text=True)
+            expected = 'codex-version=0.153.0\nclaude-version=2.1.273\n'
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, expected)
+            self.assertEqual(output.read_text(), 'existing=value\n' + expected)
+
     def test_omp_pin_moves_only_forward(self):
         cases = [
             ('v18.2.4', 'v18.2.5', 'v18.2.5'),

@@ -2,7 +2,8 @@ name: Update Flake
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    # 07:00 EDT / 06:00 EST (GitHub cron is UTC); consumers (juspay/AI) run one hour later.
+    - cron: '0 11 * * *'
   workflow_dispatch:
 
 jobs:
@@ -22,11 +23,7 @@ jobs:
 
       - name: Read the pinned package versions
         id: versions-before
-        run: |
-          version=$(nix eval --raw .#codex.version)
-          echo "codex-version=$version" >> "$GITHUB_OUTPUT"
-          version=$(nix eval --raw .#claude.version)
-          echo "claude-version=$version" >> "$GITHUB_OUTPUT"
+        run: bash .github/scripts/read-versions.sh
 
       - name: Advance the oh-my-pi release pin
         id: omp
@@ -39,10 +36,7 @@ jobs:
         shell: bash
         run: |
           nix flake update --log-format raw 2>&1 | tee "$RUNNER_TEMP/flake-update.log"
-          version=$(nix eval --raw .#codex.version)
-          echo "codex-version=$version" >> "$GITHUB_OUTPUT"
-          version=$(nix eval --raw .#claude.version)
-          echo "claude-version=$version" >> "$GITHUB_OUTPUT"
+          bash .github/scripts/read-versions.sh
 
       - name: Update the test lock after the root lock
         run: bash test/update-lock.sh
@@ -72,7 +66,6 @@ jobs:
           body-path: ${{ steps.report.outputs.pr-body-path }}
           commit-message: "chore(flake): update inputs"
           labels: dependencies
-          assignees: ${{ github.repository_owner }}
 
   # Verify the dependency PR with the same Linux/macOS build and VM tests.
   # Inherit ATTIC_TOKEN when available for optional cache uploads.
