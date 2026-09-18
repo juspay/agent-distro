@@ -13,6 +13,8 @@ let
         value = builtins.filter (name: entries.${name} == "directory") (builtins.attrNames entries);
       })
     profile.plugins);
+  # Both mkLaunchers guards are lazy: vanilla checks can omit it because only
+  # plugin rebuild checks force updated or upstreamCodex. Keep the guards here.
   updated = common.updatedLaunchers
     (if mkLaunchers != null then mkLaunchers else throw "Plugin rebuild tests require mkLaunchers")
     pkgs
