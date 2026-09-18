@@ -6,17 +6,24 @@ on:
     - cron: '0 11 * * *'
   workflow_dispatch:
 
+# Runs share the update branch and land on main, so they must not overlap.
+concurrency: update-flake
+
 jobs:
   update:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
-    outputs:
-      pr: ${{ steps.update.outputs.pull-request-number }}
+      # Dispatch the shared CI workflow and read the run it creates.
+      actions: write
+    env:
+      BRANCH: flake-update
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          # Full history: the non-force push to main below needs it to prove the
+          # fast-forward. A shallow clone makes git refuse to move the ref.
+          fetch-depth: 0
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ github.token }}
@@ -53,41 +60,68 @@ jobs:
           CLAUDE_AFTER: ${{ steps.lock.outputs.claude-version }}
         run: python3 .github/scripts/describe-flake-update.py
 
-      - uses: peter-evans/create-pull-request@v8
-        id: update
-        with:
-          branch: update_flake_lock_action
-          delete-branch: true
-          add-paths: |
-            flake.nix
-            flake.lock
-            test/flake.lock
-          title: ${{ steps.report.outputs.pr-title }}
-          body-path: ${{ steps.report.outputs.pr-body-path }}
-          commit-message: "chore(flake): update inputs"
-          labels: dependencies
+      - name: Check whether anything changed
+        id: changes
+        run: |
+          if [ -z "$(git status --porcelain -- flake.nix flake.lock test/flake.lock)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Pinned versions are current; nothing to land." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
-  # Verify the dependency PR with the same Linux/macOS build and VM tests.
-  # Inherit ATTIC_TOKEN when available for optional cache uploads.
-  verify:
-    needs: update
-    if: needs.update.outputs.pr != ''
-    uses: ./.github/workflows/ci.yml
-    with:
-      ref: update_flake_lock_action
-    secrets: inherit
+      # The update cannot arrive as a pull request: a pull request that
+      # GITHUB_TOKEN opens leaves its workflows waiting for a maintainer's
+      # approval, and main's required checks are ci.yml's own `build
+      # (ubuntu-latest)` and `build (macos-latest)` jobs, which only report on a
+      # run of the commit itself. Pushing a branch and dispatching ci.yml on it
+      # gives both: that run needs no approval, and its checks are reported on
+      # the commit that goes to main.
+      - name: Push the update branch
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          SUBJECT: ${{ steps.report.outputs.commit-subject }}
+          BODY: ${{ steps.report.outputs.body-path }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add flake.nix flake.lock test/flake.lock
+          git commit --message "$SUBJECT" --message "$(cat "$BODY")"
+          git push --force origin "HEAD:refs/heads/$BRANCH"
 
-  # Merge dependency updates only after the shared CI succeeds.
-  merge:
-    needs: [update, verify]
-    if: needs.update.outputs.pr != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Merge the flake bump
-        run: gh pr merge --squash --delete-branch "${{ needs.update.outputs.pr }}"
+      - name: Verify the commit with the shared CI workflow
+        if: steps.changes.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          gh workflow run ci.yml --ref "$BRANCH"
+          run_id=''
+          for _ in $(seq 30); do
+            run_id=$(gh run list --workflow ci.yml --branch "$BRANCH" --event workflow_dispatch \
+              --limit 20 --json databaseId,headSha \
+              --jq "first(.[] | select(.headSha == \"$sha\")) | .databaseId")
+            [ -n "$run_id" ] && break
+            sleep 10
+          done
+          if [ -z "$run_id" ]; then
+            echo "error: ci.yml did not start for $sha" >&2
+            exit 1
+          fi
+          echo "Verifying $sha in $GH_REPO/actions/runs/$run_id"
+          # Generous bound: cache-miss days build the new pins from scratch on
+          # macOS. Without it a stuck run would hold this runner indefinitely.
+          timeout 2h gh run watch "$run_id" --exit-status --interval 30
+
+      - name: Land the verified commit on main
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git push origin "HEAD:refs/heads/main"
+          git push origin --delete "$BRANCH"
+
+      - name: Summarize the update
+        if: always()
+        run: |
+          body="${{ steps.report.outputs.body-path }}"
+          [ -f "$body" ] && cat "$body" >> "$GITHUB_STEP_SUMMARY" || true
