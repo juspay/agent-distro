@@ -4,18 +4,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The daily update dispatches this workflow on its branch: the run's checks
+  # (`build (ubuntu-latest)`, `build (macos-latest)`) are the contexts main's
+  # ruleset requires, and they must report on the commit that lands on main.
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      ref:
-        description: Git ref to check out and build (defaults to the triggering ref)
-        type: string
-        required: false
 
 jobs:
   build:
-    # Dependency PRs use the same workflow via workflow_call below.
-    if: github.event_name != 'pull_request' || github.head_ref != 'update_flake_lock_action'
     strategy:
       fail-fast: false
       matrix:
@@ -27,8 +22,6 @@ jobs:
       ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref || github.ref }}
 
       - name: Test flake update policy and reporting
         if: runner.os == 'Linux'
