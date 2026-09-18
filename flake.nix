@@ -25,7 +25,6 @@
     # wrappers and VM tests on the same package set, using the very glibc the omp binary was linked against, instead of a second, newer
     # one that could drift the other way.
     nixpkgs.follows = "oh-my-pi/nixpkgs";
-
   };
 
   outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, ... }:
@@ -42,6 +41,7 @@
     in
     mkFlake { profile = vanilla; } // {
       lib = { inherit mkLaunchers mkFlake; };
+      profiles = { inherit vanilla; };
       templates.default = {
         path = ./templates/default;
         description = "A coding-agent distribution with one profile";

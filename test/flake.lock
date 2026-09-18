@@ -16,9 +16,8 @@
         "type": "path"
       },
       "original": {
-        "owner": "juspay",
-        "repo": "agent-distro",
-        "type": "github"
+        "path": "..",
+        "type": "path"
       },
       "parent": []
     },

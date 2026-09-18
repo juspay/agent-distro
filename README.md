@@ -34,7 +34,8 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
 
-The template includes a gateway example. Commit `flake.lock` to pin your build.
+The template includes a gateway example; `agent-distro.profiles.vanilla` is the
+reference profile shape. Commit `flake.lock` to pin your build.
 
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }

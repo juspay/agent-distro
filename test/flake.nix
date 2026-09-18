@@ -1,13 +1,13 @@
 {
   description = "Vanilla launcher integration tests";
   inputs = {
-    agent-distro.url = "github:juspay/agent-distro";
+    agent-distro.url = "path:..";
     nixpkgs.follows = "agent-distro/nixpkgs";
   };
   outputs = { nixpkgs, agent-distro, ... }:
     let
       pkgs = nixpkgs.legacyPackages.x86_64-linux;
-      profile = { name = "vanilla"; description = "Upstream harnesses with your own provider"; plugins = [ ]; gateway = null; };
+      profile = agent-distro.profiles.vanilla;
       packages = agent-distro.packages.x86_64-linux;
       tests = import ./lib.nix {
         inherit pkgs profile;
