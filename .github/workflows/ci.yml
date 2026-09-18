@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to check out and build (defaults to the triggering ref)
+        type: string
+        required: false
+
+jobs:
+  build:
+    # Dependency PRs use the same workflow via workflow_call below.
+    if: github.event_name != 'pull_request' || github.head_ref != 'update_flake_lock_action'
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is arm64 (aarch64-darwin), matching the flake's supported
+        # systems; ubuntu-latest covers x86_64-linux.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Test flake update policy and reporting
+        if: runner.os == 'Linux'
+        run: python3 .github/scripts/test-update-flake.py
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ github.token }}
+          # Trust the project cache so builds pull from it (warms nix run /
+          # nix develop on both platforms) instead of rebuilding.
+          extra_nix_config: |
+            extra-substituters = https://cache.nixos.asia/oss
+            extra-trusted-public-keys = oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=
+
+      - name: Install attic and log in
+        if: env.ATTIC_TOKEN != ''
+        run: |
+          nix profile install "nixpkgs#attic-client"
+          attic login --set-default oss https://cache.nixos.asia "$ATTIC_TOKEN"
+
+      - name: Build all flake outputs and push to nixos.asia cache
+        run: |
+          outs=$(nix build github:srid/devour-flake -L --no-link --print-out-paths \
+            --override-input flake .)
+          if [ -n "$ATTIC_TOKEN" ]; then
+            attic push oss "$outs"
+          fi
+
+      - name: Build the picker and harnesses
+        run: |
+          nix build --print-build-logs .#default .#omp .#codex .#claude
+
+      - name: Wrapper package tests
+        # The wrapper tests boot NixOS VMs, so they only run where a Linux
+        # builder exists. `nix flake check` builds the whole checks set.
+        if: runner.os == 'Linux'
+        run: |
+          cd test && nix flake check -L --override-input agent-distro ..
+
+      - name: Test the distribution template
+        run: bash test/template.sh
