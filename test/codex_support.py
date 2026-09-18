@@ -8,7 +8,6 @@ import tomllib
 
 expected = json.loads(sys.argv[1])
 marketplace = sys.argv[2]
-launcher = 'codex'
 home = Path.home()
 codex_home = home / 'relocated-codex'
 codex_home.mkdir()
@@ -25,7 +24,7 @@ skill.parent.mkdir(parents=True)
 skill.write_text('---\nname: personal\ndescription: Personal skill\n---\n')
 
 
-def run(*args, **kwargs):
+def run(*args, launcher='codex', **kwargs):
     return subprocess.run([launcher, *args], env=env, text=True,
                           capture_output=True, timeout=60, **kwargs)
 
@@ -45,7 +44,7 @@ def installed_plugins():
     return {p['pluginId']: p for p in installed}
 
 
-def loaded_skills():
+def loaded_skills(launcher='codex'):
     # No thread or model request: initialize, then ask the real app server for
     # its effective skills. A timeout also catches protocol changes in updates.
     process = subprocess.Popen([launcher, 'app-server'], env=env,
@@ -82,8 +81,8 @@ def loaded_skills():
 
 
 
-def assert_skills():
-    skills = loaded_skills()
+def assert_skills(launcher='codex'):
+    skills = loaded_skills(launcher)
     expected_names = {plugin + ':' + skill for plugin, names in expected.items() for skill in names}
     bundled = {name for name in skills if ':' in name}
     assert bundled == expected_names, (bundled, expected_names)
