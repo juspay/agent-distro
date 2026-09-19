@@ -1,4 +1,4 @@
-"""Format the update commit from resolved versions; never fetch or change a pin."""
+"""Format the update PR from resolved versions; never fetch or change a pin."""
 import os
 from pathlib import Path
 
@@ -40,15 +40,14 @@ def main():
         f"Automated flake input update.\n\n{omp_note}\n\n{codex_note}\n\n{claude_note}\n\n"
         "Codex packaging: https://github.com/sadjow/codex-cli-nix\n\n"
         "Claude Code packaging: https://github.com/sadjow/claude-code-nix\n\n"
-        f"```text\n{lock_log}\n```\n\n### CI on this commit\n\n"
-        f"The [Update Flake]({run_url}) workflow verifies this commit with the "
-        "shared CI workflow (Linux and macOS builds, VM and template tests) and "
-        "only then pushes it to `main`. Those runs' `build (ubuntu-latest)` and "
-        "`build (macos-latest)` checks are the contexts the `Require CI on main` "
-        "ruleset requires, so the push is gated by them.\n"
+        f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"
+        f"The [Update Flake]({run_url}) workflow approves the runs GitHub holds "
+        "back for automation-created pull requests, waits for this pull request's "
+        "checks — `build (ubuntu-latest)` and `build (macos-latest)`, the contexts "
+        "`Require CI on main` expects — and squash-merges once they pass.\n"
     )
     with Path(env["GITHUB_OUTPUT"]).open("a") as output:
-        output.write(f"commit-subject={title}\nbody-path={body}\n")
+        output.write(f"pr-title={title}\npr-body-path={body}\n")
 
 
 if __name__ == "__main__":

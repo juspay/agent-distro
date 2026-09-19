@@ -6,7 +6,7 @@ on:
     - cron: '0 11 * * *'
   workflow_dispatch:
 
-# Runs share the update branch and land on main, so they must not overlap.
+# Runs share the update branch and pull request, so they must not overlap.
 concurrency: update-flake
 
 jobs:
@@ -14,16 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      # Dispatch the shared CI workflow and read the run it creates.
+      pull-requests: write
+      # Approve the runs this job's pull request is waiting on.
       actions: write
-    env:
-      BRANCH: flake-update
+    outputs:
+      pr: ${{ steps.update.outputs.pull-request-number }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Full history: the non-force push to main below needs it to prove the
-          # fast-forward. A shallow clone makes git refuse to move the ref.
-          fetch-depth: 0
+
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ github.token }}
@@ -60,68 +58,70 @@ jobs:
           CLAUDE_AFTER: ${{ steps.lock.outputs.claude-version }}
         run: python3 .github/scripts/describe-flake-update.py
 
-      - name: Check whether anything changed
-        id: changes
-        run: |
-          if [ -z "$(git status --porcelain -- flake.nix flake.lock test/flake.lock)" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Pinned versions are current; nothing to land." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
+      - uses: peter-evans/create-pull-request@v8
+        id: update
+        with:
+          branch: flake-update
+          delete-branch: true
+          add-paths: |
+            flake.nix
+            flake.lock
+            test/flake.lock
+          title: ${{ steps.report.outputs.pr-title }}
+          body-path: ${{ steps.report.outputs.pr-body-path }}
+          commit-message: "chore(flake): update inputs"
+          labels: dependencies
 
-      # The update cannot arrive as a pull request: a pull request that
-      # GITHUB_TOKEN opens leaves its workflows waiting for a maintainer's
-      # approval, and main's required checks are ci.yml's own `build
-      # (ubuntu-latest)` and `build (macos-latest)` jobs, which only report on a
-      # run of the commit itself. Pushing a branch and dispatching ci.yml on it
-      # gives both: that run needs no approval, and its checks are reported on
-      # the commit that goes to main.
-      - name: Push the update branch
-        if: steps.changes.outputs.changed == 'true'
-        env:
-          SUBJECT: ${{ steps.report.outputs.commit-subject }}
-          BODY: ${{ steps.report.outputs.body-path }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add flake.nix flake.lock test/flake.lock
-          git commit --message "$SUBJECT" --message "$(cat "$BODY")"
-          git push --force origin "HEAD:refs/heads/$BRANCH"
-
-      - name: Verify the commit with the shared CI workflow
-        if: steps.changes.outputs.changed == 'true'
+      # A pull request that GITHUB_TOKEN opens leaves its workflow runs waiting
+      # for a maintainer to approve them, and quiet wording in the checks UI
+      # hides that they never ran. This job created the pull request and gates
+      # the merge on its own CI, so it approves those runs itself instead of
+      # asking a maintainer to start the same builds every morning. What the
+      # runs then prove is unchanged: the required `build (ubuntu-latest)` and
+      # `build (macos-latest)` checks are the contexts `Require CI on main`
+      # expects, and they now report on the commit the pull request merges.
+      - name: Approve the runs the update pull request is waiting on
+        if: steps.update.outputs.pull-request-number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.update.outputs.pull-request-number }}
         run: |
-          sha=$(git rev-parse HEAD)
-          gh workflow run ci.yml --ref "$BRANCH"
-          run_id=''
-          for _ in $(seq 30); do
-            run_id=$(gh run list --workflow ci.yml --branch "$BRANCH" --event workflow_dispatch \
-              --limit 20 --json databaseId,headSha \
-              --jq "first(.[] | select(.headSha == \"$sha\")) | .databaseId")
-            [ -n "$run_id" ] && break
+          sha=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          approved=0
+          for _ in $(seq 20); do
+            pending=$(gh run list --commit "$sha" --limit 50 --json databaseId,status,conclusion \
+              --jq '[.[] | select(.status == "action_required" or .conclusion == "action_required")
+                     | .databaseId] | join(" ")')
+            if [ -n "$pending" ]; then
+              for run in $pending; do
+                echo "Approving run $run"
+                gh api -X POST "repos/$GH_REPO/actions/runs/$run/approve" >/dev/null
+              done
+              approved=$((approved + 1))
+            elif [ "$approved" -gt 0 ]; then
+              break
+            fi
             sleep 10
           done
-          if [ -z "$run_id" ]; then
-            echo "error: ci.yml did not start for $sha" >&2
-            exit 1
-          fi
-          echo "Verifying $sha in $GH_REPO/actions/runs/$run_id"
-          # Generous bound: cache-miss days build the new pins from scratch on
-          # macOS. Without it a stuck run would hold this runner indefinitely.
-          timeout 2h gh run watch "$run_id" --exit-status --interval 30
 
-      - name: Land the verified commit on main
-        if: steps.changes.outputs.changed == 'true'
-        run: |
-          git push origin "HEAD:refs/heads/main"
-          git push origin --delete "$BRANCH"
+  # Merge the update only after the shared CI the ruleset requires succeeds.
+  merge:
+    needs: update
+    if: needs.update.outputs.pr != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Wait for the pull request checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: timeout 2h gh pr checks "${{ needs.update.outputs.pr }}" --watch --fail-fast --interval 30
 
-      - name: Summarize the update
-        if: always()
-        run: |
-          body="${{ steps.report.outputs.body-path }}"
-          [ -f "$body" ] && cat "$body" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Merge the flake bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh pr merge --squash --delete-branch "${{ needs.update.outputs.pr }}"

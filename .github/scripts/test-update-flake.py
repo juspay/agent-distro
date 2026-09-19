@@ -1,4 +1,4 @@
-"""Check release policy and reporting offline, without touching a remote."""
+"""Check release policy and reporting offline, without opening a PR."""
 import os
 from itertools import product
 from pathlib import Path
@@ -80,12 +80,12 @@ class UpdateFlakeTests(unittest.TestCase):
                            GITHUB_RUN_ID='123', RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(root / 'outputs'))
                 subprocess.run(['python3', str(SCRIPTS / 'describe-flake-update.py')], env=env, check=True)
                 outputs = dict(line.split('=', 1) for line in (root / 'outputs').read_text().splitlines())
-                body = Path(outputs['body-path']).read_text()
+                body = Path(outputs['pr-body-path']).read_text()
                 self.assertIn('skills revision changed', body)
                 self.assertIn('https://github.com/juspay/AI/actions/runs/123', body)
-                self.assertEqual('oh-my-pi v18.2.4 → v18.2.5' in outputs['commit-subject'], omp_changed)
-                self.assertEqual('Codex 0.153.0 → 0.154.0' in outputs['commit-subject'], codex_changed)
-                self.assertEqual('Claude Code 2.1.273 → 2.1.274' in outputs['commit-subject'], claude_changed)
+                self.assertEqual('oh-my-pi v18.2.4 → v18.2.5' in outputs['pr-title'], omp_changed)
+                self.assertEqual('Codex 0.153.0 → 0.154.0' in outputs['pr-title'], codex_changed)
+                self.assertEqual('Claude Code 2.1.273 → 2.1.274' in outputs['pr-title'], claude_changed)
                 if claude_changed:
                     self.assertIn('/releases/tag/v2.1.274', body)
                 else:

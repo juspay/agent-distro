@@ -86,10 +86,10 @@ python3 .github/scripts/test-update-flake.py
 ```
 
 Daily CI advances OMP's release tag, updates the root lock, then updates
-`test/flake.lock` against this checkout. It pushes the result to a branch,
-dispatches CI on it for the Linux/macOS builds and the VM and template checks,
-and pushes that verified commit to `main` — the required contexts of the
-`Require CI on main` ruleset come from that same CI run. Consumers update with
+`test/flake.lock` against this checkout. It opens a dependency pull request,
+approves the runs GitHub holds back for automation-created pull requests, and
+squash-merges once the Linux/macOS builds and the VM and template checks pass —
+the same checks `Require CI on main` requires. Consumers update with
 `nix flake update agent-distro`.
 
 For manual updates, advance `oh-my-pi.url` first, run `nix flake update`, then
