@@ -18,7 +18,7 @@ if [ "$before" != "$latest" ] && [ "$(printf '%s\n' "$before" "$latest" | sort -
   grep -qF "oh-my-pi.url = \"github:can1357/oh-my-pi/$after\";" flake.nix
 fi
 
-# Facts only. Commit wording belongs to describe-flake-update.py.
+# Facts only. PR wording belongs to describe-flake-update.py.
 {
   echo "before=$before"
   echo "after=$after"
