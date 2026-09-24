@@ -1,38 +1,29 @@
 # Selection only: each launcher owns its initialization and plugin protocol.
-{ lib, writeShellApplication, omp, codex, claude, profile }:
+{ lib, writeShellApplication, gum, omp, codex, claude, profile }:
 let
   ownLogin = lib.optionalString ((profile.gateway or null) != null) " (uses its own login)";
+  entry = label: value: lib.escapeShellArg "${label}\t${value}";
 in
 writeShellApplication {
   name = "ai";
-  text = ''
-    launch() {
-      case "$1" in
-        omp) shift; exec ${lib.getExe omp} "$@" ;;
-        codex) shift; exec ${lib.getExe codex} "$@" ;;
-        claude) shift; exec ${lib.getExe claude} "$@" ;;
-        *) echo 'Invalid AI_HARNESS; valid values: omp, codex, claude.' >&2; exit 1 ;;
-      esac
-    }
-    if [ "''${AI_HARNESS+x}" = x ]; then
-      launch "$AI_HARNESS" "$@"
-    fi
-    if [ ! -t 0 ]; then
-      echo "Set AI_HARNESS to omp, codex, or claude, or run that harness's launcher directly." >&2
-      exit 1
-    fi
+  runtimeInputs = [ gum ];
+  text = builtins.readFile ./choose.sh + ''
 
-    printf '%s\n' ${lib.escapeShellArg profile.description} 'Choose a coding agent:' '  1) Oh My Pi' '  2) Codex${ownLogin}' '  3) Claude Code${ownLogin}' >&2
-    while true; do
-      printf 'Agent [1/2/3] (q to quit): ' >&2
-      read -r choice || exit 1
-      case "$choice" in
-        1|omp) launch omp "$@" ;;
-        2|codex) launch codex "$@" ;;
-        3|claude) launch claude "$@" ;;
-        q|quit) exit 0 ;;
-        *) echo 'Enter 1 for Oh My Pi, 2 for Codex, 3 for Claude Code, or q to quit.' >&2 ;;
-      esac
-    done
+    invalid='Invalid AI_HARNESS; valid values: omp, codex, claude.'
+    choice=""
+    # The description heads the menu rather than the program, so a scripted
+    # AI_HARNESS run still prints only what the harness prints.
+    ai_choose AI_HARNESS omp ${lib.escapeShellArg "${profile.description}\nChoose a coding agent:"} "$invalid" \
+      "Set AI_HARNESS to omp, codex, or claude, or run that harness's launcher directly." \
+      ${entry "Oh My Pi" "omp"} \
+      ${entry "Codex${ownLogin}" "codex"} \
+      ${entry "Claude Code${ownLogin}" "claude"}
+
+    case "$choice" in
+      omp) exec ${lib.getExe omp} "$@" ;;
+      codex) exec ${lib.getExe codex} "$@" ;;
+      claude) exec ${lib.getExe claude} "$@" ;;
+      *) echo "$invalid" >&2; exit 1 ;;
+    esac
   '';
 }

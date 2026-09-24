@@ -3,7 +3,7 @@
 let
   mkLaunchers = import ./mk-launchers.nix { inherit oh-my-pi codex-cli claude-code; };
 in
-{ profile, systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] }:
+{ profile, systems ? import ./systems.nix }:
 let
   packages = nixpkgs.lib.genAttrs systems (system:
     let
