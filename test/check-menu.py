@@ -2,6 +2,7 @@
 import fcntl
 import os
 import pty
+import re
 import select
 import struct
 import sys
@@ -9,6 +10,9 @@ import termios
 import time
 
 DEFAULT, OTHER = sys.argv[1], sys.argv[2]
+# gum splits its own colours across a label, so match the text it drew rather
+# than the bytes it drew it with.
+ANSI = re.compile(rb'\x1b(\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[=><])')
 DOWN = b'\x1b[B'
 ESCAPE = b'\x1b'
 PROFILE_MENU = b'Choose a profile:'
@@ -53,15 +57,16 @@ def run(replies, expected, overrides=None, status=0):
     _, result = os.waitpid(pid, 0)
     os.close(fd)
     assert os.waitstatus_to_exitcode(result) == status, output
-    assert expected in output, output
     assert not pending, output
-    return output
+    drawn = ANSI.sub(b'', output)
+    assert expected in drawn, output
+    return drawn
 
 
 # The registry's default starts under the cursor, so Enter takes it and the
 # harness picker then runs with that profile's launchers.
-output = run({PROFILE_MENU: b'\r', HARNESS_MENU: DOWN + b'\r'}, b'codex-cli')
-assert b'> ' + DEFAULT.encode() in output, output
+drawn = run({PROFILE_MENU: b'\r', HARNESS_MENU: DOWN + b'\r'}, b'codex-cli')
+assert b'> ' + DEFAULT.encode() in drawn, drawn
 
 # A named profile skips its menu and lands straight on the harness picker.
 run({HARNESS_MENU: DOWN + DOWN + b'\r'}, b'(Claude Code)', {'AI_PROFILE': OTHER})
