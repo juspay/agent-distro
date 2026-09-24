@@ -1,17 +1,27 @@
+import fcntl
 import os
 import pty
 import select
+import struct
+import sys
+import termios
 import time
+
+DOWN = b'\x1b[B'
+ESCAPE = b'\x1b'
 
 
 def choose(harness, expected, overrides=None, command='ai', status=0):
     pid, fd = pty.fork()
     if pid == 0:
-        env = dict(os.environ, AI_GATEWAY='0')
+        env = dict(os.environ, AI_GATEWAY='0', TERM='xterm-256color')
         env.pop('AI_PROFILE', None)
         env.pop('AI_HARNESS', None)
         env.update(overrides or {})
         os.execvpe(command, [command, '--version'], env)
+    # pty.fork leaves the terminal zero-sized, and gum draws nothing into a
+    # window with no rows: give it one before it starts.
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
     output = b''
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -24,7 +34,9 @@ def choose(harness, expected, overrides=None, command='ai', status=0):
         if not chunk:
             break
         output += chunk
-        if harness is not None and b'Agent [1/2/3]' in output:
+        if harness is not None and b'Choose a coding agent' in output:
+            # The first frame is drawn, so gum is in its key loop.
+            time.sleep(0.5)
             os.write(fd, harness)
             harness = None
     else:
@@ -37,12 +49,11 @@ def choose(harness, expected, overrides=None, command='ai', status=0):
     return output
 
 
-choose(b'2\n', b'codex-cli')
-choose(b'3\n', b'(Claude Code)')
-choose(b'wrong\n1\n', b'Enter 1 for Oh My Pi')
+choose(DOWN + b'\r', b'codex-cli')
+choose(DOWN + DOWN + b'\r', b'(Claude Code)')
 choose(None, b'codex-cli', {'AI_HARNESS': 'codex'})
 choose(None, b'valid values: omp, codex, claude', {'AI_HARNESS': 'bad'}, status=1)
-choose(b'\x04', b'Choose a coding agent', status=1)
-output = choose(b'q\n', b'Choose a coding agent')
-import sys
+# Escape declines the menu, which is how you leave it now that there is no
+# numbered prompt to type `q` at.
+output = choose(ESCAPE, b'Choose a coding agent')
 assert (b'uses its own login' in output) == (sys.argv[1] == 'gateway'), output
