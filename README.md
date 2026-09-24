@@ -54,8 +54,8 @@ profiles/
 
 Profiles are discovered from the directory listing, so adding one is adding a
 directory — nothing in `flake.nix` names them. `profile.nix` is a plain attrset
-(or a function of no arguments) whose `name` must match its directory, and it
-pins its own plugin sources with [npins](https://github.com/andir/npins):
+whose `name` must match its directory, and it pins its own plugin sources with
+[npins](https://github.com/andir/npins):
 
 ```nix
 let sources = import ./npins;

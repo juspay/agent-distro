@@ -43,10 +43,7 @@
       # out of this file.
       profiles = lib.mapAttrs
         (name: _:
-          let
-            declared = import (./profiles + "/${name}/profile.nix");
-            profile = if lib.isFunction declared then declared { } else declared;
-          in
+          let profile = import (./profiles + "/${name}/profile.nix"); in
           # AI_PROFILE, the Codex marketplace and the picker all key off the
           # directory name, so a mismatch would surface far from its cause.
           if profile.name == name then profile
