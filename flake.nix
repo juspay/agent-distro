@@ -38,18 +38,17 @@
       mkFlake = import ./lib/mk-flake.nix (upstream // { inherit nixpkgs; });
       systems = import ./lib/systems.nix;
 
-      # Profiles are discovered, not listed: adding `profiles/<name>/profile.nix`
-      # is the whole registration step. That is what lets this file stay free of
-      # any one distribution's plugins, gateway, or name.
+      # Discovered, not listed: adding a directory is the whole registration
+      # step, which is what keeps one distribution's plugins, gateway and name
+      # out of this file.
       profiles = lib.mapAttrs
         (name: _:
           let
             declared = import (./profiles + "/${name}/profile.nix");
             profile = if lib.isFunction declared then declared { } else declared;
           in
-          # The directory name is the profile's identity — AI_PROFILE, the Codex
-          # marketplace, and the menu all key off it — so a mismatch would
-          # surface far from the line that caused it.
+          # AI_PROFILE, the Codex marketplace and the picker all key off the
+          # directory name, so a mismatch would surface far from its cause.
           if profile.name == name then profile
           else throw "profiles/${name}/profile.nix declares name \"${profile.name}\"; it must match its directory.")
         (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./profiles));
@@ -59,25 +58,34 @@
         if profiles ? ${registry.default} then registry.default
         else throw "profiles/registry.nix defaults to \"${registry.default}\", which is not a directory under profiles/.";
 
-      menus = lib.genAttrs systems (system:
+      pickers = lib.genAttrs systems (system:
         let pkgs = import nixpkgs { inherit system; };
-        in pkgs.callPackage ./adapters/menu.nix {
-          inherit profiles default;
-          launchers = lib.mapAttrs (_: profile: mkLaunchers { inherit pkgs profile; }) profiles;
+        in pkgs.callPackage ./adapters/picker.nix {
+          inherit default;
+          profiles = lib.mapAttrs
+            (_: profile: { inherit profile; launchers = mkLaunchers { inherit pkgs profile; }; })
+            profiles;
         });
     in
     {
-      # The profile menu is the only package. Every harness is reached through
-      # it, or past it with AI_PROFILE and AI_HARNESS, so there is no per-profile
-      # output set to keep in step with `profiles/`.
-      packages = lib.genAttrs systems (system: { default = menus.${system}; });
+      # The picker is the only package: every harness is reached through it, or
+      # past it with AI_PROFILE and AI_HARNESS, so no per-profile output set has
+      # to be kept in step with `profiles/`.
+      packages = lib.genAttrs systems (system: { default = pickers.${system}; });
       apps = lib.mapAttrs
-        (system: menu: { default = { type = "app"; program = lib.getExe menu; }; })
-        menus;
+        (_: picker: { default = { type = "app"; program = lib.getExe picker; }; })
+        pickers;
+
+      # Upstream's own packages, for the daily update to report: a harness
+      # version is a property of the lock, not of any profile.
+      harnesses = lib.genAttrs systems (system: {
+        omp = oh-my-pi.packages.${system}.default;
+        codex = codex-cli.packages.${system}.default;
+        claude = claude-code.packages.${system}.default;
+      });
 
       lib = { inherit mkLaunchers mkFlake; };
-      # Resolved profile data — plugins already fetched and bound — for the
-      # tests, for third parties, and for `lib.mkLaunchers`.
+      # Resolved profile data, for the tests and for third parties.
       inherit profiles;
       templates.default = {
         path = ./templates/default;

@@ -28,8 +28,8 @@ class UpdateFlakeTests(unittest.TestCase):
             nix.write_text('#!/bin/sh\n'
                            '[ "$1" = eval ] && [ "$2" = --raw ] || exit 1\n'
                            'case "$3" in\n'
-                           '  .#default.harnesses.codex.version) printf 0.153.0 ;;\n'
-                           '  .#default.harnesses.claude.version) printf 2.1.273 ;;\n'
+                           '  .#harnesses.x86_64-linux.codex.version) printf 0.153.0 ;;\n'
+                           '  .#harnesses.x86_64-linux.claude.version) printf 2.1.273 ;;\n'
                            '  *) exit 1 ;;\n'
                            'esac\n')
             nix.chmod(0o755)
@@ -132,25 +132,16 @@ class UpdateFlakeTests(unittest.TestCase):
                     self.assertIn('the pin only moves forward', body)
 
     def test_report_names_plugin_revisions_by_short_rev(self):
-        moved, same, added = 'a' * 40, 'b' * 40, 'c' * 40
+        before, after, same = 'a' * 40, 'c' * 40, 'b' * 40
         with tempfile.TemporaryDirectory() as directory:
             outputs, body = self.report(
                 Path(directory),
-                PLUGINS_BEFORE=json.dumps({'juspay/skills': moved, 'juspay/kolu': same, 'juspay/gone': 'd' * 40}),
-                PLUGINS_AFTER=json.dumps({'juspay/skills': added, 'juspay/kolu': same, 'juspay/new': added}))
-            self.assertIn(f'juspay/skills {moved[:7]} → {added[:7]}', outputs['pr-title'])
-            self.assertIn('juspay/gone removed', outputs['pr-title'])
-            self.assertIn(f'juspay/new {added[:7]}', outputs['pr-title'])
+                PLUGINS_BEFORE=json.dumps({'juspay/skills': before, 'juspay/kolu': same}),
+                PLUGINS_AFTER=json.dumps({'juspay/skills': after, 'juspay/kolu': same}))
+            self.assertIn(f'juspay/skills {before[:7]} → {after[:7]}', outputs['pr-title'])
             self.assertNotIn('juspay/kolu', outputs['pr-title'])
-            self.assertIn(f'- `juspay/skills` `{moved[:7]}` → `{added[:7]}`', body)
+            self.assertIn(f'- `juspay/skills` `{before[:7]}` → `{after[:7]}`', body)
             self.assertIn(f'- `juspay/kolu` unchanged (`{same[:7]}`)', body)
-            self.assertIn(f'- `juspay/new` pinned at `{added[:7]}`', body)
-
-    def test_report_survives_a_registry_with_no_pins(self):
-        with tempfile.TemporaryDirectory() as directory:
-            outputs, body = self.report(Path(directory))
-            self.assertIn('No plugin sources are pinned', body)
-            self.assertEqual(outputs['pr-title'], 'chore(flake): update inputs')
 
 
 if __name__ == '__main__':

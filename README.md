@@ -8,13 +8,29 @@ own plugins.
 ## Quick start
 
 ```sh
-nix run github:juspay/agent-distro           # choose a profile, then a harness
-AI_PROFILE=juspay AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
+nix run github:juspay/agent-distro           # pick a profile's harness
+AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
+AI_PROFILE=vanilla AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
 ```
 
-The only package is the profile menu. It asks which profile to use, then which
-harness to launch; `AI_PROFILE` and `AI_HARNESS` skip the respective menu, which
-is how scripts and non-interactive shells use it. Escape leaves either menu.
+The only package is the picker: one list of every profile's harnesses, the
+default profile's first and the rest tagged with their profile name.
+
+```
+Juspay skills + Kolu, via Juspay's LiteLLM gateway
+
+❯ Oh My Pi
+  Codex          (own login)
+  Claude Code    (own login)
+  vanilla · Oh My Pi
+  vanilla · Codex
+  vanilla · Claude Code
+```
+
+`AI_HARNESS` picks a row without the list, which is how scripts and
+non-interactive shells use it; `AI_PROFILE` chooses the profile, defaulting to
+the one `registry.nix` names, and on its own narrows the list to that profile.
+Escape or ctrl-c leaves the list.
 
 `AI_PROFILE=juspay` runs OMP against Juspay's LiteLLM gateway, prompting for
 `LITELLM_API_KEY` unless it is exported; create a key at
@@ -31,7 +47,7 @@ A profile is a directory under `profiles/`:
 
 ```
 profiles/
-  registry.nix          # { default = "<name>"; } — the profile the menu opens on
+  registry.nix          # { default = "<name>"; } — the profile the list opens on
   <name>/profile.nix    # { name; description; plugins; gateway; }
   <name>/npins/         # optional: the profile's pinned plugin sources
 ```
@@ -64,7 +80,7 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | Field | Meaning |
 | --- | --- |
 | `name` | Distribution identifier; Codex marketplace is `<name>-ai` |
-| `description` | Text shown by the harness picker |
+| `description` | Header above the picker's list |
 | `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
 
@@ -79,8 +95,9 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → { omp; codex; claude; picker; }
 ```
 
-A single-profile distribution has no profile menu, so `mkFlake` still gives you
-the four packages and its `default` is the harness picker.
+A single-profile distribution is the same picker with one profile's rows and
+no profile tags; `mkFlake` still gives you the four packages, with the picker as
+its `default`.
 
 `mkFlake` returns only `packages` and `apps`; add other outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
@@ -115,7 +132,7 @@ Plugin MCP commands must be available on `PATH`.
 ## Checks and updates
 
 ```sh
-nix build .#default    # the menu, and through it every profile's launchers
+nix build .#default    # the picker, and through it every profile's launchers
 nix flake check
 just test              # offline NixOS VM tests; Linux with KVM
 just test-template
@@ -139,5 +156,5 @@ Consumers can import `test/lib.nix { pkgs; launchers; profile; }` and select
 and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`) are
 separate attributes; rebuild tests additionally take `mkLaunchers`. Select
 plugin rebuild tests only for nonempty skill plugins. `test/flake.nix` runs
-every applicable attribute against every profile in `profiles/`, plus a check
-of the menu itself.
+every applicable attribute against every profile in `profiles/`, plus `registry`
+— the same `picker` check over the whole registry.

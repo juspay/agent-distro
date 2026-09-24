@@ -14,23 +14,18 @@ def describe(name, before, after, release_url):
 
 
 def describe_plugins(before, after):
-    """One line per `profiles/<name>/npins` source, keyed `<profile>/<pin>`."""
+    """One line per `profiles/<name>/npins` source, keyed `<profile>/<pin>`.
+
+    `npins update` moves revisions; the two reads always see the same pins.
+    """
     changes, lines = [], []
-    for pin in sorted(set(before) | set(after)):
-        old, new = before.get(pin), after.get(pin)
+    for pin, old in sorted(before.items()):
+        new = after[pin]
         if old == new:
             lines.append(f"- `{pin}` unchanged (`{old[:7]}`)")
-        elif old is None:
-            changes.append(f"{pin} {new[:7]}")
-            lines.append(f"- `{pin}` pinned at `{new[:7]}`")
-        elif new is None:
-            changes.append(f"{pin} removed")
-            lines.append(f"- `{pin}` removed (was `{old[:7]}`)")
         else:
             changes.append(f"{pin} {old[:7]} → {new[:7]}")
             lines.append(f"- `{pin}` `{old[:7]}` → `{new[:7]}`")
-    if not lines:
-        return changes, "**No plugin sources are pinned**"
     return changes, "**Plugin sources**\n\n" + "\n".join(lines)
 
 

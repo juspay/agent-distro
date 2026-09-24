@@ -19,7 +19,6 @@
       vanilla = suite agent-distro.profiles.vanilla;
       juspay = suite agent-distro.profiles.juspay;
       named = profile: lib.mapAttrs' (check: lib.nameValuePair "${profile}-${check}");
-      profiles = builtins.attrNames agent-distro.profiles;
     in
     {
       checks.${system} =
@@ -31,11 +30,11 @@
             ompPlugins codexPlugins claudePlugins ompKolu codexKolu claudeKolu;
         }
         // {
-          menu = pkgs.testers.runNixOSTest (import ./test-menu.nix {
-            inherit profiles;
+          # The same picker over the whole registry rather than one profile.
+          registry = pkgs.testers.runNixOSTest (import ./test-picker.nix {
+            name = "registry";
             menu = agent-distro.packages.${system}.default;
-            # registry.nix names the default; reading it here keeps the test
-            # honest about which profile the menu opens on.
+            profiles = agent-distro.profiles;
             inherit (import "${agent-distro}/profiles/registry.nix") default;
           });
         };
