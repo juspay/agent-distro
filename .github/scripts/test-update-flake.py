@@ -1,4 +1,5 @@
 """Check release policy and reporting offline, without opening a PR."""
+import json
 import os
 from itertools import product
 from pathlib import Path
@@ -9,6 +10,16 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parent
 
 
+def write_pins(root, profile, pins):
+    """Lay out a profiles/<profile>/npins/sources.json the way npins does."""
+    sources = root / 'profiles' / profile / 'npins' / 'sources.json'
+    sources.parent.mkdir(parents=True)
+    sources.write_text(json.dumps({
+        'pins': {name: {'type': 'Git', 'revision': revision} for name, revision in pins.items()},
+        'version': 8,
+    }))
+
+
 class UpdateFlakeTests(unittest.TestCase):
     def test_read_versions_prints_and_appends_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -17,21 +28,36 @@ class UpdateFlakeTests(unittest.TestCase):
             nix.write_text('#!/bin/sh\n'
                            '[ "$1" = eval ] && [ "$2" = --raw ] || exit 1\n'
                            'case "$3" in\n'
-                           '  .#codex.version) printf 0.153.0 ;;\n'
-                           '  .#claude.version) printf 2.1.273 ;;\n'
+                           '  .#harnesses.x86_64-linux.codex.version) printf 0.153.0 ;;\n'
+                           '  .#harnesses.x86_64-linux.claude.version) printf 2.1.273 ;;\n'
                            '  *) exit 1 ;;\n'
                            'esac\n')
             nix.chmod(0o755)
+            write_pins(root, 'juspay', {'skills': 'a' * 40, 'kolu': 'b' * 40})
             output = root / 'outputs'
             output.write_text('existing=value\n')
             env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
                        GITHUB_OUTPUT=str(output))
             result = subprocess.run(['bash', str(SCRIPTS / 'read-versions.sh')],
                                     cwd=root, env=env, capture_output=True, text=True)
-            expected = 'codex-version=0.153.0\nclaude-version=2.1.273\n'
+            expected = ('codex-version=0.153.0\nclaude-version=2.1.273\n'
+                        'plugins={"juspay/kolu": "%s", "juspay/skills": "%s"}\n' % ('b' * 40, 'a' * 40))
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, expected)
             self.assertEqual(output.read_text(), 'existing=value\n' + expected)
+
+    def test_plugin_pins_are_read_per_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_pins(root, 'juspay', {'skills': 'a' * 40})
+            write_pins(root, 'other', {'skills': 'c' * 40})
+            # A profile without pins contributes nothing and must not fail.
+            (root / 'profiles' / 'vanilla').mkdir()
+            result = subprocess.run(['python3', str(SCRIPTS / 'read-plugin-pins.py')],
+                                    cwd=root, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout),
+                             {'juspay/skills': 'a' * 40, 'other/skills': 'c' * 40})
 
     def test_omp_pin_moves_only_forward(self):
         cases = [
@@ -66,23 +92,31 @@ class UpdateFlakeTests(unittest.TestCase):
                     self.assertEqual(flake.read_text(), original.replace(before, after))
                     self.assertEqual(output.read_text(), f'before={before}\nafter={after}\nlatest={latest}\n')
 
+    def report(self, root, **overrides):
+        (root / 'flake-update.log').write_text('skills revision changed\n')
+        env = dict(os.environ, OMP_BEFORE='v18.2.4', OMP_AFTER='v18.2.4', OMP_LATEST='v18.2.3',
+                   CODEX_BEFORE='0.153.0', CODEX_AFTER='0.153.0',
+                   CLAUDE_BEFORE='2.1.273', CLAUDE_AFTER='2.1.273',
+                   PLUGINS_BEFORE='{}', PLUGINS_AFTER='{}',
+                   GITHUB_SERVER_URL='https://github.com', GITHUB_REPOSITORY='juspay/agent-distro',
+                   GITHUB_RUN_ID='123', RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(root / 'outputs'))
+        env.update(overrides)
+        subprocess.run(['python3', str(SCRIPTS / 'describe-flake-update.py')], env=env, check=True)
+        outputs = dict(line.split('=', 1) for line in (root / 'outputs').read_text().splitlines())
+        return outputs, Path(outputs['pr-body-path']).read_text()
+
     def test_report_uses_resolved_versions_and_preserves_lock_log(self):
         for omp_changed, codex_changed, claude_changed in product([False, True], repeat=3):
             with self.subTest(omp=omp_changed, codex=codex_changed, claude=claude_changed), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                (root / 'flake-update.log').write_text('skills revision changed\n')
-                env = dict(os.environ, OMP_BEFORE='v18.2.4',
-                           OMP_AFTER='v18.2.5' if omp_changed else 'v18.2.4',
-                           OMP_LATEST='v18.2.5' if omp_changed else 'v18.2.3',
-                           CODEX_BEFORE='0.153.0', CODEX_AFTER='0.154.0' if codex_changed else '0.153.0',
-                           CLAUDE_BEFORE='2.1.273', CLAUDE_AFTER='2.1.274' if claude_changed else '2.1.273',
-                           GITHUB_SERVER_URL='https://github.com', GITHUB_REPOSITORY='juspay/AI',
-                           GITHUB_RUN_ID='123', RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(root / 'outputs'))
-                subprocess.run(['python3', str(SCRIPTS / 'describe-flake-update.py')], env=env, check=True)
-                outputs = dict(line.split('=', 1) for line in (root / 'outputs').read_text().splitlines())
-                body = Path(outputs['pr-body-path']).read_text()
+                outputs, body = self.report(
+                    root,
+                    OMP_AFTER='v18.2.5' if omp_changed else 'v18.2.4',
+                    OMP_LATEST='v18.2.5' if omp_changed else 'v18.2.3',
+                    CODEX_AFTER='0.154.0' if codex_changed else '0.153.0',
+                    CLAUDE_AFTER='2.1.274' if claude_changed else '2.1.273')
                 self.assertIn('skills revision changed', body)
-                self.assertIn('https://github.com/juspay/AI/actions/runs/123', body)
+                self.assertIn('https://github.com/juspay/agent-distro/actions/runs/123', body)
                 self.assertEqual('oh-my-pi v18.2.4 → v18.2.5' in outputs['pr-title'], omp_changed)
                 self.assertEqual('Codex 0.153.0 → 0.154.0' in outputs['pr-title'], codex_changed)
                 self.assertEqual('Claude Code 2.1.273 → 2.1.274' in outputs['pr-title'], claude_changed)
@@ -96,6 +130,18 @@ class UpdateFlakeTests(unittest.TestCase):
                     self.assertIn('Codex unchanged (`0.153.0`)', body)
                 if not omp_changed:
                     self.assertIn('the pin only moves forward', body)
+
+    def test_report_names_plugin_revisions_by_short_rev(self):
+        before, after, same = 'a' * 40, 'c' * 40, 'b' * 40
+        with tempfile.TemporaryDirectory() as directory:
+            outputs, body = self.report(
+                Path(directory),
+                PLUGINS_BEFORE=json.dumps({'juspay/skills': before, 'juspay/kolu': same}),
+                PLUGINS_AFTER=json.dumps({'juspay/skills': after, 'juspay/kolu': same}))
+            self.assertIn(f'juspay/skills {before[:7]} → {after[:7]}', outputs['pr-title'])
+            self.assertNotIn('juspay/kolu', outputs['pr-title'])
+            self.assertIn(f'- `juspay/skills` `{before[:7]}` → `{after[:7]}`', body)
+            self.assertIn(f'- `juspay/kolu` unchanged (`{same[:7]}`)', body)
 
 
 if __name__ == '__main__':
