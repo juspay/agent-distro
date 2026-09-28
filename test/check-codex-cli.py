@@ -43,6 +43,10 @@ legacy_names = re.search(r'legacy_artifacts=\(([^)]+)\)', prelude)[1].split()
 assert legacy_names == ['app-server.pid', 'app-server.stderr.log',
                         'app-server-updater.pid', 'app-server-updater.stderr.log']
 
+dedicated_names = re.search(r'dedicated_artifacts=\(([^)]+)\)', prelude)[1].split()
+assert dedicated_names == ['daemon.pid', 'daemon.stderr.log',
+                           'daemon-updater.pid', 'daemon-updater.stderr.log']
+
 fixture = codex_home / 'fixture-codex'
 fixture.write_text('#!' + sys.executable + '\n' + r'''
 import json, os, pathlib, sys
@@ -77,7 +81,7 @@ marker = codex_home / 'packages/app-server-daemon/auto-update-version'
 marker.parent.mkdir(parents=True)
 
 
-def check_failure(case, message):
+def check_failure(case, message=None):
     (codex_home / 'fixture-calls').write_text('')
     if case == 'marker':
         marker.write_text('fixture')
@@ -111,6 +115,11 @@ def check_failure(case, message):
         _, status = os.waitpid(pid, 0)
         os.close(fd)
         marker.unlink(missing_ok=True)
+    if message is None:
+        assert os.waitstatus_to_exitcode(status) == 0, (case, output)
+        assert b'LAUNCHED' in output and b'agent-distro:' not in output, output
+        assert (codex_home / 'fixture-calls').read_text() == 'start\nversion\n'
+        return
     assert os.waitstatus_to_exitcode(status) != 0, (case, output)
     assert b'LAUNCHED' not in output, (case, output)
     assert b'agent-distro: ' in output and message.encode() in output, (case, output)
@@ -146,5 +155,21 @@ for name in legacy_names:
 artifact.symlink_to('missing-target')
 check_failure('legacy', str(artifact))
 assert artifact.is_symlink()
+artifact.unlink()
+# Dedicated selection takes precedence over leftover legacy state.
+artifact.write_text('legacy sentinel')
+current = marker.parent / 'current'
+current.mkdir()
+check_failure('dedicated-current')
+current.rmdir()
+current.symlink_to('missing-target')
+check_failure('dedicated-current-symlink')
+current.unlink()
+for name in dedicated_names:
+    dedicated = state / name
+    dedicated.touch()
+    check_failure('dedicated-artifact')
+    dedicated.unlink()
+assert artifact.read_text() == 'legacy sentinel'
 artifact.unlink()
 assert_preserved()

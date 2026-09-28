@@ -52,8 +52,17 @@ managed_package() {
 check_legacy_state() {
   local root="${CODEX_HOME:-$HOME/.codex}" name path
   [[ "$root" = /* ]] || root="$PWD/$root"
+  local -a dedicated_artifacts=(daemon.pid daemon.stderr.log daemon-updater.pid daemon-updater.stderr.log)
   local -a legacy_artifacts=(app-server.pid app-server.stderr.log app-server-updater.pid app-server-updater.stderr.log)
   local -a found=()
+  # Mirror package_root: a dedicated current entry wins, then dedicated
+  # artifacts, then legacy artifacts. Include dangling symlinks as upstream does.
+  path="$root/packages/app-server-daemon/current"
+  [[ ! -e "$path" && ! -L "$path" ]] || return 0
+  for name in "${dedicated_artifacts[@]}"; do
+    path="$root/app-server-daemon/$name"
+    [[ ! -e "$path" && ! -L "$path" ]] || return 0
+  done
   # Both complete-package and older standalone layouts are supported by Codex.
   [[ ! -f "$root/packages/standalone/current/bin/codex" &&
      ! -f "$root/packages/standalone/current/codex" ]] || return 0
