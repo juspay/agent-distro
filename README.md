@@ -10,36 +10,44 @@ own plugins.
 ```sh
 nix run github:juspay/agent-distro           # pick a profile's harness
 AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
-AI_PROFILE=vanilla AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
 ```
 
 The only package is the picker: one list of every profile's harnesses, the
 default profile's first and the rest tagged with their profile name.
 
 ```
-Juspay skills + Kolu, via Juspay's LiteLLM gateway
+Upstream harnesses with your own provider
 
 ❯ Oh My Pi
-  Codex          (own login)
-  Claude Code    (own login)
-  vanilla · Oh My Pi
-  vanilla · Codex
-  vanilla · Claude Code
+  Codex
+  Claude Code
+  juspay · Oh My Pi
+  juspay · Codex          (own login)
+  juspay · Claude Code    (own login)
 ```
 
 `AI_HARNESS` picks a row without the list, which is how scripts and
 non-interactive shells use it; `AI_PROFILE` chooses the profile, defaulting to
-the one `registry.nix` names, and on its own narrows the list to that profile.
-Escape or ctrl-c leaves the list.
+the one `registry.nix` names — `vanilla`, upstream harnesses with your own
+provider — and on its own narrows the list to that profile. Escape or ctrl-c
+leaves the list.
 
-`AI_PROFILE=juspay` runs OMP against Juspay's LiteLLM gateway, prompting for
-`LITELLM_API_KEY` unless it is exported; create a key at
+Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
+
+## The Juspay distribution
+
+```sh
+AI_PROFILE=juspay nix run github:juspay/agent-distro
+AI_PROFILE=juspay AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
+```
+
+`AI_PROFILE=juspay` adds Juspay's skills and Kolu, and runs OMP against
+Juspay's LiteLLM gateway, prompting for `LITELLM_API_KEY` unless it is
+exported; create a key at
 [grid.ai.juspay.net/dashboard](https://grid.ai.juspay.net/dashboard) (Juspay VPN
 required). `AI_GATEWAY=0` keeps the plugins but skips gateway initialization.
 Codex and Claude Code always use their own login. Kolu's MCP server needs `kolu`
 on `PATH`.
-
-Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
 ## Profiles
 
