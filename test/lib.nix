@@ -68,7 +68,7 @@ in
 {
   omp = mkCheck { } "omp" "omp" (if (profile.gateway or null) == null then "check-no-gateway.py" else "check-omp.py") [ ] { AI_GATEWAY = "0"; };
   codex = mkCheck { } "codex" "codex" "check-codex.py" [ ] { };
-  codexCli = mkCheck { } "codex" "codex-cli" "check-codex-cli.py" [ ] {
+  codexCli = mkCheck { } "codex" "codex-cli" "check-codex-cli.py" [ pkgs.jq ] {
     CODEX_DAEMON_PRELUDE = "${../adapters/codex/prepare-daemon.sh}";
   };
   # Bootstrap and pinning stage complete package copies in the user home.

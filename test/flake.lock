@@ -96,11 +96,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1790631577,
-        "narHash": "sha256-varZQzeb1n3Dw5yTKIVW9tJ5whE4hZqSr0CRe/ifdtg=",
+        "lastModified": 1790632574,
+        "narHash": "sha256-0uXBU8oMk8v/IwjPDE/0+420k+RkJeqhB8VujNqh4aw=",
         "owner": "juspay",
         "repo": "codex-cli-nix",
-        "rev": "f5b19f4f0b1e8808e539ba2c24e159ed8da82421",
+        "rev": "79176e54b1e05a356787e54a2e3ea46ecd3b1b9a",
         "type": "github"
       },
       "original": {
