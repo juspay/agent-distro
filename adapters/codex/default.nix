@@ -44,6 +44,15 @@ writeShellApplication {
       done < "$marketplace/plugin-ids"
     fi
   '' + ''
-    exec ${lib.getExe codex} "$@"
+    # A session in a terminal starts Codex's shared background server, which
+    # it looks for in a standalone install under ~/.codex/packages; a Nix
+    # package has none, so the session dies before it opens (#26). Codex
+    # rejects the flag given twice, so a user's own is left to stand.
+    for argument in "$@"; do
+      if [ "$argument" = --no-daemon ]; then
+        exec ${lib.getExe codex} "$@"
+      fi
+    done
+    exec ${lib.getExe codex} --no-daemon "$@"
   '';
 }

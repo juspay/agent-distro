@@ -180,6 +180,8 @@ LiteLLM proxy used only by OMP.
   store path changes. Steady launches preserve disabled/removed plugins; a new
   build reinstalls them. Unrelated settings, credentials, and sessions persist.
   Vanilla skips registration entirely.
+  Sessions run without Codex's shared background server (`--no-daemon`),
+  which needs a standalone install that a Nix package does not have.
 - **Claude Code:** writes each plugin as a self-contained Claude Code plugin
   root, passed with `--plugin-dir` for that session: its manifest, its
   discovered skills, and a `.mcp.json`. Each stdio MCP server runs through a
