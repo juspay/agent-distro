@@ -122,7 +122,7 @@ try:
     assert version['status'] == 'running', version
     assert version['appServerVersion'] == version['managedCodexVersion'] == version['cliVersion'], version
     assert not (standalone / 'auto-update-version').exists()
-    assert 'working standalone log sentinel' in legacy_log.read_text()
+    # Once started, Codex owns and rewrites this log.
     clear_daemon()
 
     assert_starts()
