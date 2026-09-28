@@ -78,6 +78,13 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | `description` | Header above the picker's list |
 | `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
+| `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness |
+
+An MCP server that a plugin declares by bare command, such as
+`"command": "mcp-nixos"`, is found on `PATH`. List its package in `packages`
+and it is built, or fetched from a binary cache, together with the launcher, so
+the server starts at once instead of being downloaded when the agent first
+asks for it, and every user runs the version the build pinned.
 
 The template includes a gateway example; `agent-distro.profiles.vanilla` is the
 reference profile shape. Commit `flake.lock` to pin your build. Your team then
@@ -128,7 +135,7 @@ exported; create a key at
 [grid.ai.juspay.net/dashboard](https://grid.ai.juspay.net/dashboard) (Juspay VPN
 required). `AI_GATEWAY=0` keeps the plugins but skips gateway initialization.
 Codex and Claude Code always use their own login. Kolu's MCP server needs `kolu`
-on `PATH`.
+on `PATH`. The profile supplies `mcp-nixos` itself.
 
 </details>
 
@@ -137,12 +144,13 @@ A profile is a directory under `profiles/`:
 ```
 profiles/
   registry.nix          # { default = "<name>"; } — the profile the list opens on
-  <name>/profile.nix    # { name; description; plugins; gateway; }
+  <name>/profile.nix    # { name; description; plugins; gateway; packages; }
   <name>/npins/         # optional: the profile's pinned plugin sources
 ```
 
 Profiles are discovered from the directory listing, so adding one is adding a
 directory — nothing in `flake.nix` names them. `profile.nix` is a plain attrset
+— `packages` is its one function, since only the builder has a package set —
 whose `name` must match its directory, and it pins its own plugin sources with
 [npins](https://github.com/andir/npins):
 
@@ -174,7 +182,8 @@ LiteLLM proxy used only by OMP.
   self-contained plugin roots, passed with `--plugin-dir` for that session.
   Extra user plugins compose with them; no persistent installation is needed.
 
-Plugin MCP commands must be available on `PATH`.
+Plugin MCP commands are found on `PATH`: the profile's `packages` first, then
+the user's own.
 
 Profiles share each harness's own home directory, so what OMP and Codex persist
 outlives the profile that wrote it: a Codex marketplace registered by one

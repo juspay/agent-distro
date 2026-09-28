@@ -37,6 +37,10 @@
             profiles = agent-distro.profiles;
             inherit (import "${agent-distro}/profiles/registry.nix") default;
           });
+          packages = import ./test-packages.nix {
+            inherit pkgs;
+            bindLaunchers = import "${agent-distro}/lib/mk-launchers.nix";
+          };
         };
     };
 }
