@@ -34,6 +34,8 @@ let
       inherit name;
       nodes.machine = { ... }: {
         imports = [ common.baseNode ];
+        # Bootstrap and pinning stage complete package copies in the user home.
+        virtualisation.diskSize = pkgs.lib.mkIf (script == "check-codex-terminal.py") 4096;
         environment.systemPackages = [ launchers.${harness} pkgs.python3 ] ++ extraPackages;
         environment.variables = environment;
       };
