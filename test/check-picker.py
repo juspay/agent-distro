@@ -67,7 +67,6 @@ def heading(drawn):
 
 
 drawn = run(b'\r', b'Oh My Pi')
-assert (b'(own login)' in drawn) == MENU['gateway'], drawn
 
 if OTHERS:
     # The whole registry: no header, and every row names its profile in a

@@ -10,36 +10,22 @@ let
   harnesses = [ "omp" "codex" "claude" ];
   titles = { omp = "Oh My Pi"; codex = "Codex"; claude = "Claude Code"; };
 
-  # OMP is the only harness a gateway applies to; the other two log in as
-  # themselves, which is worth saying beside their names.
-  ownLogin = name: harness:
-    harness != "omp" && (profiles.${name}.profile.gateway or null) != null;
-
   widest = strings: lib.foldl' lib.max 0 (map lib.stringLength strings);
   pad = width: text: text + lib.concatStrings (lib.genList (_: " ") (width - lib.stringLength text));
   row = name: harness: label: lib.escapeShellArg "${label}\t${name}/${harness}";
 
   # Narrowed to one profile: its description heads the list, so no row needs a
-  # tag and only the marked ones need a column.
-  narrowRows = name:
-    let column = 4 + widest (map (harness: titles.${harness}) (lib.filter (ownLogin name) harnesses));
-    in lib.concatMapStringsSep " "
-      (harness: row name harness (
-        if ownLogin name harness
-        then pad column titles.${harness} + "(own login)"
-        else titles.${harness}))
-      harnesses;
+  # tag.
+  narrowRows = name: lib.concatMapStringsSep " "
+    (harness: row name harness titles.${harness})
+    harnesses;
 
-  # The whole registry has no header, so every row carries its profile and both
-  # columns are as wide as their widest value.
+  # The whole registry has no header, so every row carries its profile, in a
+  # column as wide as the widest name.
   profileColumn = 2 + widest names;
-  harnessColumn = 2 + widest (map (harness: titles.${harness}) harnesses);
   wholeRows = lib.concatMapStringsSep " "
     (name: lib.concatMapStringsSep " "
-      (harness: row name harness (pad profileColumn name + (
-        if ownLogin name harness
-        then pad harnessColumn titles.${harness} + "(own login)"
-        else titles.${harness})))
+      (harness: row name harness (pad profileColumn name + titles.${harness}))
       harnesses)
     names;
 

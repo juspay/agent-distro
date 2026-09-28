@@ -5,7 +5,6 @@ let
   menuShape = {
     inherit default;
     others = builtins.filter (n: n != default) names;
-    gateway = builtins.any (n: (profiles.${n}.gateway or null) != null) names;
   };
 in
 {
