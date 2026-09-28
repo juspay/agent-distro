@@ -81,6 +81,16 @@ def clear_daemon():
 
 
 try:
+    # The reported #26 state selects packages/standalone, unlike lock files.
+    (codex_home / 'app-server-daemon').mkdir(mode=0o700)
+    legacy_log = codex_home / 'app-server-daemon/app-server.stderr.log'
+    legacy_log.write_text('legacy daemon log sentinel\n')
+    assert not (codex_home / 'packages').exists()
+    assert_starts()
+    server()
+    assert legacy_log.read_text() == 'legacy daemon log sentinel\n'
+    clear_daemon()
+
     assert_starts()
     identity = server()
     # Steady launches must not restart a shared server's active sessions.
