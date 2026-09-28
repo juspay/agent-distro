@@ -32,8 +32,9 @@ def run(*args, launcher='claude'):
 def inventory(plugin, launcher='claude'):
     # Claude's own inventory, rather than inspecting the translated files.
     details = run('plugin', 'details', plugin, launcher=launcher)
-    match = re.search(r'^\s*Skills \((\d+)\)\s+([^\n]+)', details, re.MULTILINE)
+    # An MCP-only plugin prints `Skills (0)` with no names after it.
+    match = re.search(r'^\s*Skills \((\d+)\)[ \t]*([^\n]*)', details, re.MULTILINE)
     assert match, details
-    names = set(match[2].split(', '))
+    names = set(filter(None, match[2].split(', ')))
     assert len(names) == int(match[1]), details
     return names, details

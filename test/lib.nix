@@ -6,11 +6,13 @@ let
     (plugin:
       let
         manifest = builtins.fromJSON (builtins.readFile "${plugin}/plugin.json");
-        entries = builtins.readDir "${plugin}/skills";
+        # Discovery per the spec, kept independent of the reader under test.
+        skills = "${plugin}/skills";
+        entries = if builtins.pathExists skills then builtins.readDir skills else { };
       in
       {
         name = manifest.name;
-        value = builtins.filter (name: entries.${name} == "directory") (builtins.attrNames entries);
+        value = builtins.filter (name: builtins.pathExists "${skills}/${name}/SKILL.md") (builtins.attrNames entries);
       })
     profile.plugins);
   # Both mkLaunchers guards are lazy: vanilla checks can omit it because only
@@ -56,6 +58,10 @@ let
   koluFixture = pkgs.writeShellScriptBin "kolu" ''
     exec ${pkgs.python3}/bin/python ${./kolu-mcp-fixture.py} "$@"
   '';
+  # The spec fixture's recorder, on PATH for the bare-command server.
+  recordFixture = pkgs.writeShellScriptBin "fixture-record" ''
+    exec ${pkgs.python3}/bin/python ${./fixtures/spec-plugin/bin/record} "$@"
+  '';
   gatewayEnvironment = { ${profile.gateway.keyEnv} = "test-api-key"; };
 in
 {
@@ -80,4 +86,7 @@ in
   ompKolu = mkCheck "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
   codexKolu = mkCheck "codex" "codex-kolu" "check-codex-kolu.py" [ koluFixture ] { };
   claudeKolu = mkCheck "claude" "claude-kolu" "check-claude-kolu.py" [ koluFixture ] { };
+
+  # Profiles containing test/fixtures/{spec-plugin,mcp-only} only.
+  claudeSpec = mkCheck "claude" "claude-spec" "check-claude-spec.py" [ recordFixture ] { };
 }

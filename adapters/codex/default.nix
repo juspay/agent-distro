@@ -1,12 +1,16 @@
 # Codex owns marketplace registration, installation, and its persistent state.
 # Portable plugin contents and provider policy stay outside this adapter.
-{ lib, writeShellApplication, runCommand, jq, codex, plugins, marketplaceName }:
+{ lib, callPackage, writeShellApplication, runCommand, jq, codex, plugins, marketplaceName }:
 let
+  # Codex loads the original directory itself; the description only supplies
+  # its validated name, so an invalid manifest fails here as it does for Claude.
+  readPlugin = callPackage ../../lib/read-plugin.nix { };
   marketplace = runCommand "codex-${marketplaceName}-marketplace" { nativeBuildInputs = [ jq ]; } ''
     mkdir -p "$out/.agents/plugins"
     touch entries.json "$out/plugin-ids"
-    for plugin in ${lib.escapeShellArgs (map toString plugins)}; do
-      name=$(jq -er '.name' "$plugin/plugin.json")
+    for description in ${lib.escapeShellArgs (map (plugin: toString (readPlugin plugin)) plugins)}; do
+      plugin=$(jq -er '.root' "$description")
+      name=$(jq -er '.manifest.name' "$description")
       ln -s "$plugin" "$out/$name"
       jq -n --arg name "$name" '{
         name: $name,

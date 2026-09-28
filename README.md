@@ -76,7 +76,7 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | --- | --- |
 | `name` | Distribution identifier; Codex marketplace is `<name>-ai` |
 | `description` | Header above the picker's list |
-| `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
+| `plugins` | List of [Agent Plugins](https://agent-plugins.org/specification/) directories: a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json` |
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
 | `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness |
 
@@ -180,12 +180,23 @@ LiteLLM proxy used only by OMP.
   store path changes. Steady launches preserve disabled/removed plugins; a new
   build reinstalls them. Unrelated settings, credentials, and sessions persist.
   Vanilla skips registration entirely.
-- **Claude Code:** translates manifests and copies skills/MCP configuration into
-  self-contained plugin roots, passed with `--plugin-dir` for that session.
+- **Claude Code:** writes each plugin as a self-contained Claude Code plugin
+  root, passed with `--plugin-dir` for that session: its manifest, its
+  discovered skills, and a `.mcp.json`. Each stdio MCP server runs through a
+  generated launcher that provides `PLUGIN_ROOT`, `PLUGIN_DATA`, placeholder
+  expansion, and the plugin root as working directory, as the spec requires.
   Extra user plugins compose with them; no persistent installation is needed.
 
-Plugin MCP commands are found on `PATH`: the profile's `packages` first, then
-the user's own.
+Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
+An invalid manifest fails the build with a message naming the field; skipped
+skills, disabled `mcp.json` files and invalid server entries are reported in
+the build log, as the spec's failure boundaries require. A bare MCP `command` is
+found on `PATH`: the profile's `packages` first, then the user's own. A `./`
+command runs from the plugin.
+
+One known gap: Claude Code expands `${VAR}` in a remote server's `url` and
+`headers`, which the spec forbids. Those values cannot go through a launcher, so
+a remote server whose URL or headers contain `${` reaches Claude Code as is.
 
 Profiles share each harness's own home directory, so what OMP and Codex persist
 outlives the profile that wrote it: a Codex marketplace registered by one
@@ -221,5 +232,7 @@ Consumers can import `test/lib.nix { pkgs; launchers; profile; }` and select
 and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`) are
 separate attributes; rebuild tests additionally take `mkLaunchers`. Select
 plugin rebuild tests only for nonempty skill plugins. `test/flake.nix` runs
-every applicable attribute against every profile in `profiles/`, plus `registry`
-— the same `picker` check over the whole registry.
+every applicable attribute against every profile in `profiles/` and against a
+test-only `fixtures` profile of spec-shaped plugins in `test/fixtures/`, plus
+`registry` — the same `picker` check over the whole registry — and `reader`,
+the plugin reader's own checks, which need no VM.
