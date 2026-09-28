@@ -11,11 +11,13 @@ import termios
 import time
 
 MENU = json.loads(sys.argv[1])
-OTHERS = MENU['others']
+DEFAULT, OTHERS = MENU['default'], MENU['others']
 DOWN = b'\x1b[B'
 ESCAPE = b'\x1b'
-# gum colours the cursor row, so match the text it drew, not the bytes.
-ANSI = re.compile(rb'\x1b(\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[=><])')
+CURSOR = '❯ '.encode()
+# gum colours the cursor row and negotiates terminal features, so match the
+# text it drew rather than the bytes it drew it with.
+ANSI = re.compile(rb'\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])')
 
 
 def run(keys, expected, overrides=None, status=0):
@@ -59,22 +61,37 @@ def run(keys, expected, overrides=None, status=0):
     return drawn
 
 
-# The default profile's harnesses head the list, untagged, cursor on the first.
-drawn = run(b'\r', b'\xe2\x9d\xaf Oh My Pi')
+def heading(drawn):
+    """Whatever the list drew above its first row."""
+    return drawn.split(CURSOR)[0]
+
+
+drawn = run(b'\r', b'Oh My Pi')
 assert (b'(own login)' in drawn) == MENU['gateway'], drawn
+
+if OTHERS:
+    # The whole registry: no header, and every row names its profile in a
+    # column of its own.
+    assert not re.search(rb'[A-Za-z]', heading(drawn)), drawn
+    assert re.search(re.escape(DEFAULT.encode()) + rb' +Oh My Pi', drawn), drawn
+else:
+    # One profile: its description heads the list and the rows need no tag.
+    assert re.search(rb'[A-Za-z]', heading(drawn)), drawn
+    assert drawn.startswith(heading(drawn) + CURSOR + b'Oh My Pi'), drawn
+
 run(DOWN + b'\r', b'codex-cli')
 run(DOWN * 2 + b'\r', b'(Claude Code)')
 
-# Every other profile follows, tagged with its name.
 for index, name in enumerate(OTHERS):
-    tagged = name.encode() + ' · Codex'.encode()
-    assert tagged in drawn, drawn
+    assert re.search(re.escape(name.encode()) + rb' +Codex', drawn), drawn
     run(DOWN * (3 * (index + 1) + 1) + b'\r', b'codex-cli')
 
-# AI_PROFILE narrows the list to one profile, which then needs no tag.
-for name in OTHERS:
-    narrowed = run(b'\r', b'\xe2\x9d\xaf Oh My Pi', {'AI_PROFILE': name})
-    assert b' \xc2\xb7 ' not in narrowed, narrowed
+# AI_PROFILE narrows the list to one profile, which then needs no tag and gets
+# its description back as the header.
+for name in [DEFAULT] + OTHERS:
+    narrowed = run(b'\r', b'Oh My Pi', {'AI_PROFILE': name})
+    assert re.search(rb'[A-Za-z]', heading(narrowed)), narrowed
+    assert narrowed.startswith(heading(narrowed) + CURSOR + b'Oh My Pi'), narrowed
 
 # A known harness skips the list; the profile falls back to the default.
 run(None, b'codex-cli', {'AI_HARNESS': 'codex'})

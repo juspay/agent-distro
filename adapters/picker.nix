@@ -2,8 +2,7 @@
 #
 # One list of every profile's harnesses. Each launcher is a derivation in this
 # same evaluation, so a choice resolves to a store path the closure already
-# holds — no flake reference, no network, no `--impure`. A single-profile
-# distribution is this same list with one profile's rows and no profile tags.
+# holds — no flake reference, no network, no `--impure`.
 { lib, writeShellApplication, gum, profiles, default }:
 let
   names = [ default ] ++ lib.remove default (lib.attrNames profiles);
@@ -16,25 +15,33 @@ let
   ownLogin = name: harness:
     harness != "omp" && (profiles.${name}.profile.gateway or null) != null;
 
-  # The shell words for one list of `{ name; tagged; }`. The "(own login)"
-  # column is measured across the rows that list actually shows, so a list
-  # narrowed to one profile does not inherit a wider list's gap.
-  listRows = entries:
-    let
-      title = entry: harness: lib.optionalString entry.tagged "${entry.name} · " + titles.${harness};
-      column = 4 + lib.foldl' lib.max 0 (map lib.stringLength (lib.concatMap
-        (entry: map (title entry) (lib.filter (ownLogin entry.name) harnesses))
-        entries));
-      label = entry: harness:
-        let text = title entry harness; in
-        text + lib.optionalString (ownLogin entry.name harness)
-          (lib.concatStrings (lib.genList (_: " ") (column - lib.stringLength text)) + "(own login)");
-    in
-    lib.concatMapStringsSep " "
-      (entry: lib.concatMapStringsSep " "
-        (harness: lib.escapeShellArg "${label entry harness}\t${entry.name}/${harness}")
-        harnesses)
-      entries;
+  widest = strings: lib.foldl' lib.max 0 (map lib.stringLength strings);
+  pad = width: text: text + lib.concatStrings (lib.genList (_: " ") (width - lib.stringLength text));
+  row = name: harness: label: lib.escapeShellArg "${label}\t${name}/${harness}";
+
+  # Narrowed to one profile: its description heads the list, so no row needs a
+  # tag and only the marked ones need a column.
+  narrowRows = name:
+    let column = 4 + widest (map (harness: titles.${harness}) (lib.filter (ownLogin name) harnesses));
+    in lib.concatMapStringsSep " "
+      (harness: row name harness (
+        if ownLogin name harness
+        then pad column titles.${harness} + "(own login)"
+        else titles.${harness}))
+      harnesses;
+
+  # The whole registry has no header, so every row carries its profile and both
+  # columns are as wide as their widest value.
+  profileColumn = 2 + widest names;
+  harnessColumn = 2 + widest (map (harness: titles.${harness}) harnesses);
+  wholeRows = lib.concatMapStringsSep " "
+    (name: lib.concatMapStringsSep " "
+      (harness: row name harness (pad profileColumn name + (
+        if ownLogin name harness
+        then pad harnessColumn titles.${harness} + "(own login)"
+        else titles.${harness})))
+      harnesses)
+    names;
 
   # Nix strips the indentation shared by every line of `text`, so these arms
   # carry the depth their `case` ends up at.
@@ -44,11 +51,10 @@ let
       "${name}/${harness}) exec ${lib.getExe profiles.${name}.launchers.${harness}} \"$@\" ;;")
       harnesses)
     names);
-  # AI_PROFILE narrows the list to one profile, whose description is the header.
   narrowed = block "  " (map
     (name: "${lib.escapeShellArg name}) header=${
       lib.escapeShellArg "${profiles.${name}.profile.description}\n"
-    }; rows=(${listRows [{ inherit name; tagged = false; }]}) ;;")
+    }; rows=(${narrowRows name}) ;;")
     names);
 
   quote = lib.escapeShellArg;
@@ -56,11 +62,11 @@ let
     ++ lib.optional (others != [ ])
     "Set AI_PROFILE to one of ${lib.concatStringsSep ", " names}; it defaults to ${default}.";
   # Only a registry of several profiles has a wider list to fall back to.
-  whole = lib.optionalString (others != [ ]) ''
+  widen = lib.optionalString (others != [ ]) ''
 
     if [ "''${AI_PROFILE+x}" != x ]; then
-      rows=(${listRows ([{ name = default; tagged = false; }]
-        ++ map (name: { inherit name; tagged = true; }) others)})
+      header=""
+      rows=(${wholeRows})
     fi
   '';
 in
@@ -91,7 +97,7 @@ writeShellApplication {
       printf '%s\n' ${lib.concatMapStringsSep " " quote noTty} >&2
       exit 1
     fi
-    ${whole}
+    ${widen}
     choice=$(gum choose --limit 1 --label-delimiter $'\t' --cursor '❯ ' --no-show-help \
       --cursor.foreground 4 --selected.foreground 4 --header.foreground= \
       --header "$header" "''${rows[@]}") || exit 0

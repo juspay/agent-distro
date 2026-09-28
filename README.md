@@ -12,25 +12,32 @@ nix run github:juspay/agent-distro           # pick a profile's harness
 AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
 ```
 
-The only package is the picker: one list of every profile's harnesses, the
-default profile's first and the rest tagged with their profile name.
+The only package is the picker: one list of every profile's harnesses in
+aligned columns, the default profile's rows first.
 
 ```
-Upstream harnesses with your own provider
-
-❯ Oh My Pi
-  Codex
-  Claude Code
-  juspay · Oh My Pi
-  juspay · Codex          (own login)
-  juspay · Claude Code    (own login)
+❯ vanilla  Oh My Pi
+  vanilla  Codex
+  vanilla  Claude Code
+  juspay   Oh My Pi
+  juspay   Codex        (own login)
+  juspay   Claude Code  (own login)
 ```
 
 `AI_HARNESS` picks a row without the list, which is how scripts and
-non-interactive shells use it; `AI_PROFILE` chooses the profile, defaulting to
-the one `registry.nix` names — `vanilla`, upstream harnesses with your own
-provider — and on its own narrows the list to that profile. Escape or ctrl-c
-leaves the list.
+non-interactive shells use it. `AI_PROFILE` chooses the profile, defaulting to
+the one `registry.nix` names, and on its own narrows the list to that profile —
+which then needs no profile column and gets its description as a header:
+
+```
+Juspay skills + Kolu, via Juspay's LiteLLM gateway
+
+❯ Oh My Pi
+  Codex          (own login)
+  Claude Code    (own login)
+```
+
+Escape or ctrl-c leaves the list.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
@@ -103,9 +110,9 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → { omp; codex; claude; picker; }
 ```
 
-A single-profile distribution is the same picker with one profile's rows and
-no profile tags; `mkFlake` still gives you the four packages, with the picker as
-its `default`.
+A single-profile distribution draws the narrowed list above — one profile's
+rows under its description; `mkFlake` still gives you the four packages, with
+the picker as its `default`.
 
 `mkFlake` returns only `packages` and `apps`; add other outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
