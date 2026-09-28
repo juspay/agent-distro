@@ -88,6 +88,12 @@ try:
     assert server() == identity
     clear_daemon()
 
+    # Help and CLI tools stay side-effect free even with flags before commands.
+    for arguments in [('--version',), ('-c', 'model="my-model"', 'app-server', 'daemon', 'version')]:
+        _, alive = session(*arguments)
+        assert not alive, arguments
+        assert not (codex_home / 'packages/app-server-daemon/current').exists()
+
     # The flag is the user's to give; it must not install or start a server.
     assert_starts('--no-daemon')
     assert not (codex_home / 'packages/app-server-daemon/current').exists()

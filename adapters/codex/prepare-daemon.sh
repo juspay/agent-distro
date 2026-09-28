@@ -37,7 +37,10 @@ if terminal_session "$@"; then
     "$codex" app-server daemon update --from-cli --yes >/dev/null
   fi
   # Fail closed if a concurrent installation changed the selected server.
+  daemon=$("$codex" app-server daemon version)
+  managed=$(jq -er '.managedCodexPath' <<< "$daemon")
+  package=${managed%/current/*}
   [[ ! -e "$package/auto-update-version" ]]
-  "$codex" app-server daemon version | jq -e --arg version "$codex_version" \
-    '.status == "running" and .managedCodexVersion == $version and .appServerVersion == $version' >/dev/null
+  jq -e --arg version "$codex_version" \
+    '.status == "running" and .managedCodexVersion == $version and .appServerVersion == $version' <<< "$daemon" >/dev/null
 fi
