@@ -28,7 +28,10 @@ def session(*args, seconds=15):
         os.execvpe('codex', ['codex', *args], dict(env, TERM='xterm-256color'))
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
     output = b''
-    deadline = time.monotonic() + seconds
+    # Complete-package staging can exceed 15s under concurrent VM load. Wait
+    # for the TUI's cursor query before measuring how long the session stays up.
+    deadline = time.monotonic() + 90
+    ready = False
     alive = True
     while time.monotonic() < deadline:
         if select.select([fd], [], [], 1)[0]:
@@ -43,11 +46,15 @@ def session(*args, seconds=15):
             # Codex asks the terminal for its colours and cursor position
             # before it draws; a terminal that never answers looks broken.
             if b'\x1b[6n' in chunk:
+                if not ready:
+                    ready = True
+                    deadline = time.monotonic() + seconds
                 os.write(fd, b'\x1b[1;1R')
     if alive:
         os.kill(pid, signal.SIGKILL)
     _, status = os.waitpid(pid, 0)
     os.close(fd)
+    assert not alive or ready, ('terminal did not initialize within 90s', output)
     return output, alive, os.waitstatus_to_exitcode(status)
 
 
