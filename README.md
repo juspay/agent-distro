@@ -1,47 +1,121 @@
 # agent-distro
 
-A Nix framework that turns a profile of [Agent Plugins](https://agent-plugins.org)
-and an optional LiteLLM gateway into Oh My Pi, Codex, and Claude Code launchers.
-Run one of the profiles in this repository, or publish a distribution with your
-own plugins.
+**Your team's coding agents, in one command.** Package your skills, MCP servers,
+and model gateway once, and run them in Oh My Pi, Codex, and Claude Code.
+
+```sh
+nix run github:juspay/agent-distro
+```
+
+![Picking a harness from the list and landing in it](./doc/demo.gif)
+
+- **Nothing to install.** Nix fetches the agent you pick; arguments after `--`
+  go straight to it.
+- **Always current.** Harnesses are updated daily, and an update lands only
+  after the Linux/macOS builds and the NixOS VM tests pass.
+- **Write once.** One [Agent Plugins](https://agent-plugins.org) directory works
+  in all three harnesses; the per-harness translation is done for you.
+- **Composes with your setup.** Your own plugins, settings, credentials, and
+  sessions stay in place.
+- **Make it yours.** `nix flake init -t github:juspay/agent-distro` starts a
+  distribution with your plugins and, optionally, your LiteLLM gateway.
 
 ## Quick start
 
 ```sh
-nix run github:juspay/agent-distro           # pick a profile's harness
-AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
+nix run github:juspay/agent-distro                     # pick from the list
+AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
+nix profile install github:juspay/agent-distro         # keep it, as `ai`
 ```
 
-The only package is the picker: one list of every profile's harnesses in
-aligned columns, the default profile's rows first.
+The list shows every profile's harnesses, the default profile's rows first:
 
 ```
 ❯ vanilla  Oh My Pi
   vanilla  Codex
   vanilla  Claude Code
   juspay   Oh My Pi
-  juspay   Codex        (own login)
-  juspay   Claude Code  (own login)
+  juspay   Codex
+  juspay   Claude Code
 ```
 
-`AI_HARNESS` picks a row without the list, which is how scripts and
-non-interactive shells use it. `AI_PROFILE` chooses the profile, defaulting to
-the one `registry.nix` names, and on its own narrows the list to that profile —
-which then needs no profile column and gets its description as a header:
+| Variable | Values | Effect |
+| --- | --- | --- |
+| `AI_HARNESS` | `omp`, `codex`, `claude` | Launches that harness without the list; required in scripts and non-interactive shells |
+| `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
+| `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
+
+Narrowed to one profile, the list needs no profile column and gets the
+profile's description as a header:
 
 ```
 Juspay skills + Kolu, via Juspay's LiteLLM gateway
 
 ❯ Oh My Pi
-  Codex          (own login)
-  Claude Code    (own login)
+  Codex
+  Claude Code
 ```
 
 Escape or ctrl-c leaves the list.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
-## The Juspay distribution
+This flake names a binary cache in its `nixConfig`. Pass `--accept-flake-config`
+to use it; without it, Oh My Pi is built from source.
+
+## Build your own distribution
+
+```sh
+mkdir my-distribution && cd my-distribution
+nix flake init -t github:juspay/agent-distro
+```
+
+Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Distribution identifier; Codex marketplace is `<name>-ai` |
+| `description` | Header above the picker's list |
+| `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
+| `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
+
+The template includes a gateway example; `agent-distro.profiles.vanilla` is the
+reference profile shape. Commit `flake.lock` to pin your build. Your team then
+runs `nix run github:<you>/my-distribution`, and updates with
+`nix flake update agent-distro`.
+
+```nix
+agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
+# → packages.<system>.{default,omp,codex,claude} and matching apps
+
+agent-distro.lib.mkLaunchers { pkgs; profile; }
+# → { omp; codex; claude; picker; }
+```
+
+A single-profile distribution draws the narrowed list above — one profile's
+rows under its description; `mkFlake` still gives you the four packages, with
+the picker as its `default`.
+
+`mkFlake` returns only `packages` and `apps`; add other outputs with `//`.
+For NixOS, with your distribution bound as `distro`:
+
+```nix
+environment.systemPackages = with distro.packages.${system}; [ omp codex claude ];
+```
+
+`AI_GATEWAY=0 nix run .#omp` skips gateway initialization while keeping plugins.
+It preserves existing settings: choose personal models in OMP if you previously
+used gateway defaults. Codex and Claude Code always use their own login.
+
+## Profiles in this repository
+
+| Profile | What it is |
+| --- | --- |
+| `vanilla` (default) | Upstream harnesses with your own provider; no plugins, no gateway |
+| `juspay` | Juspay skills + Kolu, via Juspay's LiteLLM gateway |
+
+<details>
+<summary>Using the Juspay profile</summary>
 
 ```sh
 AI_PROFILE=juspay nix run github:juspay/agent-distro
@@ -56,7 +130,7 @@ required). `AI_GATEWAY=0` keeps the plugins but skips gateway initialization.
 Codex and Claude Code always use their own login. Kolu's MCP server needs `kolu`
 on `PATH`.
 
-## Profiles
+</details>
 
 A profile is a directory under `profiles/`:
 
@@ -83,49 +157,7 @@ there. Add a source with
 `npins --directory profiles/<name>/npins add github <owner> <repo>`; the daily
 update advances every profile's pins alongside the harnesses.
 
-## Build your own distribution
-
-```sh
-mkdir my-distribution && cd my-distribution
-nix flake init -t github:juspay/agent-distro
-```
-
-Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
-
-| Field | Meaning |
-| --- | --- |
-| `name` | Distribution identifier; Codex marketplace is `<name>-ai` |
-| `description` | Header above the picker's list |
-| `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
-| `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
-
-The template includes a gateway example; `agent-distro.profiles.vanilla` is the
-reference profile shape. Commit `flake.lock` to pin your build.
-
-```nix
-agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
-# → packages.<system>.{default,omp,codex,claude} and matching apps
-
-agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → { omp; codex; claude; picker; }
-```
-
-A single-profile distribution draws the narrowed list above — one profile's
-rows under its description; `mkFlake` still gives you the four packages, with
-the picker as its `default`.
-
-`mkFlake` returns only `packages` and `apps`; add other outputs with `//`.
-For NixOS, with your distribution bound as `distro`:
-
-```nix
-environment.systemPackages = with distro.packages.${system}; [ omp codex claude ];
-```
-
-`AI_GATEWAY=0 nix run .#omp` skips gateway initialization while keeping plugins.
-It preserves existing settings: choose personal models in OMP if you previously
-used gateway defaults. Codex and Claude Code always use their own login.
-
-## Design
+## How it works
 
 A **profile** is harness-independent data. A **harness** is the agent application.
 A **plugin** is a portable Agent Plugins directory. A **gateway** is an optional
@@ -144,13 +176,20 @@ LiteLLM proxy used only by OMP.
 
 Plugin MCP commands must be available on `PATH`.
 
-## Checks and updates
+Profiles share each harness's own home directory, so what OMP and Codex persist
+outlives the profile that wrote it: a Codex marketplace registered by one
+profile is still registered when you launch `vanilla`, and so are the model
+roles a gateway filled into OMP's config. Claude Code's plugins last only for
+the session.
+
+## Development
 
 ```sh
 nix build .#default    # the picker, and through it every profile's launchers
 nix flake check
 just test              # offline NixOS VM tests; Linux with KVM
 just test-template
+just demo              # re-record doc/demo.gif
 python3 .github/scripts/test-update-flake.py
 ```
 
