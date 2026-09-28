@@ -35,8 +35,8 @@ The list shows every profile's harnesses, the default profile's rows first:
   vanilla  Codex
   vanilla  Claude Code
   juspay   Oh My Pi
-  juspay   Codex        (own login)
-  juspay   Claude Code  (own login)
+  juspay   Codex
+  juspay   Claude Code
 ```
 
 | Variable | Values | Effect |
@@ -52,8 +52,8 @@ profile's description as a header:
 Juspay skills + Kolu, via Juspay's LiteLLM gateway
 
 ❯ Oh My Pi
-  Codex          (own login)
-  Claude Code    (own login)
+  Codex
+  Claude Code
 ```
 
 Escape or ctrl-c leaves the list.
