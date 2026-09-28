@@ -13,6 +13,22 @@
       "url": "https://github.com/juspay/kolu/archive/c55e73851b7044ad928415b06c7b72767ce5cde7.tar.gz",
       "hash": "sha256-r1mjSGdbQPS5qmrasS5CNkiw81qoTQOp/Eg+tFXcmJg="
     },
+    "mcp-nixos": {
+      "type": "GitRelease",
+      "repository": {
+        "type": "GitHub",
+        "owner": "utensils",
+        "repo": "mcp-nixos"
+      },
+      "pre_releases": false,
+      "version_upper_bound": null,
+      "release_prefix": null,
+      "submodules": false,
+      "version": "v3.1.0",
+      "revision": "6a517811658c21f97bd7703b35546085117fc310",
+      "url": "https://api.github.com/repos/utensils/mcp-nixos/tarball/refs/tags/v3.1.0",
+      "hash": "sha256-EjSyb5FcVnZOW0qFbcvxzor/je02duSe/RhJsL5p+14="
+    },
     "skills": {
       "type": "Git",
       "repository": {

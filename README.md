@@ -78,6 +78,13 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | `description` | Header above the picker's list |
 | `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
+| `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness |
+
+An MCP server that a plugin declares by bare command, such as
+`"command": "mcp-nixos"`, is found on `PATH`. List its package in `packages`
+and it is built, or fetched from a binary cache, together with the launcher, so
+the server starts at once instead of being downloaded when the agent first
+asks for it, and every user runs the version the build pinned.
 
 The template includes a gateway example; `agent-distro.profiles.vanilla` is the
 reference profile shape. Commit `flake.lock` to pin your build. Your team then
@@ -128,7 +135,7 @@ exported; create a key at
 [grid.ai.juspay.net/dashboard](https://grid.ai.juspay.net/dashboard) (Juspay VPN
 required). `AI_GATEWAY=0` keeps the plugins but skips gateway initialization.
 Codex and Claude Code always use their own login. Kolu's MCP server needs `kolu`
-on `PATH`.
+on `PATH`. The profile supplies `mcp-nixos` itself, at its latest release.
 
 </details>
 
@@ -137,13 +144,14 @@ A profile is a directory under `profiles/`:
 ```
 profiles/
   registry.nix          # { default = "<name>"; } — the profile the list opens on
-  <name>/profile.nix    # { name; description; plugins; gateway; }
-  <name>/npins/         # optional: the profile's pinned plugin sources
+  <name>/profile.nix    # { name; description; plugins; gateway; packages; }
+  <name>/npins/         # optional: the profile's pinned plugin and package sources
 ```
 
 Profiles are discovered from the directory listing, so adding one is adding a
 directory — nothing in `flake.nix` names them. `profile.nix` is a plain attrset
-whose `name` must match its directory, and it pins its own plugin sources with
+— `packages` is its one function, since only the builder has a package set —
+whose `name` must match its directory, and it pins its own sources with
 [npins](https://github.com/andir/npins):
 
 ```nix
@@ -154,8 +162,10 @@ in { name = "example"; plugins = [ sources.skills ]; /* … */ }
 npins rather than flake inputs, because the top-level `flake.lock` is inherited
 by everyone who builds on `lib.mkFlake`, and no distribution's plugins belong
 there. Add a source with
-`npins --directory profiles/<name>/npins add github <owner> <repo>`; the daily
-update advances every profile's pins alongside the harnesses.
+`npins --directory profiles/<name>/npins add github <owner> <repo>`, which
+follows the repository's releases, or with `--branch main` to follow a branch.
+The daily update advances every profile's pins alongside the harnesses: a
+release pin to the latest release, a branch pin to its head.
 
 ## How it works
 
@@ -174,7 +184,8 @@ LiteLLM proxy used only by OMP.
   self-contained plugin roots, passed with `--plugin-dir` for that session.
   Extra user plugins compose with them; no persistent installation is needed.
 
-Plugin MCP commands must be available on `PATH`.
+Plugin MCP commands are found on `PATH`: the profile's `packages` first, then
+the user's own.
 
 Profiles share each harness's own home directory, so what OMP and Codex persist
 outlives the profile that wrote it: a Codex marketplace registered by one
@@ -195,8 +206,8 @@ python3 .github/scripts/test-update-flake.py
 
 Daily CI advances OMP's release tag, updates the root lock, advances every
 `profiles/*/npins`, then updates `test/flake.lock` against this checkout. It
-opens a dependency pull request naming the harness versions and the plugin
-revisions that moved, approves the runs GitHub holds back for
+opens a dependency pull request naming the harness versions and the profile
+pins that moved, approves the runs GitHub holds back for
 automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.

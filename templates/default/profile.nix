@@ -3,6 +3,8 @@
   name = "my-distribution";
   description = "My skills with your choice of coding agent";
   plugins = [ my-skills ];
+  # Commands your plugins' MCP servers name, put on PATH for every harness:
+  # packages = pkgs: [ pkgs.mcp-nixos ];
   gateway = null;
   # To connect OMP to a LiteLLM gateway, replace null with:
   # {
