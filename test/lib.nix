@@ -69,7 +69,7 @@ in
   omp = mkCheck { } "omp" "omp" (if (profile.gateway or null) == null then "check-no-gateway.py" else "check-omp.py") [ ] { AI_GATEWAY = "0"; };
   codex = mkCheck { } "codex" "codex" "check-codex.py" [ ] { };
   codexCli = mkCheck { } "codex" "codex-cli" "check-codex-cli.py" [ ] {
-    CODEX_DAEMON_PRELUDE = toString ../adapters/codex/prepare-daemon.sh;
+    CODEX_DAEMON_PRELUDE = "${../adapters/codex/prepare-daemon.sh}";
   };
   # Bootstrap and pinning stage complete package copies in the user home.
   codexTerminal = mkCheck { diskSize = 4096; } "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
