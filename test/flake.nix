@@ -37,6 +37,24 @@
             profiles = agent-distro.profiles;
             inherit (import "${agent-distro}/profiles/registry.nix") default;
           });
+          # Every profile shares one CODEX_HOME: none may inherit another's plugins.
+          registry-codex-isolation = pkgs.testers.runNixOSTest {
+            name = "registry-codex-isolation";
+            nodes.machine = { ... }: {
+              imports = [ (import ./common.nix).baseNode ];
+              environment.systemPackages = [ agent-distro.packages.${system}.default pkgs.python3 ];
+            };
+            testScript =
+              let
+                profiles = lib.mapAttrs (_: profile: (profile.plugins or [ ]) != [ ]) agent-distro.profiles;
+              in
+              ''
+                import shlex
+                ${(import ./common.nix).testPreamble}
+                command = "python ${./check-codex-profiles.py} " + shlex.quote('${builtins.toJSON profiles}')
+                machine.succeed("su - testuser -c " + shlex.quote(command))
+              '';
+          };
         };
     };
 }
