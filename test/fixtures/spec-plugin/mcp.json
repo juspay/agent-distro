@@ -1,0 +1,47 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "placeholders": {
+      "type": "stdio",
+      "command": "./bin/record",
+      "args": [
+        "placeholders",
+        "--root=${PLUGIN_ROOT}",
+        "--data=${PLUGIN_DATA}/state",
+        "${HOME}",
+        "$HOME",
+        "${PLUGIN_ROOT",
+        "${PLUGIN_ROOT}${PLUGIN_DATA}",
+        "it's \"quoted\" $(false) `false` *"
+      ],
+      "env": {
+        "FIXTURE_CONFIG": "${PLUGIN_ROOT}/share/README",
+        "FIXTURE_DATA": "${PLUGIN_DATA}",
+        "FIXTURE_LITERAL": "${HOME}",
+        "FIXTURE-DASHED": "dashed"
+      }
+    },
+    "explicit-cwd": {
+      "type": "stdio",
+      "command": "./bin/record",
+      "args": ["explicit-cwd"],
+      "cwd": "./share"
+    },
+    "data-cwd": {
+      "type": "stdio",
+      "command": "./bin/record",
+      "args": ["data-cwd"],
+      "cwd": "${PLUGIN_DATA}"
+    },
+    "remote": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:9/mcp",
+      "headers": { "X-Tenant": "fixture" }
+    },
+    "invalid": {
+      "type": "stdio",
+      "command": "../escape",
+      "unexpected": true
+    }
+  }
+}

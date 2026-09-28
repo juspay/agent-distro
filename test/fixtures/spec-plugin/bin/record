@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Offline MCP server that records how it was launched, for the spec test."""
+import json
+import os
+from pathlib import Path
+import sys
+
+keys = ['PLUGIN_ROOT', 'PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA',
+        'FIXTURE_CONFIG', 'FIXTURE_DATA', 'FIXTURE_LITERAL', 'FIXTURE-DASHED']
+Path(os.environ['FIXTURE_RECORDS'], sys.argv[1] + '.json').write_text(json.dumps({
+    'argv': sys.argv[1:],
+    'cwd': os.getcwd(),
+    'env': {key: os.environ.get(key) for key in keys},
+}))
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    if request['method'] == 'initialize':
+        result = {
+            'protocolVersion': request['params']['protocolVersion'],
+            'capabilities': {'tools': {}},
+            'serverInfo': {'name': 'record', 'version': '1.0.0'},
+        }
+    elif request['method'] == 'tools/list':
+        result = {'tools': []}
+    else:
+        result = {}
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)

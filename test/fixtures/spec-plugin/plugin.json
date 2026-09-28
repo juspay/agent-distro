@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.spec-fixture",
+  "version": "1.0.0",
+  "description": "Exercises the Agent Plugins MCP contract",
+  "author": { "name": "agent-distro tests" },
+  "keywords": ["test"],
+  "skills": "./skills"
+}
