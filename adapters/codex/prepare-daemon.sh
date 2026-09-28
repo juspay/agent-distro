@@ -46,7 +46,36 @@ managed_package() {
   esac
 }
 
+# Codex rust-v0.158.0: codex-rs/app-server-daemon/src/managed_install.rs
+# (package_root), with PID constants in src/lib.rs. The binary does not expose
+# these names; the CLI contract check requires source review on version updates.
+check_legacy_state() {
+  local root="${CODEX_HOME:-$HOME/.codex}" name path
+  [[ "$root" = /* ]] || root="$PWD/$root"
+  local -a legacy_artifacts=(app-server.pid app-server.stderr.log app-server-updater.pid app-server-updater.stderr.log)
+  local -a found=()
+  # Both complete-package and older standalone layouts are supported by Codex.
+  [[ ! -f "$root/packages/standalone/current/bin/codex" &&
+     ! -f "$root/packages/standalone/current/codex" ]] || return 0
+  for name in "${legacy_artifacts[@]}"; do
+    path="$root/app-server-daemon/$name"
+    if [[ -e "$path" || -L "$path" ]]; then
+      found+=("$path")
+    fi
+  done
+  [[ ${#found[@]} -gt 0 ]] || return 0
+  printf "agent-distro: files left over from an older Codex's background server select a missing standalone installation:\n" >&2
+  printf '  %s\n' "${found[@]}" >&2
+  printf 'To remove exactly these files, run:\nrm --' >&2
+  for path in "${found[@]}"; do
+    printf ' %q' "$path" >&2
+  done
+  printf '\n' >&2
+  daemon_error 'startup stopped without changing these files'
+}
+
 if terminal_session "$@"; then
+  check_legacy_state
   # start is idempotent; its JSON describes the installed and running package.
   daemon=$("$codex" app-server daemon start) ||
     daemon_error 'cannot install or start the pinned Codex background server (Codex startup failed)'

@@ -35,6 +35,14 @@ value_pattern = re.search(r'^\s+(--config\|-c\|[^\n]+)\)\n', prelude, re.M)[1]
 assert values == set(value_pattern.split('|')) | {'--remote'}, (
     'Codex value-flag grammar drift', values, value_pattern)
 
+# Artifact names are not exposed by the CLI. On a version bump, re-read
+# codex-rs/app-server-daemon/src/managed_install.rs (package_root) and the
+# LEGACY_* constants in src/lib.rs at the new tag before updating this guard.
+assert run('--version').stdout.strip() == 'codex-cli 0.158.0', 'Re-check Codex legacy artifact source contract'
+legacy_names = re.search(r'legacy_artifacts=\(([^)]+)\)', prelude)[1].split()
+assert legacy_names == ['app-server.pid', 'app-server.stderr.log',
+                        'app-server-updater.pid', 'app-server-updater.stderr.log']
+
 fixture = codex_home / 'fixture-codex'
 fixture.write_text('#!' + sys.executable + '\n' + r'''
 import json, os, pathlib, sys
@@ -107,6 +115,8 @@ def check_failure(case, message):
     assert b'LAUNCHED' not in output, (case, output)
     assert b'agent-distro: ' in output and message.encode() in output, (case, output)
     assert b'use --no-daemon to start a session without the background server' in output, (case, output)
+    if case == 'legacy':
+        assert (codex_home / 'fixture-calls').read_text() == ''
     if case == 'unmanaged':
         assert (codex_home / 'fixture-calls').read_text() == 'start\n'
 
@@ -123,4 +133,18 @@ for case, message in [
     ('mismatch', 'running and installed versions'),
 ]:
     check_failure(case, message)
+# Each source-defined artifact independently blocks before any Codex command,
+# including dangling symlinks (the upstream selector uses symlink_metadata).
+state = codex_home / 'app-server-daemon'
+state.mkdir()
+for name in legacy_names:
+    artifact = state / name
+    artifact.write_text('legacy sentinel')
+    check_failure('legacy', str(artifact))
+    assert artifact.read_text() == 'legacy sentinel'
+    artifact.unlink()
+artifact.symlink_to('missing-target')
+check_failure('legacy', str(artifact))
+assert artifact.is_symlink()
+artifact.unlink()
 assert_preserved()

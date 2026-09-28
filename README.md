@@ -186,6 +186,9 @@ LiteLLM proxy used only by OMP.
   rollbacks. The server does not follow automatic release updates. Changing its
   version restarts the shared server and may interrupt other Codex sessions.
   A matching pinned server stays running; `--no-daemon` remains an explicit opt-out.
+  If older background-server files select a missing standalone installation,
+  the launcher stops and prints their paths and an exact removal command. It
+  leaves those files untouched until you run that command.
 - **Claude Code:** writes each plugin as a self-contained Claude Code plugin
   root, passed with `--plugin-dir` for that session: its manifest, its
   discovered skills, and a `.mcp.json`. Each stdio MCP server runs through a
