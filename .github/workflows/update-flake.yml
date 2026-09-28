@@ -42,9 +42,10 @@ jobs:
         shell: bash
         run: |
           nix flake update --log-format raw 2>&1 | tee "$RUNNER_TEMP/flake-update.log"
-          # Profile plugin sources are pinned with npins so they stay out of the
-          # framework's lock, which also puts them out of `nix flake update`'s
-          # reach: each profile's pins are advanced here.
+          # A profile's plugins and packages are pinned with npins so they stay
+          # out of the framework's lock, which also puts them out of
+          # `nix flake update`'s reach: each profile's pins are advanced here,
+          # a branch pin to its head and a release pin to the latest release.
           for pins in profiles/*/npins; do
             nix run nixpkgs#npins -- --directory "$pins" update
           done
@@ -63,8 +64,8 @@ jobs:
           CODEX_AFTER: ${{ steps.lock.outputs.codex-version }}
           CLAUDE_BEFORE: ${{ steps.versions-before.outputs.claude-version }}
           CLAUDE_AFTER: ${{ steps.lock.outputs.claude-version }}
-          PLUGINS_BEFORE: ${{ steps.versions-before.outputs.plugins }}
-          PLUGINS_AFTER: ${{ steps.lock.outputs.plugins }}
+          PINS_BEFORE: ${{ steps.versions-before.outputs.pins }}
+          PINS_AFTER: ${{ steps.lock.outputs.pins }}
         run: python3 .github/scripts/describe-flake-update.py
 
       - uses: peter-evans/create-pull-request@v8

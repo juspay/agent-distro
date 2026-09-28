@@ -10,12 +10,22 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parent
 
 
+def release(owner, repo, version):
+    """A pin on a release, the way npins records one."""
+    return {'type': 'GitRelease', 'version': version, 'revision': 'd' * 40,
+            'repository': {'type': 'GitHub', 'owner': owner, 'repo': repo}}
+
+
 def write_pins(root, profile, pins):
-    """Lay out a profiles/<profile>/npins/sources.json the way npins does."""
+    """Lay out a profiles/<profile>/npins/sources.json the way npins does.
+
+    A pin given as a revision follows a branch; `release` gives the other kind.
+    """
     sources = root / 'profiles' / profile / 'npins' / 'sources.json'
     sources.parent.mkdir(parents=True)
     sources.write_text(json.dumps({
-        'pins': {name: {'type': 'Git', 'revision': revision} for name, revision in pins.items()},
+        'pins': {name: pin if isinstance(pin, dict) else {'type': 'Git', 'revision': pin}
+                 for name, pin in pins.items()},
         'version': 8,
     }))
 
@@ -41,23 +51,31 @@ class UpdateFlakeTests(unittest.TestCase):
             result = subprocess.run(['bash', str(SCRIPTS / 'read-versions.sh')],
                                     cwd=root, env=env, capture_output=True, text=True)
             expected = ('codex-version=0.153.0\nclaude-version=2.1.273\n'
-                        'plugins={"juspay/kolu": "%s", "juspay/skills": "%s"}\n' % ('b' * 40, 'a' * 40))
+                        'pins={"juspay/kolu": {"at": "bbbbbbb"}, "juspay/skills": {"at": "aaaaaaa"}}\n')
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, expected)
             self.assertEqual(output.read_text(), 'existing=value\n' + expected)
 
-    def test_plugin_pins_are_read_per_profile(self):
+    def test_pins_are_read_per_profile(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            write_pins(root, 'juspay', {'skills': 'a' * 40})
+            write_pins(root, 'juspay', {'skills': 'a' * 40,
+                                        'mcp-nixos': release('utensils', 'mcp-nixos', 'v3.1.0')})
             write_pins(root, 'other', {'skills': 'c' * 40})
             # A profile without pins contributes nothing and must not fail.
             (root / 'profiles' / 'vanilla').mkdir()
-            result = subprocess.run(['python3', str(SCRIPTS / 'read-plugin-pins.py')],
+            result = subprocess.run(['python3', str(SCRIPTS / 'read-pins.py')],
                                     cwd=root, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout),
-                             {'juspay/skills': 'a' * 40, 'other/skills': 'c' * 40})
+            # A branch pin is at a revision; a release pin is at its release.
+            self.assertEqual(json.loads(result.stdout), {
+                'juspay/skills': {'at': 'aaaaaaa'},
+                'juspay/mcp-nixos': {
+                    'at': 'v3.1.0',
+                    'notes': 'https://github.com/utensils/mcp-nixos/releases/tag/v3.1.0',
+                },
+                'other/skills': {'at': 'ccccccc'},
+            })
 
     def test_omp_pin_moves_only_forward(self):
         cases = [
@@ -97,7 +115,7 @@ class UpdateFlakeTests(unittest.TestCase):
         env = dict(os.environ, OMP_BEFORE='v18.2.4', OMP_AFTER='v18.2.4', OMP_LATEST='v18.2.3',
                    CODEX_BEFORE='0.153.0', CODEX_AFTER='0.153.0',
                    CLAUDE_BEFORE='2.1.273', CLAUDE_AFTER='2.1.273',
-                   PLUGINS_BEFORE='{}', PLUGINS_AFTER='{}',
+                   PINS_BEFORE='{}', PINS_AFTER='{}',
                    GITHUB_SERVER_URL='https://github.com', GITHUB_REPOSITORY='juspay/agent-distro',
                    GITHUB_RUN_ID='123', RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(root / 'outputs'))
         env.update(overrides)
@@ -131,17 +149,23 @@ class UpdateFlakeTests(unittest.TestCase):
                 if not omp_changed:
                     self.assertIn('the pin only moves forward', body)
 
-    def test_report_names_plugin_revisions_by_short_rev(self):
-        before, after, same = 'a' * 40, 'c' * 40, 'b' * 40
+    def test_report_names_pins_by_where_they_are(self):
+        notes = 'https://github.com/utensils/mcp-nixos/releases/tag/'
         with tempfile.TemporaryDirectory() as directory:
             outputs, body = self.report(
                 Path(directory),
-                PLUGINS_BEFORE=json.dumps({'juspay/skills': before, 'juspay/kolu': same}),
-                PLUGINS_AFTER=json.dumps({'juspay/skills': after, 'juspay/kolu': same}))
-            self.assertIn(f'juspay/skills {before[:7]} → {after[:7]}', outputs['pr-title'])
+                PINS_BEFORE=json.dumps({'juspay/skills': {'at': 'aaaaaaa'},
+                                        'juspay/kolu': {'at': 'bbbbbbb'},
+                                        'juspay/mcp-nixos': {'at': 'v3.0.2', 'notes': notes + 'v3.0.2'}}),
+                PINS_AFTER=json.dumps({'juspay/skills': {'at': 'ccccccc'},
+                                       'juspay/kolu': {'at': 'bbbbbbb'},
+                                       'juspay/mcp-nixos': {'at': 'v3.1.0', 'notes': notes + 'v3.1.0'}}))
+            self.assertIn('juspay/skills aaaaaaa → ccccccc', outputs['pr-title'])
+            self.assertIn('juspay/mcp-nixos v3.0.2 → v3.1.0', outputs['pr-title'])
             self.assertNotIn('juspay/kolu', outputs['pr-title'])
-            self.assertIn(f'- `juspay/skills` `{before[:7]}` → `{after[:7]}`', body)
-            self.assertIn(f'- `juspay/kolu` unchanged (`{same[:7]}`)', body)
+            self.assertIn('- `juspay/skills` `aaaaaaa` → `ccccccc`\n', body)
+            self.assertIn(f'- `juspay/mcp-nixos` `v3.0.2` → `v3.1.0` — release notes: {notes}v3.1.0', body)
+            self.assertIn('- `juspay/kolu` unchanged (`bbbbbbb`)', body)
 
 
 if __name__ == '__main__':

@@ -135,7 +135,7 @@ exported; create a key at
 [grid.ai.juspay.net/dashboard](https://grid.ai.juspay.net/dashboard) (Juspay VPN
 required). `AI_GATEWAY=0` keeps the plugins but skips gateway initialization.
 Codex and Claude Code always use their own login. Kolu's MCP server needs `kolu`
-on `PATH`. The profile supplies `mcp-nixos` itself.
+on `PATH`. The profile supplies `mcp-nixos` itself, at its latest release.
 
 </details>
 
@@ -145,13 +145,13 @@ A profile is a directory under `profiles/`:
 profiles/
   registry.nix          # { default = "<name>"; } — the profile the list opens on
   <name>/profile.nix    # { name; description; plugins; gateway; packages; }
-  <name>/npins/         # optional: the profile's pinned plugin sources
+  <name>/npins/         # optional: the profile's pinned plugin and package sources
 ```
 
 Profiles are discovered from the directory listing, so adding one is adding a
 directory — nothing in `flake.nix` names them. `profile.nix` is a plain attrset
 — `packages` is its one function, since only the builder has a package set —
-whose `name` must match its directory, and it pins its own plugin sources with
+whose `name` must match its directory, and it pins its own sources with
 [npins](https://github.com/andir/npins):
 
 ```nix
@@ -162,8 +162,10 @@ in { name = "example"; plugins = [ sources.skills ]; /* … */ }
 npins rather than flake inputs, because the top-level `flake.lock` is inherited
 by everyone who builds on `lib.mkFlake`, and no distribution's plugins belong
 there. Add a source with
-`npins --directory profiles/<name>/npins add github <owner> <repo>`; the daily
-update advances every profile's pins alongside the harnesses.
+`npins --directory profiles/<name>/npins add github <owner> <repo>`, which
+follows the repository's releases, or with `--branch main` to follow a branch.
+The daily update advances every profile's pins alongside the harnesses: a
+release pin to the latest release, a branch pin to its head.
 
 ## How it works
 
@@ -204,8 +206,8 @@ python3 .github/scripts/test-update-flake.py
 
 Daily CI advances OMP's release tag, updates the root lock, advances every
 `profiles/*/npins`, then updates `test/flake.lock` against this checkout. It
-opens a dependency pull request naming the harness versions and the plugin
-revisions that moved, approves the runs GitHub holds back for
+opens a dependency pull request naming the harness versions and the profile
+pins that moved, approves the runs GitHub holds back for
 automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.
