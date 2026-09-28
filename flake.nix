@@ -18,7 +18,8 @@
 
     # Each packaging repo tracks its current release binary and keeps its own
     # nixpkgs so packaging updates do not depend on OMP's build dependencies.
-    codex-cli.url = "github:sadjow/codex-cli-nix";
+    # Return to sadjow/codex-cli-nix once the complete-package fix is merged.
+    codex-cli.url = "github:juspay/codex-cli-nix/complete-package";
     claude-code.url = "github:sadjow/claude-code-nix";
 
     # Upstream's package set, followed rather than shadowed. omp is built from

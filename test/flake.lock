@@ -96,15 +96,16 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1790572652,
-        "narHash": "sha256-30VZlOoLqupVcfUKE+fK89SdqajERhPjuT0QVWsEKes=",
-        "owner": "sadjow",
+        "lastModified": 1790631142,
+        "narHash": "sha256-pRj0kfYkgeLzHkqj3ikVOd9U+DNLSS+ZlEa27bOsszg=",
+        "owner": "juspay",
         "repo": "codex-cli-nix",
-        "rev": "3bc018a4373b5293ecc20dafcb052b93d6471f51",
+        "rev": "98781f494218d92563b1a2c778d6156763b12f94",
         "type": "github"
       },
       "original": {
-        "owner": "sadjow",
+        "owner": "juspay",
+        "ref": "complete-package",
         "repo": "codex-cli-nix",
         "type": "github"
       }
