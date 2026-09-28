@@ -33,6 +33,11 @@ daemon_error() {
   exit 1
 }
 
+matches_cli() {
+  jq -e --arg version "$codex_version" \
+    '.managedCodexVersion == $version and .appServerVersion == $version' <<< "$1" >/dev/null
+}
+
 managed_package() {
   local managed
   managed=$(jq -er '.managedCodexPath | select(type == "string")' <<< "$1") ||
@@ -94,8 +99,7 @@ if terminal_session "$@"; then
     daemon_error 'cannot pin an existing server that Codex does not manage; leaving it running unchanged'
   package=$(managed_package "$daemon") || exit 1
   if [[ -e "$package/auto-update-version" ]] ||
-      ! jq -e --arg version "$codex_version" \
-        '.managedCodexVersion == $version and .appServerVersion == $version' <<< "$daemon" >/dev/null; then
+      ! matches_cli "$daemon"; then
     "$codex" app-server daemon update --from-cli --yes >/dev/null ||
       daemon_error "cannot pin the background server to Codex $codex_version (package replacement failed)"
   fi
@@ -105,7 +109,6 @@ if terminal_session "$@"; then
   package=$(managed_package "$daemon") || exit 1
   [[ ! -e "$package/auto-update-version" ]] ||
     daemon_error 'cannot verify the background server pin: its automatic-update marker is still present'
-  jq -e --arg version "$codex_version" \
-    '.status == "running" and .managedCodexVersion == $version and .appServerVersion == $version' <<< "$daemon" >/dev/null ||
+  { jq -e '.status == "running"' <<< "$daemon" >/dev/null && matches_cli "$daemon"; } ||
     daemon_error "cannot verify the background server pin: the running and installed versions must both be $codex_version"
 fi

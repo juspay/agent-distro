@@ -9,44 +9,50 @@ import time
 
 from codex_support import *
 
-prelude = Path(os.environ['CODEX_DAEMON_PRELUDE']).read_text()
-help_result = run('--help')
-assert help_result.returncode == 0, help_result.stderr
-help_text = help_result.stdout
-commands_text = help_text.split('Commands:\n', 1)[1].split('Options:', 1)[0]
-commands = set(re.findall(r'^  ([a-z][a-z-]+)\s', commands_text, re.M))
-aliases = set()
-for group in re.findall(r'\[aliases: ([^]]+)\]', commands_text):
-    aliases.update(group.split(', '))
-tools = set(re.search(r'^\s+(exec\|e\|[^\n]+)\)\n', prelude, re.M)[1].split('|'))
-# Hidden commands/aliases cannot be checked against public help. `app` is macOS-only.
-hidden = {'tcp-tunnel', 'execpolicy', 'responses-api-proxy', 'stdio-to-uds', 'cloud-tasks'}
-platform_only = {'app'} if sys.platform != 'darwin' else set()
-interactive = {'agents', 'resume', 'fork'}
-assert commands | aliases == (tools - hidden - platform_only) | interactive, (
-    'Codex command grammar drift', commands | aliases, tools)
 
-values = set()
-for line in help_text.splitlines():
-    if re.match(r'^\s+(?:-[A-Za-z], )?--[\w-]+\s+<', line):
-        values.update(re.findall(r'(?<!\w)--?[A-Za-z][\w-]*', line.split('<', 1)[0]))
-value_pattern = re.search(r'^\s+(--config\|-c\|[^\n]+)\)\n', prelude, re.M)[1]
-# --remote takes a value but bypasses the local-server prelude altogether.
-assert values == set(value_pattern.split('|')) | {'--remote'}, (
-    'Codex value-flag grammar drift', values, value_pattern)
+def check_contract():
+    prelude = Path(os.environ['CODEX_DAEMON_PRELUDE']).read_text()
+    help_result = run('--help')
+    assert help_result.returncode == 0, help_result.stderr
+    help_text = help_result.stdout
+    commands_text = help_text.split('Commands:\n', 1)[1].split('Options:', 1)[0]
+    commands = set(re.findall(r'^  ([a-z][a-z-]+)\s', commands_text, re.M))
+    aliases = set()
+    for group in re.findall(r'\[aliases: ([^]]+)\]', commands_text):
+        aliases.update(group.split(', '))
+    tools = set(re.search(r'^\s+(exec\|e\|[^\n]+)\)\n', prelude, re.M)[1].split('|'))
+    # Hidden commands/aliases cannot be checked against public help. `app` is macOS-only.
+    hidden = {'tcp-tunnel', 'execpolicy', 'responses-api-proxy', 'stdio-to-uds', 'cloud-tasks'}
+    platform_only = {'app'} if sys.platform != 'darwin' else set()
+    interactive = {'agents', 'resume', 'fork'}
+    assert commands | aliases == (tools - hidden - platform_only) | interactive, (
+        'Codex command grammar drift', commands | aliases, tools)
 
-# Artifact names are not exposed by the CLI. On a version bump, re-read
-# codex-rs/app-server-daemon/src/managed_install.rs (package_root) and the
-# LEGACY_* constants in src/lib.rs at the new tag before updating this guard.
-assert run('--version').stdout.strip() == 'codex-cli 0.158.0', 'Re-check Codex legacy artifact source contract'
-legacy_names = re.search(r'legacy_artifacts=\(([^)]+)\)', prelude)[1].split()
-assert legacy_names == ['app-server.pid', 'app-server.stderr.log',
-                        'app-server-updater.pid', 'app-server-updater.stderr.log']
+    values = set()
+    for line in help_text.splitlines():
+        if re.match(r'^\s+(?:-[A-Za-z], )?--[\w-]+\s+<', line):
+            values.update(re.findall(r'(?<!\w)--?[A-Za-z][\w-]*', line.split('<', 1)[0]))
+    value_pattern = re.search(r'^\s+(--config\|-c\|[^\n]+)\)\n', prelude, re.M)[1]
+    # --remote takes a value but bypasses the local-server prelude altogether.
+    assert values == set(value_pattern.split('|')) | {'--remote'}, (
+        'Codex value-flag grammar drift', values, value_pattern)
 
-dedicated_names = re.search(r'dedicated_artifacts=\(([^)]+)\)', prelude)[1].split()
-assert dedicated_names == ['daemon.pid', 'daemon.stderr.log',
-                           'daemon-updater.pid', 'daemon-updater.stderr.log']
+    # Source-only contract: on upgrades review package_root/managed_codex_bin in
+    # codex-rs/app-server-daemon/src/managed_install.rs and PID constants in lib.rs.
+    # The binary does not expose artifact names. Real terminal checks guard the
+    # daemon JSON fields and package layouts; failure fixtures guard diagnostics.
+    assert run('--version').stdout.strip() == 'codex-cli 0.158.0', 'Re-check Codex daemon source contract'
+    legacy_names = re.search(r'legacy_artifacts=\(([^)]+)\)', prelude)[1].split()
+    assert legacy_names == ['app-server.pid', 'app-server.stderr.log',
+                            'app-server-updater.pid', 'app-server-updater.stderr.log']
 
+    dedicated_names = re.search(r'dedicated_artifacts=\(([^)]+)\)', prelude)[1].split()
+    assert dedicated_names == ['daemon.pid', 'daemon.stderr.log',
+                               'daemon-updater.pid', 'daemon-updater.stderr.log']
+    return legacy_names, dedicated_names
+
+
+legacy_names, dedicated_names = check_contract()
 fixture = codex_home / 'fixture-codex'
 fixture.write_text('#!' + sys.executable + '\n' + r'''
 import json, os, pathlib, sys
@@ -81,7 +87,7 @@ marker = codex_home / 'packages/app-server-daemon/auto-update-version'
 marker.parent.mkdir(parents=True)
 
 
-def check_failure(case, message=None):
+def check_case(case, message=None):
     (codex_home / 'fixture-calls').write_text('')
     if case == 'marker':
         marker.write_text('fixture')
@@ -141,7 +147,7 @@ for case, message in [
     ('marker', 'automatic-update marker is still present'),
     ('mismatch', 'running and installed versions'),
 ]:
-    check_failure(case, message)
+    check_case(case, message)
 # Each source-defined artifact independently blocks before any Codex command,
 # including dangling symlinks (the upstream selector uses symlink_metadata).
 state = codex_home / 'app-server-daemon'
@@ -149,26 +155,26 @@ state.mkdir()
 for name in legacy_names:
     artifact = state / name
     artifact.write_text('legacy sentinel')
-    check_failure('legacy', str(artifact))
+    check_case('legacy', str(artifact))
     assert artifact.read_text() == 'legacy sentinel'
     artifact.unlink()
 artifact.symlink_to('missing-target')
-check_failure('legacy', str(artifact))
+check_case('legacy', str(artifact))
 assert artifact.is_symlink()
 artifact.unlink()
 # Dedicated selection takes precedence over leftover legacy state.
 artifact.write_text('legacy sentinel')
 current = marker.parent / 'current'
 current.mkdir()
-check_failure('dedicated-current')
+check_case('dedicated-current')
 current.rmdir()
 current.symlink_to('missing-target')
-check_failure('dedicated-current-symlink')
+check_case('dedicated-current-symlink')
 current.unlink()
 for name in dedicated_names:
     dedicated = state / name
     dedicated.touch()
-    check_failure('dedicated-artifact')
+    check_case('dedicated-artifact')
     dedicated.unlink()
 assert artifact.read_text() == 'legacy sentinel'
 artifact.unlink()
