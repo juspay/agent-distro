@@ -22,6 +22,7 @@ in
 {
   inherit omp codex claude;
   picker = pkgs.callPackage ../adapters/picker.nix {
-    inherit omp codex claude profile;
+    default = profile.name;
+    profiles.${profile.name} = { inherit profile; launchers = { inherit omp codex claude; }; };
   };
 }

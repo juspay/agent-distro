@@ -1,0 +1,31 @@
+{
+  "pins": {
+    "kolu": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "juspay",
+        "repo": "kolu"
+      },
+      "branch": "main",
+      "submodules": false,
+      "revision": "c55e73851b7044ad928415b06c7b72767ce5cde7",
+      "url": "https://github.com/juspay/kolu/archive/c55e73851b7044ad928415b06c7b72767ce5cde7.tar.gz",
+      "hash": "sha256-r1mjSGdbQPS5qmrasS5CNkiw81qoTQOp/Eg+tFXcmJg="
+    },
+    "skills": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "juspay",
+        "repo": "skills"
+      },
+      "branch": "main",
+      "submodules": false,
+      "revision": "9103a78ecf6133d15f5f2da88d7fa519450b056f",
+      "url": "https://github.com/juspay/skills/archive/9103a78ecf6133d15f5f2da88d7fa519450b056f.tar.gz",
+      "hash": "sha256-5V4zzhsHqRC3xZ9Mo7RcMsnZpzTl/shb+Ji7chaJyOU="
+    }
+  },
+  "version": 8
+}

@@ -62,7 +62,11 @@ in
   omp = mkCheck "omp" "omp" (if (profile.gateway or null) == null then "check-no-gateway.py" else "check-omp.py") [ ] { AI_GATEWAY = "0"; };
   codex = mkCheck "codex" "codex" "check-codex.py" [ ] { };
   claude = mkCheck "claude" "claude" "check-claude.py" [ ] { };
-  picker = pkgs.testers.runNixOSTest (import ./test-picker.nix { inherit launchers profile; });
+  picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
+    menu = launchers.picker;
+    profiles = { ${profile.name} = profile; };
+    default = profile.name;
+  });
 
   gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix { inherit launchers profile; });
   gatewayEnv = mkCheck "omp" "gateway-env" "check-gateway-env.py" [ ] gatewayEnvironment;

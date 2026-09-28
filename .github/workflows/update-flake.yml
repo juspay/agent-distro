@@ -2,7 +2,8 @@ name: Update Flake
 
 on:
   schedule:
-    # 07:00 EDT / 06:00 EST (GitHub cron is UTC); consumers (juspay/AI) run one hour later.
+    # 07:00 EDT / 06:00 EST (GitHub cron is UTC). This run now covers the
+    # profiles too, so nothing downstream has to be chained an hour behind it.
     - cron: '0 11 * * *'
   workflow_dispatch:
 
@@ -41,6 +42,12 @@ jobs:
         shell: bash
         run: |
           nix flake update --log-format raw 2>&1 | tee "$RUNNER_TEMP/flake-update.log"
+          # Profile plugin sources are pinned with npins so they stay out of the
+          # framework's lock, which also puts them out of `nix flake update`'s
+          # reach: each profile's pins are advanced here.
+          for pins in profiles/*/npins; do
+            nix run nixpkgs#npins -- --directory "$pins" update
+          done
           bash .github/scripts/read-versions.sh
 
       - name: Update the test lock after the root lock
@@ -56,6 +63,8 @@ jobs:
           CODEX_AFTER: ${{ steps.lock.outputs.codex-version }}
           CLAUDE_BEFORE: ${{ steps.versions-before.outputs.claude-version }}
           CLAUDE_AFTER: ${{ steps.lock.outputs.claude-version }}
+          PLUGINS_BEFORE: ${{ steps.versions-before.outputs.plugins }}
+          PLUGINS_AFTER: ${{ steps.lock.outputs.plugins }}
         run: python3 .github/scripts/describe-flake-update.py
 
       - uses: peter-evans/create-pull-request@v8
@@ -67,6 +76,7 @@ jobs:
             flake.nix
             flake.lock
             test/flake.lock
+            profiles/*/npins/sources.json
           title: ${{ steps.report.outputs.pr-title }}
           body-path: ${{ steps.report.outputs.pr-body-path }}
           commit-message: "chore(flake): update inputs"

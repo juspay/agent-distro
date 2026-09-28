@@ -50,9 +50,10 @@ jobs:
             attic push oss "$outs"
           fi
 
-      - name: Build the picker and harnesses
+      - name: Build the profile menu
+        # The menu depends on every profile's launchers, so this builds them all.
         run: |
-          nix build --print-build-logs .#default .#omp .#codex .#claude
+          nix build --print-build-logs .#default
 
       - name: Wrapper package tests
         # The wrapper tests boot NixOS VMs, so they only run where a Linux

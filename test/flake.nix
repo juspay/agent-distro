@@ -1,20 +1,42 @@
 {
-  description = "Vanilla launcher integration tests";
+  description = "Launcher integration tests for every profile in the registry";
   inputs = {
     agent-distro.url = "path:..";
     nixpkgs.follows = "agent-distro/nixpkgs";
   };
   outputs = { nixpkgs, agent-distro, ... }:
     let
-      pkgs = nixpkgs.legacyPackages.x86_64-linux;
-      profile = agent-distro.profiles.vanilla;
-      packages = agent-distro.packages.x86_64-linux;
-      tests = import ./lib.nix {
-        inherit pkgs profile;
-        launchers = { inherit (packages) omp codex claude; picker = packages.default; };
+      inherit (nixpkgs) lib;
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+      inherit (agent-distro.lib) mkLaunchers;
+      # Profiles are tested through the public builder, the same way a
+      # third-party distribution reaches them.
+      suite = profile: import ./lib.nix {
+        inherit pkgs profile mkLaunchers;
+        launchers = mkLaunchers { inherit pkgs profile; };
       };
+      vanilla = suite agent-distro.profiles.vanilla;
+      juspay = suite agent-distro.profiles.juspay;
+      named = profile: lib.mapAttrs' (check: lib.nameValuePair "${profile}-${check}");
     in
     {
-      checks.x86_64-linux = { inherit (tests) omp codex claude picker; };
+      checks.${system} =
+        # No plugins and no gateway, so only the core four apply.
+        named "vanilla" { inherit (vanilla) omp codex claude picker; }
+        # Plugins, a gateway, and Kolu's MCP server: every check applies.
+        // named "juspay" {
+          inherit (juspay) omp codex claude picker gateway gatewayEnv
+            ompPlugins codexPlugins claudePlugins ompKolu codexKolu claudeKolu;
+        }
+        // {
+          # The same picker over the whole registry rather than one profile.
+          registry = pkgs.testers.runNixOSTest (import ./test-picker.nix {
+            name = "registry";
+            menu = agent-distro.packages.${system}.default;
+            profiles = agent-distro.profiles;
+            inherit (import "${agent-distro}/profiles/registry.nix") default;
+          });
+        };
     };
 }

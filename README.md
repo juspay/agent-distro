@@ -2,21 +2,86 @@
 
 A Nix framework that turns a profile of [Agent Plugins](https://agent-plugins.org)
 and an optional LiteLLM gateway into Oh My Pi, Codex, and Claude Code launchers.
-Use the vanilla launchers with your own provider, or publish a distribution
-with your own plugins. Extracted from [juspay/AI](https://github.com/juspay/AI),
-its first consumer.
+Run one of the profiles in this repository, or publish a distribution with your
+own plugins.
 
 ## Quick start
 
 ```sh
-nix run github:juspay/agent-distro           # choose a harness
-nix run github:juspay/agent-distro#omp
-nix run github:juspay/agent-distro#codex
-nix run github:juspay/agent-distro#claude
+nix run github:juspay/agent-distro           # pick a profile's harness
 AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
 ```
 
+The only package is the picker: one list of every profile's harnesses in
+aligned columns, the default profile's rows first.
+
+```
+❯ vanilla  Oh My Pi
+  vanilla  Codex
+  vanilla  Claude Code
+  juspay   Oh My Pi
+  juspay   Codex        (own login)
+  juspay   Claude Code  (own login)
+```
+
+`AI_HARNESS` picks a row without the list, which is how scripts and
+non-interactive shells use it. `AI_PROFILE` chooses the profile, defaulting to
+the one `registry.nix` names, and on its own narrows the list to that profile —
+which then needs no profile column and gets its description as a header:
+
+```
+Juspay skills + Kolu, via Juspay's LiteLLM gateway
+
+❯ Oh My Pi
+  Codex          (own login)
+  Claude Code    (own login)
+```
+
+Escape or ctrl-c leaves the list.
+
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
+
+## The Juspay distribution
+
+```sh
+AI_PROFILE=juspay nix run github:juspay/agent-distro
+AI_PROFILE=juspay AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
+```
+
+`AI_PROFILE=juspay` adds Juspay's skills and Kolu, and runs OMP against
+Juspay's LiteLLM gateway, prompting for `LITELLM_API_KEY` unless it is
+exported; create a key at
+[grid.ai.juspay.net/dashboard](https://grid.ai.juspay.net/dashboard) (Juspay VPN
+required). `AI_GATEWAY=0` keeps the plugins but skips gateway initialization.
+Codex and Claude Code always use their own login. Kolu's MCP server needs `kolu`
+on `PATH`.
+
+## Profiles
+
+A profile is a directory under `profiles/`:
+
+```
+profiles/
+  registry.nix          # { default = "<name>"; } — the profile the list opens on
+  <name>/profile.nix    # { name; description; plugins; gateway; }
+  <name>/npins/         # optional: the profile's pinned plugin sources
+```
+
+Profiles are discovered from the directory listing, so adding one is adding a
+directory — nothing in `flake.nix` names them. `profile.nix` is a plain attrset
+whose `name` must match its directory, and it pins its own plugin sources with
+[npins](https://github.com/andir/npins):
+
+```nix
+let sources = import ./npins;
+in { name = "example"; plugins = [ sources.skills ]; /* … */ }
+```
+
+npins rather than flake inputs, because the top-level `flake.lock` is inherited
+by everyone who builds on `lib.mkFlake`, and no distribution's plugins belong
+there. Add a source with
+`npins --directory profiles/<name>/npins add github <owner> <repo>`; the daily
+update advances every profile's pins alongside the harnesses.
 
 ## Build your own distribution
 
@@ -30,7 +95,7 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | Field | Meaning |
 | --- | --- |
 | `name` | Distribution identifier; Codex marketplace is `<name>-ai` |
-| `description` | Text shown by the harness picker |
+| `description` | Header above the picker's list |
 | `plugins` | List of directories containing `plugin.json` and `skills/<name>/SKILL.md`, optionally `mcp.json` |
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
 
@@ -44,6 +109,10 @@ agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "
 agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → { omp; codex; claude; picker; }
 ```
+
+A single-profile distribution draws the narrowed list above — one profile's
+rows under its description; `mkFlake` still gives you the four packages, with
+the picker as its `default`.
 
 `mkFlake` returns only `packages` and `apps`; add other outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
@@ -78,25 +147,29 @@ Plugin MCP commands must be available on `PATH`.
 ## Checks and updates
 
 ```sh
-nix build .#default .#omp .#codex .#claude
+nix build .#default    # the picker, and through it every profile's launchers
 nix flake check
 just test              # offline NixOS VM tests; Linux with KVM
 just test-template
 python3 .github/scripts/test-update-flake.py
 ```
 
-Daily CI advances OMP's release tag, updates the root lock, then updates
-`test/flake.lock` against this checkout. It opens a dependency pull request,
-approves the runs GitHub holds back for automation-created pull requests, and
-squash-merges once the Linux/macOS builds and the VM and template checks pass —
-the same checks `Require CI on main` requires. Consumers update with
-`nix flake update agent-distro`.
+Daily CI advances OMP's release tag, updates the root lock, advances every
+`profiles/*/npins`, then updates `test/flake.lock` against this checkout. It
+opens a dependency pull request naming the harness versions and the plugin
+revisions that moved, approves the runs GitHub holds back for
+automation-created pull requests, and squash-merges once the Linux/macOS builds
+and the VM and template checks pass — the same checks `Require CI on main`
+requires. Consumers update with `nix flake update agent-distro`.
 
 For manual updates, advance `oh-my-pi.url` first, run `nix flake update`, then
+`npins --directory profiles/<name>/npins update` per profile, then
 `bash test/update-lock.sh`.
 
 Consumers can import `test/lib.nix { pkgs; launchers; profile; }` and select
 `omp`, `codex`, `claude`, and `picker`. Gateway tests (`gateway`, `gatewayEnv`)
 and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`) are
 separate attributes; rebuild tests additionally take `mkLaunchers`. Select
-plugin rebuild tests only for nonempty skill plugins.
+plugin rebuild tests only for nonempty skill plugins. `test/flake.nix` runs
+every applicable attribute against every profile in `profiles/`, plus `registry`
+— the same `picker` check over the whole registry.

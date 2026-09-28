@@ -1,38 +1,108 @@
 # Selection only: each launcher owns its initialization and plugin protocol.
-{ lib, writeShellApplication, omp, codex, claude, profile }:
+#
+# One list of every profile's harnesses. Each launcher is a derivation in this
+# same evaluation, so a choice resolves to a store path the closure already
+# holds — no flake reference, no network, no `--impure`.
+{ lib, writeShellApplication, gum, profiles, default }:
 let
-  ownLogin = lib.optionalString ((profile.gateway or null) != null) " (uses its own login)";
+  names = [ default ] ++ lib.remove default (lib.attrNames profiles);
+  others = lib.remove default names;
+  harnesses = [ "omp" "codex" "claude" ];
+  titles = { omp = "Oh My Pi"; codex = "Codex"; claude = "Claude Code"; };
+
+  # OMP is the only harness a gateway applies to; the other two log in as
+  # themselves, which is worth saying beside their names.
+  ownLogin = name: harness:
+    harness != "omp" && (profiles.${name}.profile.gateway or null) != null;
+
+  widest = strings: lib.foldl' lib.max 0 (map lib.stringLength strings);
+  pad = width: text: text + lib.concatStrings (lib.genList (_: " ") (width - lib.stringLength text));
+  row = name: harness: label: lib.escapeShellArg "${label}\t${name}/${harness}";
+
+  # Narrowed to one profile: its description heads the list, so no row needs a
+  # tag and only the marked ones need a column.
+  narrowRows = name:
+    let column = 4 + widest (map (harness: titles.${harness}) (lib.filter (ownLogin name) harnesses));
+    in lib.concatMapStringsSep " "
+      (harness: row name harness (
+        if ownLogin name harness
+        then pad column titles.${harness} + "(own login)"
+        else titles.${harness}))
+      harnesses;
+
+  # The whole registry has no header, so every row carries its profile and both
+  # columns are as wide as their widest value.
+  profileColumn = 2 + widest names;
+  harnessColumn = 2 + widest (map (harness: titles.${harness}) harnesses);
+  wholeRows = lib.concatMapStringsSep " "
+    (name: lib.concatMapStringsSep " "
+      (harness: row name harness (pad profileColumn name + (
+        if ownLogin name harness
+        then pad harnessColumn titles.${harness} + "(own login)"
+        else titles.${harness})))
+      harnesses)
+    names;
+
+  # Nix strips the indentation shared by every line of `text`, so these arms
+  # carry the depth their `case` ends up at.
+  block = indent: lines: lib.concatMapStrings (line: "\n${indent}${line}") lines;
+  arms = block "    " (lib.concatMap
+    (name: map (harness:
+      "${name}/${harness}) exec ${lib.getExe profiles.${name}.launchers.${harness}} \"$@\" ;;")
+      harnesses)
+    names);
+  narrowed = block "  " (map
+    (name: "${lib.escapeShellArg name}) header=${
+      lib.escapeShellArg "${profiles.${name}.profile.description}\n"
+    }; rows=(${narrowRows name}) ;;")
+    names);
+
+  quote = lib.escapeShellArg;
+  noTty = [ "Set AI_HARNESS to omp, codex, or claude, or run this from a terminal." ]
+    ++ lib.optional (others != [ ])
+    "Set AI_PROFILE to one of ${lib.concatStringsSep ", " names}; it defaults to ${default}.";
+  # Only a registry of several profiles has a wider list to fall back to.
+  widen = lib.optionalString (others != [ ]) ''
+
+    if [ "''${AI_PROFILE+x}" != x ]; then
+      header=""
+      rows=(${wholeRows})
+    fi
+  '';
 in
 writeShellApplication {
   name = "ai";
+  runtimeInputs = [ gum ];
   text = ''
+    invalid=${quote "Invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " harnesses}."}
+
     launch() {
-      case "$1" in
-        omp) shift; exec ${lib.getExe omp} "$@" ;;
-        codex) shift; exec ${lib.getExe codex} "$@" ;;
-        claude) shift; exec ${lib.getExe claude} "$@" ;;
-        *) echo 'Invalid AI_HARNESS; valid values: omp, codex, claude.' >&2; exit 1 ;;
+      local target=$1
+      shift
+      case "$target" in${arms}
+        *) echo "$invalid" >&2; exit 1 ;;
       esac
     }
+
+    profile=''${AI_PROFILE-${quote default}}
+    case "$profile" in${narrowed}
+      *) echo ${quote "Invalid AI_PROFILE; valid values: ${lib.concatStringsSep ", " names}."} >&2; exit 1 ;;
+    esac
+
     if [ "''${AI_HARNESS+x}" = x ]; then
-      launch "$AI_HARNESS" "$@"
-    fi
-    if [ ! -t 0 ]; then
-      echo "Set AI_HARNESS to omp, codex, or claude, or run that harness's launcher directly." >&2
-      exit 1
+      launch "$profile/$AI_HARNESS" "$@"
     fi
 
-    printf '%s\n' ${lib.escapeShellArg profile.description} 'Choose a coding agent:' '  1) Oh My Pi' '  2) Codex${ownLogin}' '  3) Claude Code${ownLogin}' >&2
-    while true; do
-      printf 'Agent [1/2/3] (q to quit): ' >&2
-      read -r choice || exit 1
-      case "$choice" in
-        1|omp) launch omp "$@" ;;
-        2|codex) launch codex "$@" ;;
-        3|claude) launch claude "$@" ;;
-        q|quit) exit 0 ;;
-        *) echo 'Enter 1 for Oh My Pi, 2 for Codex, 3 for Claude Code, or q to quit.' >&2 ;;
-      esac
-    done
+    if [ ! -t 0 ]; then
+      printf '%s\n' ${lib.concatMapStringsSep " " quote noTty} >&2
+      exit 1
+    fi
+    ${widen}
+    choice=$(gum choose --limit 1 --label-delimiter $'\t' --cursor '❯ ' --no-show-help \
+      --cursor.foreground 4 --selected.foreground 4 --header.foreground= \
+      --header "$header" "''${rows[@]}") || exit 0
+    if [ -n "$choice" ]; then
+      launch "$choice" "$@"
+    fi
   '';
 }
