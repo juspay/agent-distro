@@ -21,7 +21,7 @@ let
     (if mkLaunchers != null then mkLaunchers else throw "Plugin rebuild tests require mkLaunchers")
     pkgs
     profile;
-  mkCheck = harness: name: script: extraPackages: environment:
+  mkCheck = { diskSize ? 1024 }: harness: name: script: extraPackages: environment:
     let
       # Keep imports beside the script without coupling unrelated harness tests.
       scripts = builtins.path {
@@ -34,8 +34,7 @@ let
       inherit name;
       nodes.machine = { ... }: {
         imports = [ common.baseNode ];
-        # Bootstrap and pinning stage complete package copies in the user home.
-        virtualisation.diskSize = pkgs.lib.mkIf (script == "check-codex-terminal.py") 4096;
+        virtualisation.diskSize = diskSize;
         environment.systemPackages = [ launchers.${harness} pkgs.python3 ] ++ extraPackages;
         environment.variables = environment;
       };
@@ -67,10 +66,14 @@ let
   gatewayEnvironment = { ${profile.gateway.keyEnv} = "test-api-key"; };
 in
 {
-  omp = mkCheck "omp" "omp" (if (profile.gateway or null) == null then "check-no-gateway.py" else "check-omp.py") [ ] { AI_GATEWAY = "0"; };
-  codex = mkCheck "codex" "codex" "check-codex.py" [ ] { };
-  codexTerminal = mkCheck "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
-  claude = mkCheck "claude" "claude" "check-claude.py" [ ] { };
+  omp = mkCheck { } "omp" "omp" (if (profile.gateway or null) == null then "check-no-gateway.py" else "check-omp.py") [ ] { AI_GATEWAY = "0"; };
+  codex = mkCheck { } "codex" "codex" "check-codex.py" [ ] { };
+  codexCli = mkCheck { } "codex" "codex-cli" "check-codex-cli.py" [ ] {
+    CODEX_DAEMON_PRELUDE = toString ../adapters/codex/prepare-daemon.sh;
+  };
+  # Bootstrap and pinning stage complete package copies in the user home.
+  codexTerminal = mkCheck { diskSize = 4096; } "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
+  claude = mkCheck { } "claude" "claude" "check-claude.py" [ ] { };
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
     profiles = { ${profile.name} = profile; };
@@ -78,18 +81,18 @@ in
   });
 
   gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix { inherit launchers profile; });
-  gatewayEnv = mkCheck "omp" "gateway-env" "check-gateway-env.py" [ ] gatewayEnvironment;
+  gatewayEnv = mkCheck { } "omp" "gateway-env" "check-gateway-env.py" [ ] gatewayEnvironment;
 
   # Nonempty plugin profiles only: same home, different plugin store paths (#181).
-  ompPlugins = mkCheck "omp" "omp-plugins" "check-omp-plugins.py" [ (updatedBin "omp") ] { };
-  codexPlugins = mkCheck "codex" "codex-plugins" "check-codex-plugins.py" [ (updatedBin "codex") codexUpstream ] { };
-  claudePlugins = mkCheck "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
+  ompPlugins = mkCheck { } "omp" "omp-plugins" "check-omp-plugins.py" [ (updatedBin "omp") ] { };
+  codexPlugins = mkCheck { } "codex" "codex-plugins" "check-codex-plugins.py" [ (updatedBin "codex") codexUpstream ] { };
+  claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
 
   # Profiles containing Kolu's plugin only; the server is an offline fixture.
-  ompKolu = mkCheck "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
-  codexKolu = mkCheck "codex" "codex-kolu" "check-codex-kolu.py" [ koluFixture ] { };
-  claudeKolu = mkCheck "claude" "claude-kolu" "check-claude-kolu.py" [ koluFixture ] { };
+  ompKolu = mkCheck { } "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
+  codexKolu = mkCheck { } "codex" "codex-kolu" "check-codex-kolu.py" [ koluFixture ] { };
+  claudeKolu = mkCheck { } "claude" "claude-kolu" "check-claude-kolu.py" [ koluFixture ] { };
 
   # Profiles containing test/fixtures/{spec-plugin,mcp-only} only.
-  claudeSpec = mkCheck "claude" "claude-spec" "check-claude-spec.py" [ recordFixture ] { };
+  claudeSpec = mkCheck { } "claude" "claude-spec" "check-claude-spec.py" [ recordFixture ] { };
 }

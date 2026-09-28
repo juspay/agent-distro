@@ -32,7 +32,7 @@
     {
       checks.${system} =
         # No plugins and no gateway, so only the core launcher checks apply.
-        named "vanilla" { inherit (vanilla) omp codex codexTerminal claude picker; }
+        named "vanilla" { inherit (vanilla) omp codex codexCli codexTerminal claude picker; }
         # Plugins, a gateway, and Kolu's MCP server: every check applies.
         // named "juspay" {
           inherit (juspay) omp codex codexTerminal claude picker gateway gatewayEnv
