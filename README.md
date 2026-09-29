@@ -22,13 +22,12 @@ nix run github:juspay/agent-distro
 
 ## Quick start
 
-For daily updates of installed commands, use the [Home Manager module](#install-and-stay-current).
-To try a harness immediately:
-
 ```sh
 nix run github:juspay/agent-distro                     # pick from the list
 AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
 ```
+
+To keep the agents installed and updated daily, see [Install](#install).
 
 The list shows every profile's harnesses, the default profile's rows first:
 
@@ -65,63 +64,37 @@ Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 This flake names a binary cache in its `nixConfig`. Pass `--accept-flake-config`
 to use it; without it, Oh My Pi is built from source.
 
-## Install and stay current
+## Install
 
-Add `agent-distro.url = "github:juspay/agent-distro"` to your flake inputs,
-then import its module into your Home Manager configuration:
+Puts `omp`, `codex`, and `claude` on your `PATH` and updates them daily. With
+Home Manager:
 
 ```nix
 {
   imports = [ inputs.agent-distro.homeManagerModules.default ];
   services.agent-distro = {
     enable = true;
-    profile = "juspay"; # defaults to vanilla
+    profile = "juspay"; # default: vanilla
   };
 }
 ```
 
-This installs `omp`, `codex`, and `claude` for one profile. The picker remains
-available through `nix run`. Each command starts with a pinned fallback; a
-user service builds the latest bundle daily and switches
-`<xdg.stateHome>/agent-distro/<source-hash>/current`, with the directory fixed
-from your Home Manager configuration (default `~/.local/state`). The hash covers
-both the flake reference and profile, so switching either starts with its pinned
-fallback. Failed updates keep the previous working bundle for that source.
-Linux uses a persistent systemd user timer with up to 15 minutes of randomized
-delay; `frequency` accepts an `OnCalendar` expression. Failed runs retry twice
-at five-minute intervals. macOS uses launchd with the same bounded retries and
-supports only `"daily"`.
+Without Home Manager, update by hand:
 
-If updates keep failing, the installed update can lag behind even a newly pinned
-bundle; on Linux inspect `systemctl --user status agent-distro-update`.
+```sh
+nix profile install github:juspay/agent-distro#juspay
+nix profile upgrade juspay
+```
 
-The updater runs unattended. Unless the cache from this flake's `nixConfig` is
-configured in your Nix settings, Oh My Pi is built from source on each update.
-Configure these in the system's NixOS or nix-darwin configuration so the Nix
-daemon trusts and uses the cache for all users:
+Add the binary cache to your NixOS or nix-darwin configuration; without it,
+every update builds Oh My Pi from source:
 
 ```nix
 nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
-Home Manager's `nix.settings` writes the user's `nix.conf`; its
-`extra-substituters` setting is accepted only if the daemon already trusts that
-cache and its signing key, or the user is in the daemon's `trusted-users`. Use
-the system settings above when you administer the machine; user-level settings alone do not grant
-that trust.
-
-Activation warns if another executable named `omp`, `codex`, or `claude` is on
-your PATH, showing its path and which executable a bare command will run; it
-never fails because of a collision. Remove the
-other installation or adjust PATH to select the commands you intend to use.
-
-Without Home Manager, install a bundle and upgrade it manually:
-
-```sh
-nix profile install github:juspay/agent-distro#juspay
-nix profile upgrade juspay
-```
+Updates not arriving? `systemctl --user status agent-distro-update`.
 
 ## Build your own distribution
 

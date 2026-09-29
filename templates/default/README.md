@@ -19,9 +19,8 @@ personal models in OMP if you previously used gateway defaults.
 Commit `flake.lock` for reproducible builds. Run `nix flake update` to update
 the framework and skills together.
 
-To install all three commands and refresh them daily, import your distribution's
-Home Manager module. Set `flake` to your own published URL; the profile defaults
-to the name in `profile.nix`:
+To install `omp`, `codex`, and `claude` and update them daily, with Home
+Manager:
 
 ```nix
 {
@@ -33,7 +32,5 @@ to the name in `profile.nix`:
 }
 ```
 
-See agent-distro's “Install and stay current” section for binary cache settings
-and PATH collision warnings. Without Home Manager, use
-`nix profile install github:<you>/my-distribution#<profile-name>` and
-`nix profile upgrade <profile-name>`.
+Binary cache and manual install: see agent-distro's
+[Install](https://github.com/juspay/agent-distro#install).
