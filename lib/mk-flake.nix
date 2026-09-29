@@ -6,11 +6,15 @@ in
 { profile, systems ? import ./systems.nix }:
 let
   checked = import ./validate-profile.nix profile;
-  packages = nixpkgs.lib.genAttrs systems (system:
-    let
-      launchers = mkLaunchers { pkgs = import nixpkgs { inherit system; }; inherit profile; };
-    in
-    { inherit (launchers) omp codex claude; default = launchers.picker; ${checked.name} = launchers.bundle; });
+  launchers = nixpkgs.lib.genAttrs systems (system:
+    mkLaunchers { pkgs = import nixpkgs { inherit system; }; inherit profile; });
+  # Runnable outputs are shared by packages and apps; bundles have no main program.
+  runnable = nixpkgs.lib.mapAttrs
+    (_: ls: { inherit (ls) omp codex claude; default = ls.picker; })
+    launchers;
+  packages = nixpkgs.lib.mapAttrs
+    (system: ps: ps // { ${checked.name} = launchers.${system}.bundle; })
+    runnable;
 in
 builtins.seq checked {
   inherit packages;
@@ -19,11 +23,10 @@ builtins.seq checked {
     defaultProfile = checked.name;
   };
   apps = nixpkgs.lib.mapAttrs
-    (_: ps: nixpkgs.lib.mapAttrs
+    (_: nixpkgs.lib.mapAttrs
       (_: package: {
         type = "app";
         program = nixpkgs.lib.getExe package;
-      })
-      (builtins.removeAttrs ps [ checked.name ]))
-    packages;
+      }))
+    runnable;
 }

@@ -23,12 +23,12 @@ let
   switchedProfile = switched { profile = "juspay"; };
   switchedFlake = switched { flake = "path:/home/testuser/other-flake"; };
   original = switched { };
-  # The builder and its runtime closure are already in the offline VM's store.
-  fixture = pkgs.writeTextDir "flake.nix" ''
+  # Offline flake mechanics stay independent of the build outcome under test.
+  fixtureFlake = name: script: pkgs.writeTextDir "flake.nix" ''
     {
       outputs = { self }: {
         packages.x86_64-linux.vanilla = derivation {
-          name = "updated-agents";
+          name = "${name}";
           system = "x86_64-linux";
           # Restore dependency context lost when the flake was written as text.
           dependencies = builtins.appendContext "" {
@@ -36,34 +36,19 @@ let
             "${pkgs.coreutils}" = { path = true; };
           };
           builder = "${pkgs.bash}/bin/bash";
-          args = [ "-c" ${builtins.toJSON ''
-            ${pkgs.coreutils}/bin/mkdir -p "$out/bin"
-            for name in omp codex claude; do
-              printf '#!${pkgs.bash}/bin/bash\necho updated-%s "$@"\n' "$name" > "$out/bin/$name"
-              ${pkgs.coreutils}/bin/chmod +x "$out/bin/$name"
-            done
-          ''} ];
+          args = [ "-c" ${builtins.toJSON script} ];
         };
       };
     }
   '';
-  broken = pkgs.writeTextDir "flake.nix" ''
-    {
-      outputs = { self }: {
-        packages.x86_64-linux.vanilla = derivation {
-          name = "broken-agents";
-          system = "x86_64-linux";
-          # Restore dependency context lost when the flake was written as text.
-          dependencies = builtins.appendContext "" {
-            "${pkgs.bash}" = { path = true; };
-            "${pkgs.coreutils}" = { path = true; };
-          };
-          builder = "${pkgs.bash}/bin/bash";
-          args = [ "-c" "exit 1" ];
-        };
-      };
-    }
+  fixture = fixtureFlake "updated-agents" ''
+    ${pkgs.coreutils}/bin/mkdir -p "$out/bin"
+    for name in omp codex claude; do
+      printf '#!${pkgs.bash}/bin/bash\necho updated-%s "$@"\n' "$name" > "$out/bin/$name"
+      ${pkgs.coreutils}/bin/chmod +x "$out/bin/$name"
+    done
   '';
+  broken = fixtureFlake "broken-agents" "exit 1";
 in
 {
   name = "auto-update";

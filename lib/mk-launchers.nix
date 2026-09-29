@@ -39,8 +39,7 @@ let
     claude = claude-code.packages.${system}.default;
   });
 in
-{
-  inherit omp codex claude;
+commands // {
   bundle = pkgs.symlinkJoin {
     name = "agent-distro-${profile.name}";
     paths = builtins.attrValues commands;
@@ -48,6 +47,6 @@ in
   };
   picker = pkgs.callPackage ../adapters/picker.nix {
     default = profile.name;
-    profiles.${profile.name} = { inherit profile; launchers = { inherit omp codex claude; }; };
+    profiles.${profile.name} = { inherit profile; launchers = commands; };
   };
 }
