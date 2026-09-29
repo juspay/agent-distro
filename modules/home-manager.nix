@@ -3,6 +3,9 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.agent-distro;
+  # One hour after the 11:00 UTC cron in .github/workflows/update-flake.yml.
+  updateHourUTC = 12;
+  defaultFrequency = "*-*-* ${toString updateHourUTC}:00:00 UTC";
   available = bundles.${pkgs.stdenv.hostPlatform.system};
   bundle = available.${cfg.profile} or (throw
     "Unknown agent-distro profile \"${cfg.profile}\"; valid names: ${lib.concatStringsSep ", " (builtins.attrNames available)}.");
@@ -28,11 +31,18 @@ let
     set -eu
     ${state}
     ${pkgs.coreutils}/bin/mkdir -p "$state"
-    exec ${lib.getExe (if config.nix.package != null then config.nix.package else pkgs.nix)} build \
+    ${lib.getExe (if config.nix.package != null then config.nix.package else pkgs.nix)} build \
       ${lib.escapeShellArg "${cfg.flake}#${cfg.profile}"} --refresh --out-link "$state/current"
+    ${pkgs.coreutils}/bin/date -u +%s > "$state/last-success.tmp"
+    ${pkgs.coreutils}/bin/mv "$state/last-success.tmp" "$state/last-success"
   '';
   # launchd has no start-limit counter, so bound retries within this invocation.
   launchdUpdater = pkgs.writeShellScript "agent-distro-update-retry" ''
+    set -eu
+    ${state}
+    source ${../lib/update-due.sh}
+    stamp=$(${pkgs.coreutils}/bin/cat "$state/last-success" 2>/dev/null) || stamp=""
+    update_due "$(${pkgs.coreutils}/bin/date -u +%s)" "$stamp" ${toString updateHourUTC} || exit 0
     for attempt in 1 2 3; do
       ${updater} && exit 0
       [ "$attempt" -lt 3 ] || exit 1
@@ -54,15 +64,15 @@ in
     } // lib.optionalAttrs (defaultFlake != null) { default = defaultFlake; });
     frequency = lib.mkOption {
       type = lib.types.str;
-      default = "daily";
-      description = "systemd OnCalendar schedule; macOS supports daily only.";
+      default = defaultFrequency;
+      description = "systemd OnCalendar schedule; macOS supports only the default UTC schedule.";
     };
   };
 
   config = lib.mkIf cfg.enable {
     assertions = [{
-      assertion = !pkgs.stdenv.isDarwin || cfg.frequency == "daily";
-      message = "services.agent-distro.frequency on macOS must be \"daily\".";
+      assertion = !pkgs.stdenv.isDarwin || cfg.frequency == defaultFrequency;
+      message = "services.agent-distro.frequency on macOS supports only the default: ${defaultFrequency}.";
     }];
     home.packages = [ shims ];
     home.activation.agent-distro-prune = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -101,7 +111,8 @@ in
       enable = true;
       config = {
         ProgramArguments = [ "${launchdUpdater}" ];
-        StartCalendarInterval = [{ Hour = 12; Minute = 0; }];
+        # Hourly wake-ups avoid encoding a UTC boundary in launchd's local time.
+        StartCalendarInterval = [{ Minute = 0; }];
       };
     };
     home.activation.agent-distro-collisions = lib.hm.dag.entryAfter [ "linkGeneration" "installPackages" ] ''

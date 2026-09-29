@@ -2,8 +2,8 @@ name: Update Flake
 
 on:
   schedule:
-    # 07:00 EDT / 06:00 EST (GitHub cron is UTC). This run now covers the
-    # profiles too, so nothing downstream has to be chained an hour behind it.
+    # modules/home-manager.nix defaults to 12:00 UTC, one hour after this job.
+    # Keep that default aligned when changing this upstream schedule.
     - cron: '0 11 * * *'
   workflow_dispatch:
 

@@ -66,8 +66,8 @@ to use it; without it, Oh My Pi is built from source.
 
 ## Install
 
-Puts `omp`, `codex`, and `claude` on your `PATH` and updates them daily. With
-Home Manager:
+Puts `omp`, `codex`, and `claude` on your `PATH` and updates them daily at
+12:00 UTC, an hour after upstream's update. With Home Manager:
 
 ```nix
 {
@@ -94,7 +94,7 @@ nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
-Updates not arriving? `systemctl --user status agent-distro-update`.
+Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`.
 
 ## Build your own distribution
 

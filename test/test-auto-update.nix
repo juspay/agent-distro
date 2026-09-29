@@ -100,6 +100,9 @@ in
     machine.succeed(systemctl("start agent-distro-update.service"))
     first = machine.succeed("readlink -f " + state).strip()
     assert first.startswith("/nix/store/"), first
+    stamp = state.rsplit("/", 1)[0] + "/last-success"
+    successful_update = machine.succeed("cat " + stamp).strip()
+    assert successful_update.isdigit(), successful_update
     for name in ["omp", "codex", "claude"]:
         output = machine.succeed(user("unset XDG_STATE_HOME; " + name + " --version 'two words'"))
         assert output.strip().endswith("updated-" + name + " --version two words"), output
@@ -109,6 +112,7 @@ in
     machine.wait_until_succeeds(systemctl("is-failed agent-distro-update.service"))
     retries = machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value"))
     assert retries.strip().endswith("3"), retries
+    assert machine.succeed("cat " + stamp).strip() == successful_update
     assert machine.succeed("readlink -f " + state).strip() == first
     for name in ["omp", "codex", "claude"]:
         assert "updated-" + name in machine.succeed(user(name + " --version"))

@@ -63,6 +63,9 @@
             profiles = agent-distro.profiles;
             inherit (import "${agent-distro}/profiles/registry.nix") default;
           });
+          update-schedule = import ./test-update-schedule.nix {
+            inherit pkgs nixpkgs agent-distro home-manager;
+          };
           auto-update = pkgs.testers.runNixOSTest (import ./test-auto-update.nix {
             inherit pkgs agent-distro home-manager;
           });
