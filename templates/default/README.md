@@ -18,3 +18,19 @@ personal models in OMP if you previously used gateway defaults.
 
 Commit `flake.lock` for reproducible builds. Run `nix flake update` to update
 the framework and skills together.
+
+To install `omp`, `codex`, and `claude` and update them daily, with Home
+Manager:
+
+```nix
+{
+  imports = [ inputs.my-distribution.homeManagerModules.default ];
+  services.agent-distro = {
+    enable = true;
+    flake = "github:<you>/my-distribution";
+  };
+}
+```
+
+Binary cache and manual install: see agent-distro's
+[Install](https://github.com/juspay/agent-distro#install).

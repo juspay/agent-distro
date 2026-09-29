@@ -25,8 +25,9 @@ nix run github:juspay/agent-distro
 ```sh
 nix run github:juspay/agent-distro                     # pick from the list
 AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
-nix profile install github:juspay/agent-distro         # keep it, as `ai`
 ```
+
+To keep the agents installed and updated daily, see [Install](#install).
 
 The list shows every profile's harnesses, the default profile's rows first:
 
@@ -63,6 +64,38 @@ Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 This flake names a binary cache in its `nixConfig`. Pass `--accept-flake-config`
 to use it; without it, Oh My Pi is built from source.
 
+## Install
+
+Puts `omp`, `codex`, and `claude` on your `PATH` and updates them daily at
+12:00 UTC, an hour after upstream's update. With Home Manager:
+
+```nix
+{
+  imports = [ inputs.agent-distro.homeManagerModules.default ];
+  services.agent-distro = {
+    enable = true;
+    profile = "juspay"; # default: vanilla
+  };
+}
+```
+
+Without Home Manager, update by hand:
+
+```sh
+nix profile install github:juspay/agent-distro#juspay
+nix profile upgrade juspay
+```
+
+Add the binary cache to your NixOS or nix-darwin configuration; without it,
+every update builds Oh My Pi from source:
+
+```nix
+nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
+nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
+```
+
+Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`.
+
 ## Build your own distribution
 
 ```sh
@@ -93,17 +126,19 @@ runs `nix run github:<you>/my-distribution`, and updates with
 
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
-# → packages.<system>.{default,omp,codex,claude} and matching apps
+# → packages.<system>.{default,omp,codex,claude,<profile.name>}
+#   apps.<system>.{default,omp,codex,claude}, homeManagerModules.default
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → { omp; codex; claude; picker; }
+# → { omp; codex; claude; picker; bundle; }
 ```
 
 A single-profile distribution draws the narrowed list above — one profile's
-rows under its description; `mkFlake` still gives you the four packages, with
-the picker as its `default`.
+rows under its description; `mkFlake` gives you the individual launchers and a
+bundle named after the profile, with the picker as its `default`.
 
-`mkFlake` returns only `packages` and `apps`; add other outputs with `//`.
+`mkFlake` returns `packages`, `apps`, and `homeManagerModules`; add other
+outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
 
 ```nix
