@@ -127,13 +127,16 @@ in
     assert machine.succeed("readlink -f " + state).strip() == first
     for name in ["omp", "codex", "claude"]:
         assert "updated-" + name in machine.succeed(user(name + " --version"))
-    # Neither a changed profile nor a changed flake may reuse this update.
+    # Reactivating the same source preserves its working update and GC root.
+    machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate"))
+    assert machine.succeed("readlink -f " + state).strip() == first
+    # Neither a changed profile nor a changed flake may reuse or keep rooting this update.
     for activation in ["${switchedProfile}", "${switchedFlake}"]:
         machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 " + activation + "/activate"))
         for name in ["omp", "codex", "claude"]:
             output = machine.succeed(user("unset XDG_STATE_HOME; AI_GATEWAY=0 " + name + " --version"))
             assert "updated-" not in output, output
-        assert machine.succeed("readlink -f " + state).strip() == first
+        machine.succeed("test ! -e " + shlex.quote(state.rsplit("/", 1)[0]))
 
     # A greeting and a native binary before the shim must still give a precise warning.
     machine.succeed(user("printf 'export PATH=/run/current-system/sw/bin:$PATH\\n' > ~/.bash_profile"))

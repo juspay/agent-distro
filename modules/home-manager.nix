@@ -65,6 +65,16 @@ in
       message = "services.agent-distro.frequency on macOS must be \"daily\".";
     }];
     home.packages = [ shims ];
+    home.activation.agent-distro-prune = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      (
+        ${state}
+        # Superseded out-links must stop rooting bundles the shims no longer use.
+        for previous in ${lib.escapeShellArg "${config.xdg.stateHome}/agent-distro"}/*; do
+          [ -d "$previous" ] && [ "$previous" != "$state" ] || continue
+          run ${pkgs.coreutils}/bin/rm -rf -- "$previous"
+        done
+      )
+    '';
     systemd.user.services.agent-distro-update = lib.mkIf pkgs.stdenv.isLinux {
       Unit = {
         Description = "Update agent-distro profile";
