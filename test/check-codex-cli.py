@@ -37,11 +37,11 @@ def check_contract():
     assert values == set(value_pattern.split('|')) | {'--remote'}, (
         'Codex value-flag grammar drift', values, value_pattern)
 
-    # Source-only contract: on upgrades review package_root/managed_codex_bin in
+    # Reviewed at rust-v0.159.0. On upgrades review package_root/managed_codex_bin in
     # codex-rs/app-server-daemon/src/managed_install.rs and PID constants in lib.rs.
     # The binary does not expose artifact names. Real terminal checks guard the
     # daemon JSON fields and package layouts; failure fixtures guard diagnostics.
-    assert run('--version').stdout.strip() == 'codex-cli 0.158.0', 'Re-check Codex daemon source contract'
+    assert run('--version').stdout.strip() == 'codex-cli 0.159.0', 'Re-check Codex daemon source contract'
     legacy_names = re.search(r'legacy_artifacts=\(([^)]+)\)', prelude)[1].split()
     assert legacy_names == ['app-server.pid', 'app-server.stderr.log',
                             'app-server-updater.pid', 'app-server-updater.stderr.log']

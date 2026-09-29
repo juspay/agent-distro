@@ -51,7 +51,7 @@ managed_package() {
   esac
 }
 
-# Codex rust-v0.158.0: codex-rs/app-server-daemon/src/managed_install.rs
+# Codex rust-v0.159.0: codex-rs/app-server-daemon/src/managed_install.rs
 # (package_root), with PID constants in src/lib.rs. The binary does not expose
 # these names; the CLI contract check requires source review on version updates.
 check_legacy_state() {
