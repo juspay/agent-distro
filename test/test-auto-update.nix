@@ -1,5 +1,28 @@
 { pkgs, agent-distro, home-manager }:
 let
+  homeConfig = {
+    imports = [ agent-distro.homeManagerModules.default ];
+    home = {
+      username = "testuser";
+      homeDirectory = "/home/testuser";
+      stateVersion = "24.05";
+    };
+    xdg.stateHome = "/home/testuser/custom-state";
+    services.agent-distro = {
+      enable = true;
+      flake = "path:/home/testuser/update-flake";
+      # Avoid a timer firing before the fallback assertions.
+      frequency = "2099-01-01";
+    };
+    systemd.user.services.agent-distro-update.Service.RestartSec = pkgs.lib.mkForce "1s";
+  };
+  switched = settings: (home-manager.lib.homeManagerConfiguration {
+    inherit pkgs;
+    modules = [ homeConfig { services.agent-distro = pkgs.lib.mapAttrs (_: pkgs.lib.mkForce) settings; } ];
+  }).activationPackage;
+  switchedProfile = switched { profile = "juspay"; };
+  switchedFlake = switched { flake = "path:/home/testuser/other-flake"; };
+  original = switched { };
   # The builder and its runtime closure are already in the offline VM's store.
   fixture = pkgs.writeTextDir "flake.nix" ''
     {
@@ -53,17 +76,12 @@ in
       experimental-features = [ "nix-command" "flakes" ];
       substituters = pkgs.lib.mkForce [ ];
     };
-    virtualisation.additionalPaths = [ fixture broken pkgs.bash pkgs.coreutils ];
-    home-manager.users.testuser = {
-      imports = [ agent-distro.homeManagerModules.default ];
-      home.stateVersion = "24.05";
-      services.agent-distro = {
-        enable = true;
-        flake = "path:/home/testuser/update-flake";
-        # Avoid a timer firing before the fallback assertions.
-        frequency = "2099-01-01";
-      };
-    };
+    # Alternate generations must be registered in the VM store for activation's GC roots.
+    virtualisation.additionalPaths = [ fixture broken pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
+    environment.loginShellInit = ''
+      echo "Welcome: this greeting is not a PATH"
+    '';
+    home-manager.users.testuser = homeConfig;
   };
   testScript = ''
     import shlex
@@ -72,7 +90,7 @@ in
     machine.wait_for_unit("home-manager-testuser.service")
     machine.wait_for_unit("user@1000.service")
     activation = machine.succeed("journalctl -u home-manager-testuser.service --no-pager")
-    assert "warning: agent-distro PATH collision for omp: /run/current-system/sw/bin/omp" in activation, activation
+    assert "warning: agent-distro PATH collision for omp: /run/current-system/sw/bin/omp; bare omp runs /home/testuser/.nix-profile/bin/omp" in activation, activation
     assert "PATH collision for codex" not in activation, activation
     assert "PATH collision for claude" not in activation, activation
 
@@ -82,25 +100,44 @@ in
     def systemctl(command):
         return user("XDG_RUNTIME_DIR=/run/user/1000 systemctl --user " + command)
 
-    state = "/home/testuser/.local/state/agent-distro/current"
+    source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
+    state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     machine.succeed("test ! -e " + state)
     for name in ["omp", "codex", "claude"]:
         output = machine.succeed(user(name + " --version"))
         assert "updated-" not in output, output
     machine.succeed(systemctl("is-enabled agent-distro-update.timer"))
-    machine.succeed(systemctl("cat agent-distro-update.timer"))
+    timer = machine.succeed(systemctl("cat agent-distro-update.timer"))
+    assert "RandomizedDelaySec=15min" in timer, timer
+    service = machine.succeed(systemctl("cat agent-distro-update.service"))
+    assert "StartLimitBurst=3" in service and "Restart=on-failure" in service, service
     machine.succeed(user("cp -r ${fixture} ~/update-flake; chmod -R u+w ~/update-flake"))
     machine.succeed(systemctl("start agent-distro-update.service"))
     first = machine.succeed("readlink -f " + state).strip()
     assert first.startswith("/nix/store/"), first
     for name in ["omp", "codex", "claude"]:
-        output = machine.succeed(user(name + " --version 'two words'"))
-        assert output.strip() == "updated-" + name + " --version two words", output
+        output = machine.succeed(user("unset XDG_STATE_HOME; " + name + " --version 'two words'"))
+        assert output.strip().endswith("updated-" + name + " --version two words"), output
     machine.succeed(user("cp ${broken}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.fail(systemctl("start agent-distro-update.service"))
-    machine.succeed(systemctl("is-failed agent-distro-update.service"))
+    machine.wait_until_succeeds(systemctl("is-failed agent-distro-update.service"))
+    retries = machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value"))
+    assert retries.strip().endswith("3"), retries
     assert machine.succeed("readlink -f " + state).strip() == first
     for name in ["omp", "codex", "claude"]:
         assert "updated-" + name in machine.succeed(user(name + " --version"))
+    # Neither a changed profile nor a changed flake may reuse this update.
+    for activation in ["${switchedProfile}", "${switchedFlake}"]:
+        machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 " + activation + "/activate"))
+        for name in ["omp", "codex", "claude"]:
+            output = machine.succeed(user("unset XDG_STATE_HOME; AI_GATEWAY=0 " + name + " --version"))
+            assert "updated-" not in output, output
+        assert machine.succeed("readlink -f " + state).strip() == first
+
+    # A greeting and a native binary before the shim must still give a precise warning.
+    machine.succeed(user("printf 'export PATH=/run/current-system/sw/bin:$PATH\\n' > ~/.bash_profile"))
+    warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate 2>&1"))
+    assert "PATH collision for omp: /run/current-system/sw/bin/omp; bare omp runs /run/current-system/sw/bin/omp" in warning, warning
   '';
 }

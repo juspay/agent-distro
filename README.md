@@ -83,23 +83,37 @@ then import its module into your Home Manager configuration:
 This installs `omp`, `codex`, and `claude` for one profile. The picker remains
 available through `nix run`. Each command starts with a pinned fallback; a
 user service builds the latest bundle daily and switches
-`$XDG_STATE_HOME/agent-distro/current` (defaulting to `~/.local/state`). Failed
-updates keep the previous working bundle. Linux uses a persistent systemd user
-timer; `frequency` accepts an `OnCalendar` expression. macOS uses launchd and
+`<xdg.stateHome>/agent-distro/<source-hash>/current`, with the directory fixed
+from your Home Manager configuration (default `~/.local/state`). The hash covers
+both the flake reference and profile, so switching either starts with its pinned
+fallback. Failed updates keep the previous working bundle for that source.
+Linux uses a persistent systemd user timer with up to 15 minutes of randomized
+delay; `frequency` accepts an `OnCalendar` expression. Failed runs retry twice
+at five-minute intervals. macOS uses launchd with the same bounded retries and
 supports only `"daily"`.
+
+If updates keep failing, the installed update can lag behind even a newly pinned
+bundle; on Linux inspect `systemctl --user status agent-distro-update`.
 
 The updater runs unattended. Unless the cache from this flake's `nixConfig` is
 configured in your Nix settings, Oh My Pi is built from source on each update.
-Configure these in the NixOS, nix-darwin, or Home Manager configuration that
-manages your Nix settings:
+Configure these in the system's NixOS or nix-darwin configuration so the Nix
+daemon trusts and uses the cache for all users:
 
 ```nix
 nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
+Home Manager's `nix.settings` writes the user's `nix.conf`; its
+`extra-substituters` setting is accepted only if the daemon already trusts that
+cache and its signing key, or the user is in the daemon's `trusted-users`. Use
+the system settings above when you administer the machine; user-level settings alone do not grant
+that trust.
+
 Activation warns if another executable named `omp`, `codex`, or `claude` is on
-your PATH, showing its path; it never fails because of a collision. Remove the
+your PATH, showing its path and which executable a bare command will run; it
+never fails because of a collision. Remove the
 other installation or adjust PATH to select the commands you intend to use.
 
 Without Home Manager, install a bundle and upgrade it manually:

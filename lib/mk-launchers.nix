@@ -42,7 +42,7 @@ in
 {
   inherit omp codex claude;
   bundle = pkgs.symlinkJoin {
-    name = "agent-distro-${(import ./validate-profile.nix profile).name}";
+    name = "agent-distro-${profile.name}";
     paths = builtins.attrValues commands;
     passthru.commands = builtins.attrNames commands;
   };

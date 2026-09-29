@@ -34,8 +34,9 @@ writeShellApplication {
     marketplace=${marketplace}
     if ! registered=$(${lib.getExe codex} plugin marketplace list --json \
       | jq -r --arg n ${lib.escapeShellArg marketplaceName} '.marketplaces[] | select(.name == $n) | .root'); then
-      # A collected marketplace makes listing fail before it can report its root.
-      ${lib.getExe codex} plugin marketplace remove ${lib.escapeShellArg marketplaceName} >/dev/null
+      # Another broken marketplace can make listing fail even when ours is absent.
+      # Until it is repaired, each launch reinstalls ours and re-enables its plugins.
+      ${lib.getExe codex} plugin marketplace remove ${lib.escapeShellArg marketplaceName} >/dev/null || true
       registered=""
     fi
     if [ "$registered" != "$marketplace" ] || [ ! -d "$registered" ]; then

@@ -1,3 +1,4 @@
+# Protect the exporters' package namespaces from profile-name collisions.
 profile:
 let
   reserved = [ "default" "omp" "codex" "claude" ];
