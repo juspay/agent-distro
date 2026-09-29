@@ -22,10 +22,12 @@ nix run github:juspay/agent-distro
 
 ## Quick start
 
+For daily updates of installed commands, use the [Home Manager module](#install-and-stay-current).
+To try a harness immediately:
+
 ```sh
 nix run github:juspay/agent-distro                     # pick from the list
 AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
-nix profile install github:juspay/agent-distro         # keep it, as `ai`
 ```
 
 The list shows every profile's harnesses, the default profile's rows first:
@@ -63,6 +65,50 @@ Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 This flake names a binary cache in its `nixConfig`. Pass `--accept-flake-config`
 to use it; without it, Oh My Pi is built from source.
 
+## Install and stay current
+
+Add `agent-distro.url = "github:juspay/agent-distro"` to your flake inputs,
+then import its module into your Home Manager configuration:
+
+```nix
+{
+  imports = [ inputs.agent-distro.homeManagerModules.default ];
+  services.agent-distro = {
+    enable = true;
+    profile = "juspay"; # defaults to vanilla
+  };
+}
+```
+
+This installs `omp`, `codex`, and `claude` for one profile. The picker remains
+available through `nix run`. Each command starts with a pinned fallback; a
+user service builds the latest bundle daily and switches
+`$XDG_STATE_HOME/agent-distro/current` (defaulting to `~/.local/state`). Failed
+updates keep the previous working bundle. Linux uses a persistent systemd user
+timer; `frequency` accepts an `OnCalendar` expression. macOS uses launchd and
+supports only `"daily"`.
+
+The updater runs unattended. Unless the cache from this flake's `nixConfig` is
+configured in your Nix settings, Oh My Pi is built from source on each update.
+Configure these in the NixOS, nix-darwin, or Home Manager configuration that
+manages your Nix settings:
+
+```nix
+nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
+nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
+```
+
+Activation warns if another executable named `omp`, `codex`, or `claude` is on
+your PATH, showing its path; it never fails because of a collision. Remove the
+other installation or adjust PATH to select the commands you intend to use.
+
+Without Home Manager, install a bundle and upgrade it manually:
+
+```sh
+nix profile install github:juspay/agent-distro#juspay
+nix profile upgrade juspay
+```
+
 ## Build your own distribution
 
 ```sh
@@ -93,17 +139,19 @@ runs `nix run github:<you>/my-distribution`, and updates with
 
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
-# → packages.<system>.{default,omp,codex,claude} and matching apps
+# → packages.<system>.{default,omp,codex,claude,<profile.name>}
+#   apps.<system>.{default,omp,codex,claude}, homeManagerModules.default
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → { omp; codex; claude; picker; }
+# → { omp; codex; claude; picker; bundle; }
 ```
 
 A single-profile distribution draws the narrowed list above — one profile's
-rows under its description; `mkFlake` still gives you the four packages, with
-the picker as its `default`.
+rows under its description; `mkFlake` gives you the individual launchers and a
+bundle named after the profile, with the picker as its `default`.
 
-`mkFlake` returns only `packages` and `apps`; add other outputs with `//`.
+`mkFlake` returns `packages`, `apps`, and `homeManagerModules`; add other
+outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
 
 ```nix

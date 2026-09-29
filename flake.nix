@@ -46,7 +46,7 @@
           let profile = import (./profiles + "/${name}/profile.nix"); in
           # AI_PROFILE, the Codex marketplace and the picker all key off the
           # directory name, so a mismatch would surface far from its cause.
-          if profile.name == name then profile
+          if profile.name == name then import ./lib/validate-profile.nix profile
           else throw "profiles/${name}/profile.nix declares name \"${profile.name}\"; it must match its directory.")
         (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./profiles));
 
@@ -54,6 +54,10 @@
       default =
         if profiles ? ${registry.default} then registry.default
         else throw "profiles/registry.nix defaults to \"${registry.default}\", which is not a directory under profiles/.";
+
+      bundles = lib.genAttrs systems (system:
+        let pkgs = import nixpkgs { inherit system; };
+        in lib.mapAttrs (_: profile: (mkLaunchers { inherit pkgs profile; }).bundle) profiles);
 
       pickers = lib.genAttrs systems (system:
         let pkgs = import nixpkgs { inherit system; };
@@ -65,10 +69,13 @@
         });
     in
     {
-      # The picker is the only package: every harness is reached through it, or
-      # past it with AI_PROFILE and AI_HARNESS, so no per-profile output set has
-      # to be kept in step with `profiles/`.
-      packages = lib.genAttrs systems (system: { default = pickers.${system}; });
+      # The picker stays the runnable default; profile bundles install all three commands.
+      packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; });
+      homeManagerModules.default = import ./modules/home-manager.nix {
+        inherit bundles;
+        defaultProfile = default;
+        defaultFlake = "github:juspay/agent-distro";
+      };
       apps = lib.mapAttrs
         (_: picker: { default = { type = "app"; program = lib.getExe picker; }; })
         pickers;

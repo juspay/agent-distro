@@ -1,0 +1,7 @@
+profile:
+let
+  reserved = [ "default" "omp" "codex" "claude" ];
+in
+if builtins.elem profile.name reserved then
+  throw "Profile \"${profile.name}\" uses a reserved name; reserved names: ${builtins.concatStringsSep ", " reserved}."
+else profile

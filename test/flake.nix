@@ -2,9 +2,11 @@
   description = "Launcher integration tests for every profile in the registry";
   inputs = {
     agent-distro.url = "path:..";
+    home-manager.url = "github:nix-community/home-manager";
+    home-manager.inputs.nixpkgs.follows = "agent-distro/nixpkgs";
     nixpkgs.follows = "agent-distro/nixpkgs";
   };
-  outputs = { nixpkgs, agent-distro, ... }:
+  outputs = { nixpkgs, agent-distro, home-manager, ... }:
     let
       inherit (nixpkgs) lib;
       system = "x86_64-linux";
@@ -36,7 +38,7 @@
         # Plugins, a gateway, and Kolu's MCP server: every check applies.
         // named "juspay" {
           inherit (juspay) omp codex claude picker gateway gatewayEnv
-            ompPlugins codexPlugins claudePlugins ompKolu codexKolu claudeKolu;
+            ompPlugins codexPlugins codexStaleMarketplace claudePlugins ompKolu codexKolu claudeKolu;
         }
         # MCP-only, skills-only, and every MCP shape the translation handles.
         # No `omp`: OMP 18.4.1 loads no skills from these plugins as `-e` roots
@@ -61,6 +63,19 @@
             profiles = agent-distro.profiles;
             inherit (import "${agent-distro}/profiles/registry.nix") default;
           });
+          auto-update = pkgs.testers.runNixOSTest (import ./test-auto-update.nix {
+            inherit pkgs agent-distro home-manager;
+          });
+          reserved-profile = assert !(builtins.tryEval (agent-distro.lib.mkFlake {
+            profile = agent-distro.profiles.vanilla // { name = "omp"; };
+          })).success; pkgs.runCommand "reserved-profile" { nativeBuildInputs = [ pkgs.nix ]; } ''
+            export NIX_STATE_DIR="$TMPDIR/nix-state"
+            if nix-instantiate --eval --expr '(import ${agent-distro}/lib/validate-profile.nix) { name = "omp"; }' 2>error; then
+              exit 1
+            fi
+            grep -F 'Profile "omp" uses a reserved name; reserved names: default, omp, codex, claude.' error
+            touch "$out"
+          '';
           packages = import ./test-packages.nix {
             inherit pkgs;
             bindLaunchers = import "${agent-distro}/lib/mk-launchers.nix";

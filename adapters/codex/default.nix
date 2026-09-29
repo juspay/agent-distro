@@ -32,9 +32,13 @@ writeShellApplication {
     # native installer only when that path changes, preserving disabled plugins
     # on steady-state launches as well as unrelated config and auth.
     marketplace=${marketplace}
-    registered=$(${lib.getExe codex} plugin marketplace list --json \
-      | jq -r --arg n ${lib.escapeShellArg marketplaceName} '.marketplaces[] | select(.name == $n) | .root')
-    if [ "$registered" != "$marketplace" ]; then
+    if ! registered=$(${lib.getExe codex} plugin marketplace list --json \
+      | jq -r --arg n ${lib.escapeShellArg marketplaceName} '.marketplaces[] | select(.name == $n) | .root'); then
+      # A collected marketplace makes listing fail before it can report its root.
+      ${lib.getExe codex} plugin marketplace remove ${lib.escapeShellArg marketplaceName} >/dev/null
+      registered=""
+    fi
+    if [ "$registered" != "$marketplace" ] || [ ! -d "$registered" ]; then
       if [ -n "$registered" ]; then
         ${lib.getExe codex} plugin marketplace remove ${lib.escapeShellArg marketplaceName} >/dev/null
       fi
