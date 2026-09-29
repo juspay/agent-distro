@@ -23,6 +23,8 @@ let
         '';
       };
 
+  commands = { inherit omp codex claude; };
+
   omp = withPackages (pkgs.callPackage ../adapters/omp {
     inherit plugins gateway;
     omp = oh-my-pi.packages.${system}.default;
@@ -37,10 +39,14 @@ let
     claude = claude-code.packages.${system}.default;
   });
 in
-{
-  inherit omp codex claude;
+commands // {
+  bundle = pkgs.symlinkJoin {
+    name = "agent-distro-${profile.name}";
+    paths = builtins.attrValues commands;
+    passthru.commands = builtins.attrNames commands;
+  };
   picker = pkgs.callPackage ../adapters/picker.nix {
     default = profile.name;
-    profiles.${profile.name} = { inherit profile; launchers = { inherit omp codex claude; }; };
+    profiles.${profile.name} = { inherit profile; launchers = commands; };
   };
 }

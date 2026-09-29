@@ -86,6 +86,7 @@ in
   # Nonempty plugin profiles only: same home, different plugin store paths (#181).
   ompPlugins = mkCheck { } "omp" "omp-plugins" "check-omp-plugins.py" [ (updatedBin "omp") ] { };
   codexPlugins = mkCheck { } "codex" "codex-plugins" "check-codex-plugins.py" [ (updatedBin "codex") codexUpstream ] { };
+  codexStaleMarketplace = mkCheck { } "codex" "codex-stale-marketplace" "check-codex-stale-marketplace.py" [ codexUpstream ] { };
   claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
 
   # Profiles containing Kolu's plugin only; the server is an offline fixture.
