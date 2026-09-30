@@ -36,7 +36,8 @@
   outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, ... }:
     let
       inherit (nixpkgs) lib;
-      upstream = { inherit oh-my-pi codex-cli claude-code opencode; };
+      opencode-v2 = pkgs: pkgs.callPackage ./pkgs/opencode-v2 { };
+      upstream = { inherit oh-my-pi codex-cli claude-code opencode opencode-v2; };
       mkLaunchers = import ./lib/mk-launchers.nix upstream;
       mkFlake = import ./lib/mk-flake.nix (upstream // { inherit nixpkgs; });
       systems = import ./lib/systems.nix;
@@ -90,7 +91,7 @@
         codex = codex-cli.packages.${system}.default;
         claude = claude-code.packages.${system}.default;
         opencode = opencode.packages.${system}.default;
-        opencode2 = nixpkgs.legacyPackages.${system}.callPackage ./pkgs/opencode-v2 { };
+        opencode2 = opencode-v2 nixpkgs.legacyPackages.${system};
       });
 
       lib = { inherit mkLaunchers mkFlake; };

@@ -11,16 +11,15 @@ let
   tool = pkgs.writeShellScriptBin "profile-tool" "";
   decoy = pkgs.writeShellScriptBin "profile-tool" "";
   profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; gateway = null; };
-  mkLaunchers = bindLaunchers { oh-my-pi = stub "omp"; codex-cli = stub "codex"; claude-code = stub "claude"; opencode = stub "opencode"; };
-  # V2 is packaged locally, so stub its package lookup instead of a flake input.
-  testPkgs = pkgs // {
-    callPackage = path: args:
-      if lib.hasSuffix "/pkgs/opencode-v2" (toString path)
-      then (stub "opencode2").packages.${system}.default
-      else pkgs.callPackage path args;
+  mkLaunchers = bindLaunchers {
+    oh-my-pi = stub "omp";
+    codex-cli = stub "codex";
+    claude-code = stub "claude";
+    opencode = stub "opencode";
+    opencode-v2 = _: (stub "opencode2").packages.${system}.default;
   };
-  packaged = mkLaunchers { pkgs = testPkgs; profile = profile // { packages = _: [ tool ]; }; };
-  bare = mkLaunchers { pkgs = testPkgs; inherit profile; };
+  packaged = mkLaunchers { inherit pkgs; profile = profile // { packages = _: [ tool ]; }; };
+  bare = mkLaunchers { inherit pkgs profile; };
 in
 pkgs.runCommand "packages" { } ''
   for launcher in ${lib.escapeShellArgs (map (h: lib.getExe packaged.${h}) packaged.bundle.commands)}; do

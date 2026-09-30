@@ -23,6 +23,7 @@ let
     profile;
   mkCheck = { diskSize ? 1024 }: harness: name: script: extraPackages: environment:
     let
+      # Both OpenCode harnesses share opencode_support.py.
       # Keep imports beside the script without coupling unrelated harness tests.
       scripts = builtins.path {
         path = ./.;
