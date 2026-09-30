@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 expected = json.loads(sys.argv[1])
 home = Path.home()
@@ -18,24 +19,24 @@ env = dict(os.environ, AI_GATEWAY='0', OPENCODE_DISABLE_MODELS_FETCH='true')
 
 
 def run(*args, launcher='opencode'):
-    result = subprocess.run([launcher, '--pure', *args], env=env, text=True,
-                            capture_output=True, timeout=90)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    return result.stdout
+    # Upstream exits before large pipe writes drain; a file keeps the full JSON.
+    with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as output:
+        result = subprocess.run([launcher, '--pure', *args], env=env, text=True,
+                                stdout=output, stderr=subprocess.PIPE, timeout=90)
+        output.seek(0)
+        stdout = output.read()
+    assert result.returncode == 0, (stdout, result.stderr)
+    return stdout
 
 
 def config(launcher='opencode'):
     return json.loads(run('debug', 'config', launcher=launcher))
 
 
-def skills(launcher='opencode'):
-    return json.loads(run('debug', 'skill', launcher=launcher))
-
-
 def check_inventory(launcher='opencode'):
     resolved = config(launcher)
     assert resolved['username'] == 'personal-user', resolved
-    discovered = skills(launcher)
+    discovered = json.loads(run('debug', 'skill', launcher=launcher))
     locations = [skill['location'] for skill in discovered]
     for plugin, names in expected.items():
         for name in names:
