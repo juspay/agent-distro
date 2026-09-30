@@ -48,7 +48,7 @@ class AdapterTests(unittest.TestCase):
                 second = description('second-plugin', server)
                 for index, order in enumerate([(first, second), (second, first)]):
                     with self.subTest(type=server['type'], order=index):
-                        result = generate(root / 'collision', *order)
+                        result = generate(root / f'collision-{server["type"]}-{index}', *order)
                         self.assertNotEqual(result.returncode, 0)
                         self.assertIn('MCP server "shared"', result.stderr)
                         self.assertIn('"first-plugin"', result.stderr)
