@@ -236,7 +236,8 @@ LiteLLM proxy used by OMP and OpenCode.
 
 - **OpenCode:** loads a generated `OPENCODE_CONFIG` file with skills and MCP
   servers. It merges after the user's global config and before the project's
-  config, leaving both files untouched. An existing `OPENCODE_CONFIG` is
+  config. The launcher leaves those files untouched; OpenCode itself adds
+  `$schema` to schema-less config files. An existing `OPENCODE_CONFIG` is
   replaced with a warning. Stdio servers use the same plugin environment and
   working-directory contract as Claude Code, with data under
   `${XDG_DATA_HOME:-$HOME/.local/share}/agent-distro/plugins/<name>`.

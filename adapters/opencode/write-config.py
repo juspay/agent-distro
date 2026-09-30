@@ -11,7 +11,7 @@ from mcp_launcher import launcher
 def main(out, bash, env, gateway_path, *descriptions):
     root = Path(out)
     (root / 'bin').mkdir(parents=True)
-    config = {'skills': {'paths': []}, 'mcp': {}}
+    config = {'$schema': 'https://opencode.ai/config.json', 'skills': {'paths': []}, 'mcp': {}}
     for description_path in descriptions:
         description = json.loads(Path(description_path).read_text())
         plugin = description['manifest']['name']
