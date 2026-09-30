@@ -27,7 +27,7 @@ let
       scripts = builtins.path {
         path = ./.;
         name = "agent-distro-test-scripts";
-        filter = path: type: builtins.elem (baseNameOf path) [ script "${harness}_support.py" ];
+        filter = path: type: builtins.elem (baseNameOf path) [ script "${if harness == "opencode2" then "opencode" else harness}_support.py" ];
       };
     in
     pkgs.testers.runNixOSTest {
@@ -74,6 +74,7 @@ in
   codexTerminal = mkCheck { } "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
   claude = mkCheck { } "claude" "claude" "check-claude.py" [ ] { };
   opencode = mkCheck { } "opencode" "opencode" "check-opencode.py" [ ] { AI_GATEWAY = "0"; };
+  opencode2 = mkCheck { } "opencode2" "opencode2" "check-opencode2.py" [ ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
     profiles = { ${profile.name} = profile; };
@@ -82,12 +83,12 @@ in
 
   gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix {
     inherit launchers profile;
-    opencode = ((if mkLaunchers != null then mkLaunchers else throw "Gateway tests require mkLaunchers") {
+    opencodeLaunchers = ((if mkLaunchers != null then mkLaunchers else throw "Gateway tests require mkLaunchers") {
       inherit pkgs;
       profile = profile // {
         gateway = profile.gateway // { url = "http://127.0.0.1:8080"; };
       };
-    }).opencode;
+    });
   });
   gatewayEnv = mkCheck { } "omp" "gateway-env" "check-gateway-env.py" [ ] gatewayEnvironment;
 
@@ -96,12 +97,14 @@ in
   codexPlugins = mkCheck { } "codex" "codex-plugins" "check-codex-plugins.py" [ (updatedBin "codex") codexUpstream ] { };
   codexStaleMarketplace = mkCheck { } "codex" "codex-stale-marketplace" "check-codex-stale-marketplace.py" [ codexUpstream ] { };
   opencodePlugins = mkCheck { } "opencode" "opencode-plugins" "check-opencode-plugins.py" [ (updatedBin "opencode") ] { AI_GATEWAY = "0"; };
+  opencode2Plugins = mkCheck { } "opencode2" "opencode2-plugins" "check-opencode2-plugins.py" [ (updatedBin "opencode2") ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
   claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
 
   # Profiles containing Kolu's plugin only; the server is an offline fixture.
   ompKolu = mkCheck { } "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
   codexKolu = mkCheck { } "codex" "codex-kolu" "check-codex-kolu.py" [ koluFixture ] { };
   opencodeKolu = mkCheck { } "opencode" "opencode-kolu" "check-opencode-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
+  opencode2Kolu = mkCheck { } "opencode2" "opencode2-kolu" "check-opencode2-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
   claudeKolu = mkCheck { } "claude" "claude-kolu" "check-claude-kolu.py" [ koluFixture ] { };
 
   # Profiles containing test/fixtures/{spec-plugin,mcp-only} only.

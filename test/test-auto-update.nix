@@ -43,7 +43,7 @@ let
   '';
   fixture = fixtureFlake "updated-agents" ''
     ${pkgs.coreutils}/bin/mkdir -p "$out/bin"
-    for name in omp codex claude opencode; do
+    for name in omp codex claude opencode opencode2; do
       printf '#!${pkgs.bash}/bin/bash\necho updated-%s "$@"\n' "$name" > "$out/bin/$name"
       ${pkgs.coreutils}/bin/chmod +x "$out/bin/$name"
     done
@@ -88,7 +88,7 @@ in
     source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     machine.succeed("test ! -e " + state)
-    for name in ["omp", "codex", "claude", "opencode"]:
+    for name in ["omp", "codex", "claude", "opencode", "opencode2"]:
         output = machine.succeed(user(name + " --version"))
         assert "updated-" not in output, output
     machine.succeed(systemctl("is-enabled agent-distro-update.timer"))
@@ -103,7 +103,7 @@ in
     stamp = state.rsplit("/", 1)[0] + "/last-success"
     successful_update = machine.succeed("cat " + stamp).strip()
     assert successful_update.isdigit(), successful_update
-    for name in ["omp", "codex", "claude", "opencode"]:
+    for name in ["omp", "codex", "claude", "opencode", "opencode2"]:
         output = machine.succeed(user("unset XDG_STATE_HOME; " + name + " --version 'two words'"))
         assert output.strip().endswith("updated-" + name + " --version two words"), output
     machine.succeed(user("cp ${broken}/flake.nix ~/update-flake/flake.nix"))
@@ -114,7 +114,7 @@ in
     assert retries.strip().endswith("3"), retries
     assert machine.succeed("cat " + stamp).strip() == successful_update
     assert machine.succeed("readlink -f " + state).strip() == first
-    for name in ["omp", "codex", "claude", "opencode"]:
+    for name in ["omp", "codex", "claude", "opencode", "opencode2"]:
         assert "updated-" + name in machine.succeed(user(name + " --version"))
     # Reactivating the same source preserves its working update and GC root.
     machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate"))
@@ -122,7 +122,7 @@ in
     # Neither a changed profile nor a changed flake may reuse or keep rooting this update.
     for activation in ["${switchedProfile}", "${switchedFlake}"]:
         machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 " + activation + "/activate"))
-        for name in ["omp", "codex", "claude", "opencode"]:
+        for name in ["omp", "codex", "claude", "opencode", "opencode2"]:
             output = machine.succeed(user("unset XDG_STATE_HOME; AI_GATEWAY=0 " + name + " --version"))
             assert "updated-" not in output, output
         machine.succeed("test ! -e " + shlex.quote(state.rsplit("/", 1)[0]))

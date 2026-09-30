@@ -11,7 +11,7 @@ let
   tool = pkgs.writeShellScriptBin "profile-tool" "";
   decoy = pkgs.writeShellScriptBin "profile-tool" "";
   profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; gateway = null; };
-  mkLaunchers = bindLaunchers { oh-my-pi = stub "omp"; codex-cli = stub "codex"; claude-code = stub "claude"; opencode = stub "opencode"; };
+  mkLaunchers = bindLaunchers { oh-my-pi = stub "omp"; codex-cli = stub "codex"; claude-code = stub "claude"; opencode = stub "opencode"; opencode-v2 = stub "opencode"; };
   packaged = mkLaunchers { inherit pkgs; profile = profile // { packages = _: [ tool ]; }; };
   bare = mkLaunchers { inherit pkgs profile; };
 in
