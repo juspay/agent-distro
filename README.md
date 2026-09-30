@@ -279,16 +279,18 @@ pins that moved, approves the runs GitHub holds back for
 automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.
-OpenCode v1 stays on `v1.` release tags; OpenCode v2 advances independently with
-`advance-release-pin.sh opencode-v2 anomalyco/opencode v2. tags`, since upstream
-publishes v2 tags without GitHub releases.
+OpenCode v1 stays on `v1.` release tags; OpenCode v2 uses upstream’s prebuilt npm
+binaries because its Nix build is not reliable yet, with `advance-opencode-v2.sh`
+advancing `pkgs/opencode-v2/sources.json` from upstream’s installer metadata
+(or npm’s `latest` dist-tag) only after all three platform downloads succeed.
 
 CI pushes every store path it realises to the OSS cache, so users and later runs
 fetch OMP and OpenCode instead of building them; `ATTIC_TOKEN` is required except
 on fork PRs, which build without pushing. Superseded PR runs are cancelled.
 
-For manual updates, advance `oh-my-pi.url`, `opencode.url`, and `opencode-v2.url` first, run `nix flake update`, then
-`npins --directory profiles/<name>/npins update` per profile, then
+For manual updates, advance `oh-my-pi.url` and `opencode.url`, run
+`bash .github/scripts/advance-opencode-v2.sh`, then `nix flake update`,
+`npins --directory profiles/<name>/npins update` per profile, and
 `bash test/update-lock.sh`.
 
 Consumers can import `test/lib.nix { pkgs; launchers; profile; }` and select

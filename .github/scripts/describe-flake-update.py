@@ -62,8 +62,8 @@ def main():
         "OpenCode v2", env["OPENCODE2_BEFORE"], env["OPENCODE2_AFTER"],
         "https://github.com/anomalyco/opencode/releases/tag/v",
     )
-    if "v" + env["OPENCODE2_AFTER"].split("+", 1)[0] != env["OPENCODE2_LATEST"]:
-        opencode2_note += f" — latest v2 tag is `{env['OPENCODE2_LATEST']}`; the pin only moves forward."
+    if env["OPENCODE2_AFTER"] != env["OPENCODE2_LATEST"]:
+        opencode2_note += f" — latest v2 npm version is `{env['OPENCODE2_LATEST']}`; the pin only moves forward."
     pin_changes, pin_note = describe_pins(
         json.loads(env["PINS_BEFORE"]), json.loads(env["PINS_AFTER"]),
     )

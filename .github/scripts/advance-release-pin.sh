@@ -7,12 +7,7 @@ repo=${2:?GitHub repository required}
 tag_prefix=${3:-}
 
 before=$(sed -n 's|.*'"$input"'\.url = "github:'"$repo"'/\([^"]*\)";.*|\1|p' flake.nix)
-if [ "${4:-}" = tags ]; then
-  latest=$(gh api "repos/$repo/git/matching-refs/tags/$tag_prefix" --jq '.[].ref' |
-    sed 's|^refs/tags/||' | sort -V | tail -n1)
-else
-  latest=$(gh release view --repo "$repo" --json tagName --jq .tagName)
-fi
+latest=$(gh release view --repo "$repo" --json tagName --jq .tagName)
 for version in "$before" "$latest"; do
   if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "error: unusable $input release tag: $version" >&2

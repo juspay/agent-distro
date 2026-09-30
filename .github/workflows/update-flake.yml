@@ -44,11 +44,9 @@ jobs:
         # Keep the two major versions independently pinned.
         run: bash .github/scripts/advance-release-pin.sh opencode anomalyco/opencode v1.
 
-      - name: Advance the OpenCode v2 tag pin
+      - name: Advance the OpenCode v2 npm pin
         id: opencode2
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/advance-release-pin.sh opencode-v2 anomalyco/opencode v2. tags
+        run: bash .github/scripts/advance-opencode-v2.sh
 
       - name: Update all inputs
         id: lock
@@ -98,6 +96,7 @@ jobs:
             flake.lock
             test/flake.lock
             profiles/*/npins/sources.json
+            pkgs/opencode-v2/sources.json
           title: ${{ steps.report.outputs.pr-title }}
           body-path: ${{ steps.report.outputs.pr-body-path }}
           commit-message: "chore(flake): update inputs"
