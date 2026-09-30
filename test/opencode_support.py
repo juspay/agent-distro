@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 expected = json.loads(sys.argv[1])
 binary = os.environ.get('OPENCODE_TEST_BINARY', 'opencode')
@@ -18,7 +19,7 @@ settings = config_dir / 'opencode.json'
 settings.write_text('{"$schema":"https://opencode.ai/config.json","username":"personal-user"}\n')
 preserved = settings.read_bytes()
 env = dict(os.environ, AI_GATEWAY='0', OPENCODE_DISABLE_MODELS_FETCH='true',
-           OPENCODE_DISABLE_AUTOUPDATE='true')
+           OPENCODE_DISABLE_AUTOUPDATE='true', OPENCODE_PASSWORD='fixture')
 
 
 def run(*args, launcher=binary):
@@ -35,29 +36,30 @@ def run(*args, launcher=binary):
 def config(launcher=binary):
     if not v2:
         return json.loads(run('debug', 'config', launcher=launcher))
-    entries = api('config', launcher)
-    resolved = {}
-    for entry in entries:
-        if entry['type'] == 'document':
-            merge(resolved, entry['info'])
-    return resolved
-
-
-def merge(target, source):
-    for key, value in source.items():
-        if isinstance(value, dict) and isinstance(target.get(key), dict):
-            merge(target[key], value)
-        elif isinstance(value, list) and isinstance(target.get(key), list):
-            target[key].extend(value)
-        else:
-            target[key] = value
+    # The personal fixture and generated document have disjoint settings.
+    return {key: value for entry in api('config', launcher) if entry['type'] == 'document'
+            for key, value in entry['info'].items()}
 
 
 def api(resource, launcher=binary):
-    # These endpoints inspect the private server; debug/mcp CLI commands do not.
-    return json.loads(run('api', '--standalone', 'GET', '/api/' + resource,
-                          '--header', 'x-opencode-directory: ' + str(home),
-                          launcher=launcher))
+    with subprocess.Popen([launcher, 'serve', '--stdio', '--port', '0'], env=env,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as server:
+        try:
+            url = json.loads(server.stdout.readline())['url']
+            def get(resource):
+                return json.loads(run('api', '--server', url, 'GET', '/api/' + resource,
+                                      '--header', 'x-opencode-directory:' + str(home), launcher=launcher))
+            # Cold locations activate plugins asynchronously; this endpoint waits for activation.
+            get('integration')
+            for _ in range(60):
+                result = get(resource)
+                if resource != 'mcp' or all(s['status']['status'] != 'pending' for s in result['data']):
+                    return result
+                time.sleep(0.5)
+            raise AssertionError(result)
+        finally:
+            server.stdin.close()
+            server.wait(timeout=90)
 
 
 def servers(resolved):
