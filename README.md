@@ -267,10 +267,9 @@ automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.
 
-CI pushes every store path realised during builds and tests to the OSS cache at
-job end; `ATTIC_TOKEN` is required for main, manual runs, and same-repository PRs,
-while fork PRs build without pushing. New PR runs cancel superseded runs;
-main and manual runs do not cancel runs in progress.
+CI pushes every store path it realises to the OSS cache, so users and later runs
+fetch OMP and OpenCode instead of building them; `ATTIC_TOKEN` is required except
+on fork PRs, which build without pushing. Superseded PR runs are cancelled.
 
 For manual updates, advance `oh-my-pi.url` first, run `nix flake update`, then
 `npins --directory profiles/<name>/npins update` per profile, then
