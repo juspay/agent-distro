@@ -1,7 +1,5 @@
-#!/usr/bin/env bash
-# Publish a new pin only once every supported platform has been fetched.
-set -euo pipefail
-python3 - <<'PY'
+#!/usr/bin/env python3
+"""Publish a new pin only once every supported platform has been fetched."""
 import json
 import os
 from pathlib import Path
@@ -59,4 +57,3 @@ if version(latest) > version(before):
 
 with Path(os.environ.get('GITHUB_OUTPUT', '/dev/stdout')).open('a') as output:
     output.write(f'before={before}\nafter={after}\nlatest={latest}\n')
-PY

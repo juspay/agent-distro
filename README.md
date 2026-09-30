@@ -237,7 +237,7 @@ LiteLLM proxy used by OMP and OpenCode.
   `AI_GATEWAY=0` omits the generated provider configuration.
 - **OpenCode v2 (`opencode2`):** shares the OpenCode adapter and model cache,
   emits v2's `skills` array, `mcp.servers`, and `providers` configuration, and
-  starts interactive sessions with `--standalone` so a shared background server
+  adds `--standalone` only to interactive TUI launches so a shared background server
   cannot supply another session's config. V2 has no small-model setting, so only
   `model` is selected. For scripted runs use `opencode2 run --standalone`; for
   inspection use `opencode2 api --standalone` because v2's `debug config` and
@@ -280,7 +280,7 @@ automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.
 OpenCode v1 stays on `v1.` release tags; OpenCode v2 uses upstream’s prebuilt npm
-binaries because its Nix build is not reliable yet, with `advance-opencode-v2.sh`
+binaries because its Nix build is not reliable yet, with `advance-opencode-v2.py`
 advancing `pkgs/opencode-v2/sources.json` from upstream’s installer metadata
 (or npm’s `latest` dist-tag) only after all three platform downloads succeed.
 
@@ -289,7 +289,7 @@ fetch OMP and OpenCode instead of building them; `ATTIC_TOKEN` is required excep
 on fork PRs, which build without pushing. Superseded PR runs are cancelled.
 
 For manual updates, advance `oh-my-pi.url` and `opencode.url`, run
-`bash .github/scripts/advance-opencode-v2.sh`, then `nix flake update`,
+`python3 .github/scripts/advance-opencode-v2.py`, then `nix flake update`,
 `npins --directory profiles/<name>/npins update` per profile, and
 `bash test/update-lock.sh`.
 

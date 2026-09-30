@@ -46,7 +46,7 @@ jobs:
 
       - name: Advance the OpenCode v2 npm pin
         id: opencode2
-        run: bash .github/scripts/advance-opencode-v2.sh
+        run: python3 .github/scripts/advance-opencode-v2.py
 
       - name: Update all inputs
         id: lock

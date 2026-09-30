@@ -169,7 +169,7 @@ print(json.dumps({'hash': 'bad' if os.environ['PREFETCH'] == 'bad-hash' else 'sh
         env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', LATEST=latest,
                    METADATA=metadata, FALLBACK=fallback, PREFETCH=prefetch,
                    ORIGINAL=original, GITHUB_OUTPUT=str(output))
-        result = subprocess.run(['bash', str(SCRIPTS / 'advance-opencode-v2.sh')],
+        result = subprocess.run(['python3', str(SCRIPTS / 'advance-opencode-v2.py')],
                                 cwd=root, env=env, capture_output=True, text=True)
         return result, source, original, inode, output
 
