@@ -12,7 +12,7 @@ let
   target = targets.${system} or (throw "OpenCode v2: unsupported system ${system}");
 in
 stdenv.mkDerivation {
-  pname = "opencode";
+  pname = "opencode2";
   inherit (sources) version;
   src = fetchurl {
     url = "https://registry.npmjs.org/@opencode/cli-${target}/-/cli-${target}-${sources.version}.tgz";
@@ -27,10 +27,17 @@ stdenv.mkDerivation {
     runHook preInstall
     install -Dm755 bin/opencode "$out/libexec/opencode"
     mkdir -p "$out/bin"
+    ${lib.optionalString stdenv.hostPlatform.isLinux ''
+      # Bun sees the loader as execPath; self-spawn must re-enter this wrapper.
+      $CC -shared -fPIC ${./exec-path.c} -ldl \
+        -DLOADER='"${stdenv.cc.bintools.dynamicLinker}"' \
+        -DWRAPPER='"'"$out/bin/opencode2"'"' -o "$out/libexec/exec-path.so"
+    ''}
     makeBinaryWrapper ${if stdenv.hostPlatform.isLinux then stdenv.cc.bintools.dynamicLinker else "$out/libexec/opencode"} "$out/bin/opencode2" \
       ${lib.optionalString stdenv.hostPlatform.isLinux "--add-flags $out/libexec/opencode"} \
       --prefix PATH : ${lib.makeBinPath ([ ripgrep ] ++ lib.optional stdenv.hostPlatform.isDarwin sysctl)} \
       ${lib.optionalString stdenv.hostPlatform.isLinux "--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland ]}"} \
+      ${lib.optionalString stdenv.hostPlatform.isLinux ''--prefix LD_PRELOAD : "$out/libexec/exec-path.so"''} \
       --set OPENCODE_DISABLE_AUTOUPDATE true
     runHook postInstall
   '';

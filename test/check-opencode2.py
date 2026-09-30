@@ -2,6 +2,7 @@ from opencode_support import *
 
 assert v2
 assert re.search(r'2\.\d+\.\d+', run('--version'))
+assert str(home) in run('debug', 'paths')
 resolved = check_inventory()
 configured = servers(resolved)
 if 'kolu' in expected:
