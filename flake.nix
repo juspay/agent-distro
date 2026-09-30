@@ -1,5 +1,5 @@
 {
-  description = "Build a coding-agent distribution: Oh My Pi, Codex, Claude Code, and OpenCode preloaded with a profile of Agent Plugins";
+  description = "Build a coding-agent distribution: Oh My Pi, Codex, Claude Code, OpenCode v1, and OpenCode v2 preloaded with a profile of Agent Plugins";
 
   nixConfig = {
     extra-substituters = "https://cache.nixos.asia/oss";
@@ -36,7 +36,8 @@
   outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, ... }:
     let
       inherit (nixpkgs) lib;
-      upstream = { inherit oh-my-pi codex-cli claude-code opencode; };
+      opencode-v2 = pkgs: pkgs.callPackage ./pkgs/opencode-v2 { };
+      upstream = { inherit oh-my-pi codex-cli claude-code opencode opencode-v2; };
       mkLaunchers = import ./lib/mk-launchers.nix upstream;
       mkFlake = import ./lib/mk-flake.nix (upstream // { inherit nixpkgs; });
       systems = import ./lib/systems.nix;
@@ -72,7 +73,7 @@
         });
     in
     {
-      # The picker stays the runnable default; profile bundles install all four commands.
+      # The picker stays the runnable default; profile bundles install all five commands.
       packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; });
       homeManagerModules.default = import ./modules/home-manager.nix {
         inherit bundles;
@@ -90,6 +91,7 @@
         codex = codex-cli.packages.${system}.default;
         claude = claude-code.packages.${system}.default;
         opencode = opencode.packages.${system}.default;
+        opencode2 = opencode-v2 nixpkgs.legacyPackages.${system};
       });
 
       lib = { inherit mkLaunchers mkFlake; };

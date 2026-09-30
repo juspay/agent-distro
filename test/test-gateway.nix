@@ -1,10 +1,10 @@
-{ launchers, profile, opencode }:
+{ launchers, profile, opencodeLaunchers }:
 let common = import ./common.nix;
 in {
   name = "gateway";
   nodes.machine = { pkgs, ... }: {
     imports = [ common.baseNode ];
-    environment.systemPackages = [ launchers.omp opencode pkgs.python3 ];
+    environment.systemPackages = [ launchers.omp opencodeLaunchers.opencode opencodeLaunchers.opencode2 pkgs.python3 ];
     systemd.services.fake-gateway = {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${pkgs.python3}/bin/python ${./opencode-gateway-fixture.py}";
@@ -17,25 +17,43 @@ in {
     ${common.testPreamble}
     machine.wait_for_unit("fake-gateway.service")
     machine.wait_for_open_port(8080)
-    def opencode_config(extra=""):
-        command = f"OPENCODE_DISABLE_MODELS_FETCH=true {extra} opencode --pure debug config"
-        return json.loads(machine.succeed("su - testuser -c " + shlex.quote(command)))
-    config = opencode_config()
-    provider = config["provider"]["litellm"]
-    assert set(provider["models"]) == {"served-large", "served-small", "${profile.gateway.models.large}", "${profile.gateway.models.small}"}, config
-    assert provider["options"]["baseURL"] == "http://127.0.0.1:8080/v1"
-    # OpenCode redacts credentials in debug output; the cache keeps only an env reference.
-    assert provider["options"]["apiKey"] == "***"
-    cached = json.loads(machine.succeed("cat /home/testuser/.cache/agent-distro/opencode/*/opencode.json"))
-    assert cached["provider"]["litellm"]["options"]["apiKey"] == "{env:${profile.gateway.keyEnv}}"
-    assert config["model"] == "litellm/${profile.gateway.models.large}"
-    assert config["small_model"] == "litellm/${profile.gateway.models.small}"
-    machine.succeed("systemctl stop fake-gateway.service")
-    assert opencode_config() == config
-    fallback = opencode_config("XDG_CACHE_HOME=/home/testuser/empty-cache")
-    assert set(fallback["provider"]["litellm"]["models"]) == {"${profile.gateway.models.large}", "${profile.gateway.models.small}"}
-    assert "litellm" not in opencode_config("AI_GATEWAY=0").get("provider", {})
-    machine.fail("su - testuser -c 'env -u ${profile.gateway.keyEnv} opencode --version </dev/null'")
+    def opencode_config(binary, extra=""):
+        inspect = "--pure debug config" if binary == "opencode" else "api --standalone GET /api/config --header x-opencode-directory:/home/testuser"
+        command = f"OPENCODE_DISABLE_MODELS_FETCH=true OPENCODE_DISABLE_AUTOUPDATE=true {extra} {binary} {inspect}"
+        result = json.loads(machine.succeed("su - testuser -c " + shlex.quote(command)))
+        if binary == "opencode":
+            return result
+        # V2 exposes config sources; select the generated gateway document.
+        documents = [entry["info"] for entry in result if entry["type"] == "document"]
+        return next((info for info in documents if "litellm" in info.get("providers", {})), {})
+
+    for binary, provider_key, settings_key in [("opencode", "provider", "options"), ("opencode2", "providers", "settings")]:
+        machine.succeed("systemctl start fake-gateway.service")
+        machine.wait_for_open_port(8080)
+        config = opencode_config(binary)
+        provider = config[provider_key]["litellm"]
+        assert set(provider["models"]) == {"served-large", "served-small", "${profile.gateway.models.large}", "${profile.gateway.models.small}"}, config
+        assert provider[settings_key]["baseURL"] == "http://127.0.0.1:8080/v1"
+        cached_text = machine.succeed(f"cat /home/testuser/.cache/agent-distro/{binary}/*/opencode.json")
+        cached = json.loads(cached_text)
+        assert "test-api-key" not in cached_text
+        assert cached["model"] == "litellm/${profile.gateway.models.large}"
+        if binary == "opencode":
+            assert provider["options"]["apiKey"] == "***"
+            assert cached["provider"]["litellm"]["options"]["apiKey"] == "{env:${profile.gateway.keyEnv}}"
+            assert config["model"] == "litellm/${profile.gateway.models.large}"
+            assert config["small_model"] == "litellm/${profile.gateway.models.small}"
+        else:
+            assert provider["env"] == ["${profile.gateway.keyEnv}"]
+            assert provider["package"] == "@opencode/ai/providers/openai-compatible"
+            assert config["model"] == {"providerID": "litellm", "model": "${profile.gateway.models.large}"}
+            assert "small_model" not in cached
+        machine.succeed("systemctl stop fake-gateway.service")
+        assert opencode_config(binary) == config
+        fallback = opencode_config(binary, "XDG_CACHE_HOME=/home/testuser/empty-cache")
+        assert set(fallback[provider_key]["litellm"]["models"]) == {"${profile.gateway.models.large}", "${profile.gateway.models.small}"}
+        assert "litellm" not in opencode_config(binary, "AI_GATEWAY=0").get(provider_key, {})
+        machine.fail(f"su - testuser -c 'env -u ${profile.gateway.keyEnv} {binary} --version </dev/null'")
     CONFIG = "/home/testuser/.omp/agent/config.yml"
     # Runtime opt-out uses the same package, needs no gateway key, and must not
     # seed gateway settings before upstream OMP starts.
