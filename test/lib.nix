@@ -74,24 +74,35 @@ in
   # Bootstrap and pinning stage complete package copies in the user home.
   codexTerminal = mkCheck { diskSize = 4096; } "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
   claude = mkCheck { } "claude" "claude" "check-claude.py" [ ] { };
+  opencode = mkCheck { } "opencode" "opencode" "check-opencode.py" [ ] { AI_GATEWAY = "0"; };
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
     profiles = { ${profile.name} = profile; };
     default = profile.name;
   });
 
-  gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix { inherit launchers profile; });
+  gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix {
+    inherit launchers profile;
+    opencode = ((if mkLaunchers != null then mkLaunchers else throw "Gateway tests require mkLaunchers") {
+      inherit pkgs;
+      profile = profile // {
+        gateway = profile.gateway // { url = "http://127.0.0.1:8080"; };
+      };
+    }).opencode;
+  });
   gatewayEnv = mkCheck { } "omp" "gateway-env" "check-gateway-env.py" [ ] gatewayEnvironment;
 
   # Nonempty plugin profiles only: same home, different plugin store paths (#181).
   ompPlugins = mkCheck { } "omp" "omp-plugins" "check-omp-plugins.py" [ (updatedBin "omp") ] { };
   codexPlugins = mkCheck { } "codex" "codex-plugins" "check-codex-plugins.py" [ (updatedBin "codex") codexUpstream ] { };
   codexStaleMarketplace = mkCheck { } "codex" "codex-stale-marketplace" "check-codex-stale-marketplace.py" [ codexUpstream ] { };
+  opencodePlugins = mkCheck { } "opencode" "opencode-plugins" "check-opencode-plugins.py" [ (updatedBin "opencode") ] { AI_GATEWAY = "0"; };
   claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
 
   # Profiles containing Kolu's plugin only; the server is an offline fixture.
   ompKolu = mkCheck { } "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
   codexKolu = mkCheck { } "codex" "codex-kolu" "check-codex-kolu.py" [ koluFixture ] { };
+  opencodeKolu = mkCheck { } "opencode" "opencode-kolu" "check-opencode-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
   claudeKolu = mkCheck { } "claude" "claude-kolu" "check-claude-kolu.py" [ koluFixture ] { };
 
   # Profiles containing test/fixtures/{spec-plugin,mcp-only} only.

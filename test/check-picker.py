@@ -6,6 +6,7 @@ import pty
 import re
 import select
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -80,10 +81,16 @@ else:
 
 run(DOWN + b'\r', b'codex-cli')
 run(DOWN * 2 + b'\r', b'(Claude Code)')
+opencode_version = subprocess.check_output(
+    ['ai', '--version'],
+    env=dict(os.environ, AI_GATEWAY='0', AI_PROFILE=DEFAULT, AI_HARNESS='opencode'),
+    timeout=60,
+).strip()
+run(DOWN * 3 + b'\r', opencode_version)
 
 for index, name in enumerate(OTHERS):
     assert re.search(re.escape(name.encode()) + rb' +Codex', drawn), drawn
-    run(DOWN * (3 * (index + 1) + 1) + b'\r', b'codex-cli')
+    run(DOWN * (4 * (index + 1) + 1) + b'\r', b'codex-cli')
 
 # AI_PROFILE narrows the list to one profile, which then needs no tag and gets
 # its description back as the header.
@@ -94,7 +101,7 @@ for name in [DEFAULT] + OTHERS:
 
 # A known harness skips the list; the profile falls back to the default.
 run(None, b'codex-cli', {'AI_HARNESS': 'codex'})
-run(None, b'valid values: omp, codex, claude', {'AI_HARNESS': 'bad'}, status=1)
+run(None, b'valid values: omp, codex, claude, opencode', {'AI_HARNESS': 'bad'}, status=1)
 run(None, b'Invalid AI_PROFILE', {'AI_PROFILE': 'nonesuch'}, status=1)
 
 # Escape declines the list, which is how you leave it.
