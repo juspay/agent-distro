@@ -27,10 +27,7 @@ writeShellApplication {
   name = "codex";
   runtimeInputs = [ jq ];
   derivationArgs.version = codex.version;
-  text = ''
-    codex=${lib.getExe codex}
-    codex_version=${lib.escapeShellArg codex.version}
-  '' + builtins.readFile ./prepare-daemon.sh + lib.optionalString (plugins != [ ]) ''
+  text = builtins.readFile ./session-defaults.sh + lib.optionalString (plugins != [ ]) ''
     # The name stays fixed, but its store path changes between builds. Use the
     # native installer only when that path changes, preserving disabled plugins
     # on steady-state launches as well as unrelated config and auth.
