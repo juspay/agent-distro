@@ -90,7 +90,7 @@ class UpdateFlakeTests(unittest.TestCase):
         ]
         for (input_name, repo), (before, latest, after) in product(
                 [('oh-my-pi', 'can1357/oh-my-pi'), ('opencode', 'anomalyco/opencode')], cases):
-            with self.subTest(before=before, latest=latest), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(input=input_name, before=before, latest=latest), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 flake = root / 'flake.nix'
                 original = f'{input_name}.url = "github:{repo}/{before}";\n'
@@ -101,7 +101,7 @@ class UpdateFlakeTests(unittest.TestCase):
                 output = root / 'outputs'
                 env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
                            TEST_LATEST=latest, GITHUB_OUTPUT=str(output))
-                result = subprocess.run(['bash', str(SCRIPTS / 'advance-omp-pin.sh'), input_name, repo],
+                result = subprocess.run(['bash', str(SCRIPTS / 'advance-release-pin.sh'), input_name, repo],
                                         cwd=root, env=env, capture_output=True, text=True)
                 if after is None:
                     self.assertNotEqual(result.returncode, 0)
@@ -128,7 +128,7 @@ class UpdateFlakeTests(unittest.TestCase):
 
     def test_report_uses_resolved_versions_and_preserves_lock_log(self):
         for omp_changed, codex_changed, claude_changed, opencode_changed in product([False, True], repeat=4):
-            with self.subTest(omp=omp_changed, codex=codex_changed, claude=claude_changed), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(omp=omp_changed, codex=codex_changed, claude=claude_changed, opencode=opencode_changed), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 outputs, body = self.report(
                     root,

@@ -35,13 +35,13 @@ jobs:
         id: omp
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/advance-omp-pin.sh oh-my-pi can1357/oh-my-pi
+        run: bash .github/scripts/advance-release-pin.sh oh-my-pi can1357/oh-my-pi
 
       - name: Advance the OpenCode release pin
         id: opencode
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/advance-omp-pin.sh opencode anomalyco/opencode
+        run: bash .github/scripts/advance-release-pin.sh opencode anomalyco/opencode
 
       - name: Update all inputs
         id: lock

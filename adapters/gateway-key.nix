@@ -1,3 +1,4 @@
+# Shell fragment shared by OMP and OpenCode.
 { gum, gateway }:
 ''
   if [ -z "''${${gateway.keyEnv}:-}" ]; then

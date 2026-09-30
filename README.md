@@ -233,19 +233,11 @@ LiteLLM proxy used by OMP and OpenCode.
   generated launcher that provides `PLUGIN_ROOT`, `PLUGIN_DATA`, placeholder
   expansion, and the plugin root as working directory, as the spec requires.
   Extra user plugins compose with them; no persistent installation is needed.
-
-- **OpenCode:** loads a generated `OPENCODE_CONFIG` file with skills and MCP
-  servers. It merges after the user's global config and before the project's
-  config. The launcher leaves those files untouched; OpenCode itself adds
-  `$schema` to schema-less config files. An existing `OPENCODE_CONFIG` is
-  replaced with a warning. Stdio servers use the same plugin environment and
-  working-directory contract as Claude Code, with data under
-  `${XDG_DATA_HOME:-$HOME/.local/share}/agent-distro/plugins/<name>`.
-  A gateway uses an OpenAI-compatible provider. OpenCode cannot discover its
-  models natively, so the launcher fetches `/v1/models` and caches the config
-  under `${XDG_CACHE_HOME:-$HOME/.cache}/agent-distro/opencode/<hash>/`.
-  Offline launches reuse the cache, or fall back to the profile's large and
-  small aliases. `AI_GATEWAY=0` supplies only skills and MCP configuration.
+- **OpenCode:** generates a session config with skills and MCP servers, loaded
+  through `OPENCODE_CONFIG` after global settings and before project settings.
+  Custom-provider models come from the launcher's `/v1/models` fetch, with a
+  cached list or the profile's two aliases as fallback when unavailable.
+  `AI_GATEWAY=0` omits the generated provider configuration.
 
 Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
 An invalid manifest fails the build with a message naming the field; skipped
@@ -275,7 +267,8 @@ just demo              # re-record doc/demo.gif
 python3 .github/scripts/test-update-flake.py
 ```
 
-Daily CI advances OMP's and OpenCode's release tags, updates the root lock, advances every
+Daily CI uses `.github/scripts/advance-release-pin.sh <input> <owner/repo>`
+to advance OMP's and OpenCode's release tags, updates the root lock, advances every
 `profiles/*/npins`, then updates `test/flake.lock` against this checkout. It
 opens a dependency pull request naming the harness versions and the profile
 pins that moved, approves the runs GitHub holds back for

@@ -7,6 +7,7 @@ from pathlib import Path
 def describe(name, before, after, release_url):
     if before == after:
         return [], f"**{name} unchanged (`{after}`)**"
+    # OpenCode's upstream package version carries +<rev>, but release tags do not.
     return [f"{name} {before} → {after}"], (
         f"**{name} `{before}` → `{after}`**\n\n"
         f"- release notes: {release_url}{after.split('+', 1)[0]}"
