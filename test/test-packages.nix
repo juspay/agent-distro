@@ -11,18 +11,18 @@ let
   tool = pkgs.writeShellScriptBin "profile-tool" "";
   decoy = pkgs.writeShellScriptBin "profile-tool" "";
   profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; gateway = null; };
-  mkLaunchers = bindLaunchers { oh-my-pi = stub "omp"; codex-cli = stub "codex"; claude-code = stub "claude"; };
+  mkLaunchers = bindLaunchers { oh-my-pi = stub "omp"; codex-cli = stub "codex"; claude-code = stub "claude"; opencode = stub "opencode"; };
   packaged = mkLaunchers { inherit pkgs; profile = profile // { packages = _: [ tool ]; }; };
   bare = mkLaunchers { inherit pkgs profile; };
 in
 pkgs.runCommand "packages" { } ''
-  for launcher in ${lib.escapeShellArgs (map (h: lib.getExe packaged.${h}) [ "omp" "codex" "claude" ])}; do
+  for launcher in ${lib.escapeShellArgs (map (h: lib.getExe packaged.${h}) packaged.bundle.commands)}; do
     # Ahead of the user's own PATH, so a launch runs what the build pinned.
     found=$(PATH=${decoy}/bin "$launcher")
     [ "$found" = ${tool}/bin/profile-tool ] || { echo "$launcher found $found" >&2; exit 1; }
   done
   # A profile without packages leaves PATH to the user.
-  for launcher in ${lib.escapeShellArgs (map (h: lib.getExe bare.${h}) [ "omp" "codex" "claude" ])}; do
+  for launcher in ${lib.escapeShellArgs (map (h: lib.getExe bare.${h}) bare.bundle.commands)}; do
     found=$(PATH=${decoy}/bin "$launcher")
     [ "$found" = ${decoy}/bin/profile-tool ] || { echo "$launcher found $found" >&2; exit 1; }
   done

@@ -1,5 +1,5 @@
 {
-  description = "Build a coding-agent distribution: Oh My Pi, Codex, and Claude Code preloaded with a profile of Agent Plugins";
+  description = "Build a coding-agent distribution: Oh My Pi, Codex, Claude Code, and OpenCode preloaded with a profile of Agent Plugins";
 
   nixConfig = {
     extra-substituters = "https://cache.nixos.asia/oss";
@@ -16,6 +16,9 @@
     # reproducible in between.
     oh-my-pi.url = "github:can1357/oh-my-pi/v18.4.4";
 
+    # Upstream release tag, advanced daily without overriding its nixpkgs.
+    opencode.url = "github:anomalyco/opencode/v1.18.33";
+
     # Each packaging repo tracks its current release binary and keeps its own
     # nixpkgs so packaging updates do not depend on OMP's build dependencies.
     codex-cli.url = "github:sadjow/codex-cli-nix";
@@ -30,10 +33,10 @@
     nixpkgs.follows = "oh-my-pi/nixpkgs";
   };
 
-  outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, ... }:
+  outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, ... }:
     let
       inherit (nixpkgs) lib;
-      upstream = { inherit oh-my-pi codex-cli claude-code; };
+      upstream = { inherit oh-my-pi codex-cli claude-code opencode; };
       mkLaunchers = import ./lib/mk-launchers.nix upstream;
       mkFlake = import ./lib/mk-flake.nix (upstream // { inherit nixpkgs; });
       systems = import ./lib/systems.nix;
@@ -69,7 +72,7 @@
         });
     in
     {
-      # The picker stays the runnable default; profile bundles install all three commands.
+      # The picker stays the runnable default; profile bundles install all four commands.
       packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; });
       homeManagerModules.default = import ./modules/home-manager.nix {
         inherit bundles;
@@ -86,6 +89,7 @@
         omp = oh-my-pi.packages.${system}.default;
         codex = codex-cli.packages.${system}.default;
         claude = claude-code.packages.${system}.default;
+        opencode = opencode.packages.${system}.default;
       });
 
       lib = { inherit mkLaunchers mkFlake; };

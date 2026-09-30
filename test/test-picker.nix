@@ -20,7 +20,7 @@ in
     # Without a terminal the picker says what to set instead of guessing.
     status, output = machine.execute("su - testuser -c 'ai --version </dev/null 2>&1'")
     assert status == 1, output
-    assert "Set AI_HARNESS to omp, codex, or claude" in output, output
+    assert "Set AI_HARNESS to omp, codex, claude, or opencode" in output, output
     assert "github:" not in output, output
 
     for override in ["AI_HARNESS=bad", "AI_HARNESS="]:
@@ -33,7 +33,7 @@ in
 
     # Every profile reaches every harness with no list in the way.
     for profile in ${builtins.toJSON names}:
-        for harness in ["omp", "codex", "claude"]:
+        for harness in ["omp", "codex", "claude", "opencode"]:
             machine.succeed(
                 f"su - testuser -c 'AI_GATEWAY=0 AI_PROFILE={profile} AI_HARNESS={harness} ai --version </dev/null'"
             )

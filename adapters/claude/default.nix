@@ -21,7 +21,7 @@ let
       done
   '';
   mcp = description: runCommand "claude-plugin-mcp" { } ''
-    ${python3.interpreter} ${./write-mcp.py} ${description} ${runtimeShell} ${coreutils}/bin/env "$out"
+    PYTHONPATH=${../../lib} ${python3.interpreter} ${./write-mcp.py} ${description} ${runtimeShell} ${coreutils}/bin/env "$out"
   '';
   adaptPlugin = plugin:
     let description = readPlugin plugin; in

@@ -52,7 +52,7 @@ let
 in
 {
   options.services.agent-distro = {
-    enable = lib.mkEnableOption "daily updates of the three coding agents";
+    enable = lib.mkEnableOption "daily updates of the four coding agents";
     profile = lib.mkOption {
       type = lib.types.str;
       default = defaultProfile;
