@@ -9,6 +9,10 @@ on:
   # ruleset requires, and they must report on the commit that lands on main.
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     strategy:
@@ -20,14 +24,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+      PUSH_CACHE: >-
+        ${{
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name == github.repository)
+        }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Test flake update policy and reporting
         if: runner.os == 'Linux'
         run: python3 .github/scripts/test-update-flake.py
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           github_access_token: ${{ github.token }}
           # Trust the project cache so builds pull from it (warms nix run /
@@ -36,19 +47,27 @@ jobs:
             extra-substituters = https://cache.nixos.asia/oss
             extra-trusted-public-keys = oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=
 
-      - name: Install attic and log in
-        if: env.ATTIC_TOKEN != ''
+      - name: Require cache token
+        if: env.PUSH_CACHE == 'true'
         run: |
-          nix profile install "nixpkgs#attic-client"
-          attic login --set-default oss https://cache.nixos.asia "$ATTIC_TOKEN"
-
-      - name: Build all flake outputs and push to nixos.asia cache
-        run: |
-          outs=$(nix build github:srid/devour-flake -L --no-link --print-out-paths \
-            --override-input flake .)
-          if [ -n "$ATTIC_TOKEN" ]; then
-            attic push oss "$outs"
+          if [ -z "$ATTIC_TOKEN" ]; then
+            echo "::error::ATTIC_TOKEN must be set to push builds to the OSS cache."
+            exit 1
           fi
+
+      # The cache keeps users and CI from building OMP and OpenCode from source,
+      # so a missing token is an error, not a skip.
+      - uses: ryanccn/attic-action@5635a15ef0c5462194ffbd05d1daeddc74625c3a # v0.5.0
+        if: env.PUSH_CACHE == 'true'
+        with:
+          endpoint: https://cache.nixos.asia
+          cache: oss
+          token: ${{ secrets.ATTIC_TOKEN }}
+
+      - name: Build all flake outputs
+        run: |
+          nix build github:srid/devour-flake -L --no-link \
+            --override-input flake .
 
       - name: Build the profile menu
         # The menu depends on every profile's launchers, so this builds them all.
