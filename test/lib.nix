@@ -76,11 +76,13 @@ in
   claude = mkCheck { } "claude" "claude" "check-claude.py" [ ] { };
   opencode = mkCheck { } "opencode" "opencode" "check-opencode.py" [ ] { AI_GATEWAY = "0"; };
   opencode2 = mkCheck { } "opencode2" "opencode2" "check-opencode2.py" [ ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
+  pi = mkCheck { } "pi" "pi" "check-pi.py" [ ] { AI_GATEWAY = "0"; };
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
     profiles = { ${profile.name} = profile; };
     default = profile.name;
   });
+
 
   gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix {
     inherit launchers profile;
@@ -100,6 +102,8 @@ in
   opencodePlugins = mkCheck { } "opencode" "opencode-plugins" "check-opencode-plugins.py" [ (updatedBin "opencode") ] { AI_GATEWAY = "0"; };
   opencode2Plugins = mkCheck { } "opencode2" "opencode2-plugins" "check-opencode2-plugins.py" [ (updatedBin "opencode2") ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
   claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
+  piPlugins = mkCheck { } "pi" "pi-plugins" "check-pi-plugins.py" [ (updatedBin "pi") ] { AI_GATEWAY = "0"; };
+
 
   # Profiles containing Kolu's plugin only; the server is an offline fixture.
   ompKolu = mkCheck { } "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
@@ -107,7 +111,9 @@ in
   opencodeKolu = mkCheck { } "opencode" "opencode-kolu" "check-opencode-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
   opencode2Kolu = mkCheck { } "opencode2" "opencode2-kolu" "check-opencode2-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
   claudeKolu = mkCheck { } "claude" "claude-kolu" "check-claude-kolu.py" [ koluFixture ] { };
+  piKolu = mkCheck { } "pi" "pi-kolu" "check-pi-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
 
   # Profiles containing test/fixtures/{spec-plugin,mcp-only} only.
   claudeSpec = mkCheck { } "claude" "claude-spec" "check-claude-spec.py" [ recordFixture ] { };
+  piSpec = mkCheck { } "pi" "pi-spec" "check-pi-spec.py" [ recordFixture ] { AI_GATEWAY = "0"; };
 }

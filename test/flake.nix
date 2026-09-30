@@ -34,16 +34,16 @@
     {
       checks.${system} =
         # No plugins and no gateway, so only the core launcher checks apply.
-        named "vanilla" { inherit (vanilla) omp codex codexCli codexTerminal claude opencode opencode2 picker; }
+        named "vanilla" { inherit (vanilla) omp codex codexCli codexTerminal claude opencode opencode2 pi picker; }
         # Plugins, a gateway, and Kolu's MCP server: every check applies.
         // named "juspay" {
-          inherit (juspay) omp codex codexTerminal claude opencode opencode2 picker gateway gatewayEnv
-            ompPlugins codexPlugins codexStaleMarketplace claudePlugins opencodePlugins opencode2Plugins ompKolu codexKolu claudeKolu opencodeKolu opencode2Kolu;
+          inherit (juspay) omp codex codexTerminal claude opencode opencode2 pi picker gateway gatewayEnv
+            ompPlugins codexPlugins codexStaleMarketplace claudePlugins opencodePlugins opencode2Plugins piPlugins ompKolu codexKolu claudeKolu opencodeKolu opencode2Kolu piKolu;
         }
         # MCP-only, skills-only, and every MCP shape the translation handles.
         # No `omp`: OMP 18.4.1 loads no skills from these plugins as `-e` roots
         # (the real profiles' plugins also carry harness-specific manifests).
-        // named "fixtures" { inherit (fixtures) codex claude opencode opencode2 opencodePlugins opencode2Plugins claudeSpec; }
+        // named "fixtures" { inherit (fixtures) codex claude opencode opencode2 opencodePlugins opencode2Plugins claudeSpec piSpec; }
         // {
           opencode-adapter = pkgs.runCommand "opencode-adapter-checks" { } ''
             PYTHONPATH=${agent-distro}/lib ${pkgs.python3.interpreter} ${./check-opencode-adapter.py} ${agent-distro}/adapters/opencode
@@ -76,12 +76,12 @@
           reserved-profile = assert builtins.all (name:
             !(builtins.tryEval (agent-distro.lib.mkFlake {
               profile = agent-distro.profiles.vanilla // { inherit name; };
-            })).success) [ "default" "omp" "codex" "claude" "opencode" "opencode2" ]; pkgs.runCommand "reserved-profile" { nativeBuildInputs = [ pkgs.nix ]; } ''
+            })).success) [ "default" "omp" "codex" "claude" "opencode" "opencode2" "pi" ]; pkgs.runCommand "reserved-profile" { nativeBuildInputs = [ pkgs.nix ]; } ''
             export NIX_STATE_DIR="$TMPDIR/nix-state"
-            if nix-instantiate --eval --expr '(import ${agent-distro}/lib/validate-profile.nix) { name = "opencode2"; }' 2>error; then
+            if nix-instantiate --eval --expr '(import ${agent-distro}/lib/validate-profile.nix) { name = "pi"; }' 2>error; then
+            grep -F 'Profile "pi" uses a reserved name; reserved names: default, omp, codex, claude, opencode, opencode2, pi.' error
               exit 1
             fi
-            grep -F 'Profile "opencode2" uses a reserved name; reserved names: default, omp, codex, claude, opencode, opencode2.' error
             touch "$out"
           '';
           packages = import ./test-packages.nix {

@@ -17,6 +17,7 @@ let
     claude-code = stub "claude";
     opencode = stub "opencode";
     opencode-v2 = _: (stub "opencode2").packages.${system}.default;
+    pi = stub "pi";
   };
   packaged = mkLaunchers { inherit pkgs; profile = profile // { packages = _: [ tool ]; }; };
   bare = mkLaunchers { inherit pkgs profile; };

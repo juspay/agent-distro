@@ -4,7 +4,7 @@ in {
   name = "gateway";
   nodes.machine = { pkgs, ... }: {
     imports = [ common.baseNode ];
-    environment.systemPackages = [ launchers.omp opencodeLaunchers.opencode opencodeLaunchers.opencode2 pkgs.python3 ];
+    environment.systemPackages = [ launchers.omp launchers.pi opencodeLaunchers.opencode opencodeLaunchers.opencode2 pkgs.python3 ];
     systemd.services.fake-gateway = {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${pkgs.python3}/bin/python ${./opencode-gateway-fixture.py}";
@@ -149,6 +149,59 @@ in {
     ))["value"]
     assert roles == {"default": "openai/my-model"}
     assert machine.succeed(f"cat {relocated}") == personal
+    ## Pi: gateway models, defaults, and the AI_GATEWAY=0 opt-out.
+    PI = "/home/testuser/.pi/agent"
+    run_as_user(f"mkdir -p {PI}/empty")
+    machine.succeed("systemctl start fake-gateway.service")
+    machine.wait_for_open_port(8080)
+    run_as_user("AI_GATEWAY=1 pi --version")
+    models = json.loads(run_as_user(f"cat {PI}/models.json"))["providers"]["litellm"]
+    assert {model["id"] for model in models["models"]} == {
+        "served-large", "served-small", "${profile.gateway.models.large}", "${profile.gateway.models.small}"}, models
+    assert models["baseUrl"] == "http://127.0.0.1:8080/v1", models
+    settings = json.loads(run_as_user(f"cat {PI}/settings.json"))
+    assert settings["defaultProvider"] == "litellm" and settings["defaultModel"] == "${profile.gateway.models.large}", settings
 
-  '';
+    # Served ids ride along in the cache even when the gateway is down.
+    machine.succeed("systemctl stop fake-gateway.service")
+    run_as_user("rm -rf /home/testuser/.cache /home/testuser/.pi")
+    run_as_user(f"mkdir -p {PI}")
+    run_as_user("AI_GATEWAY=1 pi --version")
+    cached = json.loads(run_as_user(f"cat /home/testuser/.cache/agent-distro/pi/*/models.json"))["providers"]["litellm"]
+    assert {model["id"] for model in cached["models"]} == {
+        "served-large", "served-small", "${profile.gateway.models.large}", "${profile.gateway.models.small}"}, cached
+    run_as_user("rm -rf /home/testuser/.cache/agent-distro")
+    run_as_user("AI_GATEWAY=1 pi --version")
+    fallback = json.loads(run_as_user(f"cat {PI}/models.json"))["providers"]["litellm"]
+    assert {model["id"] for model in fallback["models"]} == {
+        "${profile.gateway.models.large}", "${profile.gateway.models.small}"}, fallback
+
+    # Existing user settings win; unrelated models.json content survives.
+    run_as_user(f"printf '%s' '{{\"defaultModel\": \"personal/model\", \"defaultProvider\": \"personal\", \"user\": 1}}' > {PI}/settings.json")
+    run_as_user(f"printf '%s' '{{\"providers\": {{\"personal\": {{\"baseUrl\": \"x\"}}}}, \"top\": 1}}' > {PI}/models.json")
+    machine.succeed("systemctl start fake-gateway.service")
+    machine.wait_for_open_port(8080)
+    run_as_user("AI_GATEWAY=1 pi --version")
+    settings = json.loads(run_as_user(f"cat {PI}/settings.json"))
+    assert settings == {"defaultModel": "personal/model", "defaultProvider": "personal", "user": 1}, settings
+    merged_models = json.loads(run_as_user(f"cat {PI}/models.json"))
+    assert merged_models["top"] == 1 and merged_models["providers"]["personal"]["baseUrl"] == "x", merged_models
+    assert {model["id"] for model in merged_models["providers"]["litellm"]["models"]} == {
+        "served-large", "served-small", "${profile.gateway.models.large}", "${profile.gateway.models.small}"}, merged_models
+    machine.succeed("systemctl stop fake-gateway.service")
+
+    # AI_GATEWAY=0 leaves all three files alone.
+    before = run_as_user(f"cat {PI}/models.json {PI}/settings.json")
+    run_as_user("env -u ${profile.gateway.keyEnv} AI_GATEWAY=0 pi --version")
+    assert run_as_user(f"cat {PI}/models.json {PI}/settings.json") == before
+    # Missing credentials fail before launching Pi or changing config.
+    machine.fail("su - testuser -c 'env -u ${profile.gateway.keyEnv} AI_GATEWAY=1 pi --version </dev/null'")
+    assert run_as_user(f"cat {PI}/models.json {PI}/settings.json") == before
+
+    # Invalid mcp.json aborts the launch without writing.
+    run_as_user(f"printf '%s' '{{ bad' > {PI}/mcp.json")
+    machine.fail("su - testuser -c 'AI_GATEWAY=0 pi --version'")
+    assert machine.succeed(f"cat {PI}/mcp.json") == "{ bad"
+    run_as_user(f"rm {PI}/mcp.json")
+   '';
 }
