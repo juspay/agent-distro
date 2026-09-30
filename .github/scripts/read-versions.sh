@@ -7,8 +7,9 @@ set -euo pipefail
 codex_version=$(nix eval --raw .#harnesses.x86_64-linux.codex.version)
 claude_version=$(nix eval --raw .#harnesses.x86_64-linux.claude.version)
 opencode_version=$(nix eval --raw .#harnesses.x86_64-linux.opencode.version)
+opencode2_version=$(nix eval --raw .#harnesses.x86_64-linux.opencode2.version)
 # Plugin and package sources are pinned per profile with npins, where
 # `nix flake update` cannot see them.
 pins=$(python3 "$(dirname "$0")/read-pins.py")
-printf 'codex-version=%s\nclaude-version=%s\nopencode-version=%s\npins=%s\n' \
-  "$codex_version" "$claude_version" "$opencode_version" "$pins" | tee -a "$GITHUB_OUTPUT"
+printf 'codex-version=%s\nclaude-version=%s\nopencode-version=%s\nopencode2-version=%s\npins=%s\n' \
+  "$codex_version" "$claude_version" "$opencode_version" "$opencode2_version" "$pins" | tee -a "$GITHUB_OUTPUT"
