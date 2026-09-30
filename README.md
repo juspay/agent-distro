@@ -275,6 +275,7 @@ pins that moved, approves the runs GitHub holds back for
 automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.
+OpenCode’s pin stays on v1 until the adapter is ported to v2’s config schema.
 
 For manual updates, advance `oh-my-pi.url` and `opencode.url` first, run `nix flake update`, then
 `npins --directory profiles/<name>/npins update` per profile, then

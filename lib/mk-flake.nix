@@ -10,7 +10,7 @@ let
     mkLaunchers { pkgs = import nixpkgs { inherit system; }; inherit profile; });
   # Runnable outputs are shared by packages and apps; bundles have no main program.
   runnable = nixpkgs.lib.mapAttrs
-    (_: ls: { inherit (ls) omp codex claude opencode; default = ls.picker; })
+    (_: ls: nixpkgs.lib.genAttrs ls.bundle.commands (name: ls.${name}) // { default = ls.picker; })
     launchers;
   packages = nixpkgs.lib.mapAttrs
     (system: ps: ps // { ${checked.name} = launchers.${system}.bundle; })

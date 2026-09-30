@@ -9,19 +9,12 @@ from mcp_launcher import launcher
 
 
 def main(out, bash, env, gateway_path, *descriptions):
-    descriptions = [json.loads(Path(path).read_text()) for path in descriptions]
     owners = {}
-    for description in descriptions:
-        plugin = description['manifest']['name']
-        for name in description['mcpServers']:
-            if name in owners:
-                raise SystemExit(f'OpenCode: MCP server {json.dumps(name)} is declared by both '
-                                 f'plugins {json.dumps(owners[name])} and {json.dumps(plugin)}')
-            owners[name] = plugin
     root = Path(out)
     (root / 'bin').mkdir(parents=True)
     config = {'$schema': 'https://opencode.ai/config.json', 'skills': {'paths': []}, 'mcp': {}}
-    for description in descriptions:
+    for path in descriptions:
+        description = json.loads(Path(path).read_text())
         plugin = description['manifest']['name']
         skills = root / 'skills' / plugin
         if description['skills']:
@@ -34,6 +27,10 @@ def main(out, bash, env, gateway_path, *descriptions):
                                     target], check=True)
             config['skills']['paths'].append(str(skills))
         for index, (name, server) in enumerate(description['mcpServers'].items()):
+            if name in owners:
+                raise SystemExit(f'OpenCode: MCP server {json.dumps(name)} is declared by both '
+                                 f'plugins {json.dumps(owners[name])} and {json.dumps(plugin)}')
+            owners[name] = plugin
             if server['type'] != 'stdio':
                 config['mcp'][name] = {'type': 'remote', 'url': server['url'],
                                       'headers': server['headers']}
