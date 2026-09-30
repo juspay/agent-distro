@@ -31,6 +31,7 @@ stdenv.mkDerivation {
       # Bun sees the loader as execPath; self-spawn must re-enter this wrapper.
       $CC -shared -fPIC ${./exec-path.c} -ldl \
         -DLOADER='"${stdenv.cc.bintools.dynamicLinker}"' \
+        -DSHIM='"'"$out/libexec/exec-path.so"'"' \
         -DWRAPPER='"'"$out/bin/opencode2"'"' -o "$out/libexec/exec-path.so"
     ''}
     makeBinaryWrapper ${if stdenv.hostPlatform.isLinux then stdenv.cc.bintools.dynamicLinker else "$out/libexec/opencode"} "$out/bin/opencode2" \
