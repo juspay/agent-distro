@@ -51,9 +51,9 @@ managed_package() {
   esac
 }
 
-# Codex rust-v0.159.0: codex-rs/app-server-daemon/src/managed_install.rs
-# (package_root), with PID constants in src/lib.rs. The binary does not expose
-# these names; the CLI contract check requires source review on version updates.
+# Mirrors codex-rs/app-server-daemon/src/managed_install.rs (package_root),
+# with PID constants in src/lib.rs. The CLI contract check probes the pinned
+# binary's package selection for these artifacts and precedence rules.
 check_legacy_state() {
   local root="${CODEX_HOME:-$HOME/.codex}" name path
   [[ "$root" = /* ]] || root="$PWD/$root"

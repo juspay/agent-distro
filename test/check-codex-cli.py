@@ -4,6 +4,7 @@ import pty
 import re
 import select
 import struct
+import tempfile
 import termios
 import time
 
@@ -37,11 +38,8 @@ def check_contract():
     assert values == set(value_pattern.split('|')) | {'--remote'}, (
         'Codex value-flag grammar drift', values, value_pattern)
 
-    # Reviewed at rust-v0.159.0. On upgrades review package_root/managed_codex_bin in
-    # codex-rs/app-server-daemon/src/managed_install.rs and PID constants in lib.rs.
-    # The binary does not expose artifact names. Real terminal checks guard the
-    # daemon JSON fields and package layouts; failure fixtures guard diagnostics.
-    assert run('--version').stdout.strip() == 'codex-cli 0.159.0', 'Re-check Codex daemon source contract'
+    # Probe the pinned binary's package selection below instead of gating every
+    # release on a source review. Terminal checks cover real startup and pinning.
     legacy_names = re.search(r'legacy_artifacts=\(([^)]+)\)', prelude)[1].split()
     assert legacy_names == ['app-server.pid', 'app-server.stderr.log',
                             'app-server-updater.pid', 'app-server-updater.stderr.log']
@@ -52,7 +50,59 @@ def check_contract():
     return legacy_names, dedicated_names
 
 
+def check_package_selection(legacy_names, dedicated_names):
+    def check(artifacts=(), *, dangling=False, current=None, layout=None,
+              expected='app-server-daemon/current/bin/codex'):
+        # A separate, never-started home makes `stop` a cheap package-selection
+        # query: its JSON reports managedCodexPath without staging a release or
+        # starting a server. Empty PID files cannot refer to a running process.
+        with tempfile.TemporaryDirectory(dir=home, prefix='daemon-contract-') as directory:
+            root = Path(directory)
+            state = root / 'app-server-daemon'
+            state.mkdir()
+            for name in artifacts:
+                artifact = state / name
+                if dangling:
+                    artifact.symlink_to('missing-artifact')
+                else:
+                    artifact.touch()
+            if current:
+                path = root / 'packages/app-server-daemon/current'
+                path.parent.mkdir(parents=True)
+                if current == 'symlink':
+                    path.symlink_to('missing-release')
+                else:
+                    path.mkdir()
+            if layout:
+                binary = root / 'packages/standalone/current' / layout
+                binary.parent.mkdir(parents=True)
+                binary.touch()
+            result = subprocess.run(
+                ['codex', 'app-server', 'daemon', 'stop'],
+                env=dict(env, CODEX_HOME=directory), text=True,
+                capture_output=True, timeout=15)
+            assert result.returncode == 0, (artifacts, result.stderr)
+            selected = json.loads(result.stdout)['managedCodexPath']
+            assert selected == str(root / 'packages' / expected), (
+                'Codex daemon package-selection drift', artifacts, dangling,
+                current, layout, selected, expected)
+
+    check()
+    for dangling in [False, True]:
+        for name in legacy_names:
+            check([name], dangling=dangling, expected='standalone/current/codex')
+        for name in dedicated_names:
+            # Dedicated artifacts must override otherwise-selected legacy state.
+            check(['app-server.stderr.log', name], dangling=dangling)
+    for current in ['directory', 'symlink']:
+        check(legacy_names, current=current)
+    for layout in ['codex', 'bin/codex']:
+        check(['app-server.stderr.log'], layout=layout,
+              expected='standalone/current/' + layout)
+
+
 legacy_names, dedicated_names = check_contract()
+check_package_selection(legacy_names, dedicated_names)
 fixture = codex_home / 'fixture-codex'
 fixture.write_text('#!' + sys.executable + '\n' + r'''
 import json, os, pathlib, sys
