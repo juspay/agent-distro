@@ -4,12 +4,12 @@ assert re.search(r'\d+\.\d+\.\d+', run('--version'))
 resolved = check_inventory()
 servers = resolved.get('mcp', {})
 if 'kolu' in expected:
-    assert servers['kolu:kolu']['type'] == 'local', servers
+    assert servers['kolu']['type'] == 'local', servers
 if 'acme.spec-fixture' in expected:
-    assert servers['acme.spec-fixture:remote']['type'] == 'remote', servers
-    assert servers['acme.spec-fixture:placeholders']['type'] == 'local', servers
-    assert servers['mcp-only:bare']['type'] == 'local', servers
-    assert 'acme.spec-fixture:invalid' not in servers
+    assert servers['remote']['type'] == 'remote', servers
+    assert servers['placeholders']['type'] == 'local', servers
+    assert servers['bare']['type'] == 'local', servers
+    assert 'invalid' not in servers
 assert 'litellm' not in resolved.get('provider', {}), resolved
 env['OPENCODE_CONFIG'] = '/does-not-exist'
 result = subprocess.run(['opencode', '--pure', 'debug', 'config'], env=env,

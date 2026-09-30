@@ -9,11 +9,19 @@ from mcp_launcher import launcher
 
 
 def main(out, bash, env, gateway_path, *descriptions):
+    descriptions = [json.loads(Path(path).read_text()) for path in descriptions]
+    owners = {}
+    for description in descriptions:
+        plugin = description['manifest']['name']
+        for name in description['mcpServers']:
+            if name in owners:
+                raise SystemExit(f'OpenCode: MCP server {json.dumps(name)} is declared by both '
+                                 f'plugins {json.dumps(owners[name])} and {json.dumps(plugin)}')
+            owners[name] = plugin
     root = Path(out)
     (root / 'bin').mkdir(parents=True)
     config = {'$schema': 'https://opencode.ai/config.json', 'skills': {'paths': []}, 'mcp': {}}
-    for description_path in descriptions:
-        description = json.loads(Path(description_path).read_text())
+    for description in descriptions:
         plugin = description['manifest']['name']
         skills = root / 'skills' / plugin
         if description['skills']:
@@ -26,9 +34,8 @@ def main(out, bash, env, gateway_path, *descriptions):
                                     target], check=True)
             config['skills']['paths'].append(str(skills))
         for index, (name, server) in enumerate(description['mcpServers'].items()):
-            key = plugin + ':' + name
             if server['type'] != 'stdio':
-                config['mcp'][key] = {'type': 'remote', 'url': server['url'],
+                config['mcp'][name] = {'type': 'remote', 'url': server['url'],
                                       'headers': server['headers']}
                 continue
             if '=' in server['command'] or '=' in description['root']:
@@ -38,7 +45,7 @@ def main(out, bash, env, gateway_path, *descriptions):
             script = root / 'bin' / f'{plugin}-{index}-{re.sub(r"[^A-Za-z0-9._-]", "_", name)}'
             script.write_text(launcher(description, name, server, bash, env))
             script.chmod(0o700)
-            config['mcp'][key] = {'type': 'local', 'command': [str(script)]}
+            config['mcp'][name] = {'type': 'local', 'command': [str(script)]}
     (root / 'opencode.json').write_text(json.dumps(config, indent=2))
     gateway = json.loads(Path(gateway_path).read_text())
     if gateway is not None:

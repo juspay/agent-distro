@@ -12,11 +12,16 @@ def main(base, cache, curl, key_env):
     provider = config['provider']['litellm']
     target = Path(cache)
     try:
+        header = 'Authorization: Bearer ' + os.environ[key_env]
+        if '\r' in header or '\n' in header:
+            raise ValueError('invalid gateway key')
+        # curl's config quoting keeps credentials off the process command line.
+        header = header.replace('\\', '\\\\').replace('"', '\\"')
         response = subprocess.run(
             [curl, '--fail', '--silent', '--show-error', '--connect-timeout', '2',
-             '--max-time', '5', '--header', 'Authorization: Bearer ' + os.environ[key_env],
+             '--max-time', '5', '--config', '-',
              provider['options']['baseURL'] + '/models'],
-            capture_output=True, text=True, check=True)
+            input=f'header = "{header}"\n', capture_output=True, text=True, check=True)
         models = json.loads(response.stdout)['data']
         if not isinstance(models, list):
             raise ValueError('models data is not a list')
@@ -35,7 +40,9 @@ def main(base, cache, curl, key_env):
         finally:
             temporary.unlink(missing_ok=True)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-        pass
+        fallback = target if target.is_file() else Path(base)
+        source = 'cached model list' if fallback == target else 'two profile aliases'
+        print(f'OpenCode: gateway model discovery failed; using {source} from {fallback}', file=sys.stderr)
     print(target if target.is_file() else base)
 
 

@@ -45,6 +45,10 @@
         # (the real profiles' plugins also carry harness-specific manifests).
         // named "fixtures" { inherit (fixtures) codex claude opencode opencodePlugins claudeSpec; }
         // {
+          opencode-adapter = pkgs.runCommand "opencode-adapter-checks" { } ''
+            PYTHONPATH=${agent-distro}/lib ${pkgs.python3.interpreter} ${./check-opencode-adapter.py} ${agent-distro}/adapters/opencode
+            touch "$out"
+          '';
           # The reader alone, without a VM: invalid manifests, skipped
           # components, and a failed build that names the field.
           reader = pkgs.runCommand "read-plugin-checks"

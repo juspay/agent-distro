@@ -1,0 +1,104 @@
+"""Adapter policy checks without starting OpenCode or reaching a gateway."""
+from contextlib import redirect_stderr, redirect_stdout
+import io
+import json
+import os
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ADAPTER = Path(sys.argv.pop())
+cache_config = runpy.run_path(str(ADAPTER / 'cache-config.py'))['main']
+
+
+class AdapterTests(unittest.TestCase):
+    def test_server_names_and_collisions(self):
+        local = {'type': 'stdio', 'command': 'echo', 'args': [], 'env': {}}
+        remote = {'type': 'streamable-http', 'url': 'https://example.com/mcp', 'headers': {}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gateway = root / 'gateway.json'
+            gateway.write_text('null')
+
+            def description(plugin, server):
+                path = root / f'{plugin}.json'
+                path.write_text(json.dumps({
+                    'version': '1.0.0', 'root': str(root), 'manifest': {'name': plugin},
+                    'skills': {}, 'mcpServers': {'shared': server},
+                }))
+                return str(path)
+
+            def generate(out, *descriptions):
+                return subprocess.run(
+                    [sys.executable, str(ADAPTER / 'write-config.py'), str(out),
+                     '/bin/sh', '/usr/bin/env', str(gateway), *descriptions],
+                    capture_output=True, text=True)
+
+            first = description('first-plugin', local)
+            out = root / 'valid'
+            result = generate(out, first)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            config = json.loads((out / 'opencode.json').read_text())
+            self.assertEqual(set(config['mcp']), {'shared'})
+            for server in [local, remote]:
+                second = description('second-plugin', server)
+                for index, order in enumerate([(first, second), (second, first)]):
+                    with self.subTest(type=server['type'], order=index):
+                        result = generate(root / 'collision', *order)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn('MCP server "shared"', result.stderr)
+                        self.assertIn('"first-plugin"', result.stderr)
+                        self.assertIn('"second-plugin"', result.stderr)
+
+    def test_credentials_and_fallbacks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base, cache = root / 'base.json', root / 'cache/opencode.json'
+            base.write_text(json.dumps({'provider': {'litellm': {
+                'options': {'baseURL': 'https://gateway.example/v1', 'apiKey': '{env:TEST_KEY}'},
+                'models': {'large': {'name': 'large'}, 'small': {'name': 'small'}},
+            }}}))
+            key = 'test"key\\value'
+
+            def fetch(argv, **kwargs):
+                self.assertNotIn(key, ' '.join(argv))
+                self.assertNotIn('--header', argv)
+                self.assertEqual(argv[argv.index('--config') + 1], '-')
+                self.assertEqual(kwargs['input'], 'header = "Authorization: Bearer test\\"key\\\\value"\n')
+                return subprocess.CompletedProcess(argv, 0, '{"data":[{"id":"served"}]}')
+
+            def invoke():
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr), patch.dict(os.environ, TEST_KEY=key):
+                    cache_config(str(base), str(cache), 'curl', 'TEST_KEY')
+                return stdout.getvalue().strip(), stderr.getvalue()
+
+            with patch('subprocess.run', side_effect=fetch):
+                selected, warning = invoke()
+            self.assertEqual(selected, str(cache))
+            self.assertEqual(warning, '')
+            saved = cache.read_bytes()
+            self.assertNotIn(key.encode(), saved)
+            self.assertEqual(set(json.loads(saved)['provider']['litellm']['models']),
+                             {'served', 'large', 'small'})
+
+            with patch('subprocess.run', side_effect=OSError('unreachable')):
+                selected, warning = invoke()
+                self.assertEqual(selected, str(cache))
+                self.assertIn(f'cached model list from {cache}', warning)
+                self.assertEqual(len(warning.splitlines()), 1)
+                self.assertNotIn(key, warning)
+                self.assertEqual(cache.read_bytes(), saved)
+                cache.unlink()
+                selected, warning = invoke()
+                self.assertEqual(selected, str(base))
+                self.assertIn(f'two profile aliases from {base}', warning)
+                self.assertEqual(len(warning.splitlines()), 1)
+
+
+if __name__ == '__main__':
+    unittest.main()
