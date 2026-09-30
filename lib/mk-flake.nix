@@ -1,7 +1,7 @@
 # Bind upstream inputs once; consumers add their own outputs with //.
-{ nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, opencode-v2 }:
+{ nixpkgs, oh-my-pi, codex-cli, claude-code, opencode }:
 let
-  mkLaunchers = import ./mk-launchers.nix { inherit oh-my-pi codex-cli claude-code opencode opencode-v2; };
+  mkLaunchers = import ./mk-launchers.nix { inherit oh-my-pi codex-cli claude-code opencode; };
 in
 { profile, systems ? import ./systems.nix }:
 let

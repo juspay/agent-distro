@@ -249,22 +249,6 @@
         "type": "github"
       }
     },
-    "nixpkgs_5": {
-      "locked": {
-        "lastModified": 1790510107,
-        "narHash": "sha256-EVMNYv7hYDDD9TGVT/hIyTYgpiXA8y3m5xIEIxuGNU0=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "3181085bfd08663b6b9e60bc7a8395c2aaa741bd",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixpkgs-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "oh-my-pi": {
       "inputs": {
         "bun2nix": "bun2nix",
@@ -308,25 +292,6 @@
         "type": "github"
       }
     },
-    "opencode-v2": {
-      "inputs": {
-        "nixpkgs": "nixpkgs_5"
-      },
-      "locked": {
-        "lastModified": 1790716074,
-        "narHash": "sha256-r0SBbfOaOMXQeIbMzVXP+3xh/9330WGVddiACWojTLw=",
-        "owner": "anomalyco",
-        "repo": "opencode",
-        "rev": "84c9be93a56304a108f1a22df0c5d62c26d5b6ca",
-        "type": "github"
-      },
-      "original": {
-        "owner": "anomalyco",
-        "ref": "v2.0.20",
-        "repo": "opencode",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "claude-code": "claude-code",
@@ -336,8 +301,7 @@
           "nixpkgs"
         ],
         "oh-my-pi": "oh-my-pi",
-        "opencode": "opencode",
-        "opencode-v2": "opencode-v2"
+        "opencode": "opencode"
       }
     },
     "rust-overlay": {

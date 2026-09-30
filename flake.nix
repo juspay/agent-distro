@@ -18,7 +18,6 @@
 
     # Upstream release tag, advanced daily without overriding its nixpkgs.
     opencode.url = "github:anomalyco/opencode/v1.18.33";
-    opencode-v2.url = "github:anomalyco/opencode/v2.0.20";
 
     # Each packaging repo tracks its current release binary and keeps its own
     # nixpkgs so packaging updates do not depend on OMP's build dependencies.
@@ -34,10 +33,10 @@
     nixpkgs.follows = "oh-my-pi/nixpkgs";
   };
 
-  outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, opencode-v2, ... }:
+  outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, ... }:
     let
       inherit (nixpkgs) lib;
-      upstream = { inherit oh-my-pi codex-cli claude-code opencode opencode-v2; };
+      upstream = { inherit oh-my-pi codex-cli claude-code opencode; };
       mkLaunchers = import ./lib/mk-launchers.nix upstream;
       mkFlake = import ./lib/mk-flake.nix (upstream // { inherit nixpkgs; });
       systems = import ./lib/systems.nix;
@@ -91,7 +90,7 @@
         codex = codex-cli.packages.${system}.default;
         claude = claude-code.packages.${system}.default;
         opencode = opencode.packages.${system}.default;
-        opencode2 = opencode-v2.packages.${system}.default;
+        opencode2 = nixpkgs.legacyPackages.${system}.callPackage ./pkgs/opencode-v2 { };
       });
 
       lib = { inherit mkLaunchers mkFlake; };
