@@ -217,16 +217,10 @@ LiteLLM proxy used by OMP and OpenCode.
 - **Codex:** registers a store-built marketplace and installs plugins when its
   store path changes. Steady launches preserve disabled/removed plugins; a new
   build reinstalls them. Unrelated settings, credentials, and sessions persist.
-  Vanilla skips registration entirely. On first terminal use, Codex copies its
-  complete package into `~/.codex/packages/` (or `$CODEX_HOME/packages/`). The
-  launcher pins that background server with `app-server daemon update --from-cli
-  --yes`, and repeats this when the flake changes Codex versions, including
-  rollbacks. The server does not follow automatic release updates. Changing its
-  version restarts the shared server and may interrupt other Codex sessions.
-  A matching pinned server stays running; `--no-daemon` remains an explicit opt-out.
-  If older background-server files select a missing standalone installation,
-  the launcher stops and prints their paths and an exact removal command. It
-  leaves those files untouched until you run that command.
+  Vanilla skips registration entirely. Local sessions default to `--no-daemon`
+  to avoid experimental background-server startup failures. The launcher does
+  not install, start, or update a shared server. Explicit `--remote` connections
+  and daemon-management subcommands remain available.
 - **Claude Code:** writes each plugin as a self-contained Claude Code plugin
   root, passed with `--plugin-dir` for that session: its manifest, its
   discovered skills, and a `.mcp.json`. Each stdio MCP server runs through a
@@ -276,6 +270,10 @@ automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.
 OpenCode’s pin stays on v1 until the adapter is ported to v2’s config schema.
+
+CI pushes every store path it realises to the OSS cache, so users and later runs
+fetch OMP and OpenCode instead of building them; `ATTIC_TOKEN` is required except
+on fork PRs, which build without pushing. Superseded PR runs are cancelled.
 
 For manual updates, advance `oh-my-pi.url` and `opencode.url` first, run `nix flake update`, then
 `npins --directory profiles/<name>/npins update` per profile, then

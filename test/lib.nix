@@ -68,11 +68,10 @@ in
 {
   omp = mkCheck { } "omp" "omp" (if (profile.gateway or null) == null then "check-no-gateway.py" else "check-omp.py") [ ] { AI_GATEWAY = "0"; };
   codex = mkCheck { } "codex" "codex" "check-codex.py" [ ] { };
-  codexCli = mkCheck { } "codex" "codex-cli" "check-codex-cli.py" [ pkgs.jq ] {
-    CODEX_DAEMON_PRELUDE = "${../adapters/codex/prepare-daemon.sh}";
+  codexCli = mkCheck { } "codex" "codex-cli" "check-codex-cli.py" [ ] {
+    CODEX_SESSION_DEFAULTS = "${../adapters/codex/session-defaults.sh}";
   };
-  # Bootstrap and pinning stage complete package copies in the user home.
-  codexTerminal = mkCheck { diskSize = 4096; } "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
+  codexTerminal = mkCheck { } "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
   claude = mkCheck { } "claude" "claude" "check-claude.py" [ ] { };
   opencode = mkCheck { } "opencode" "opencode" "check-opencode.py" [ ] { AI_GATEWAY = "0"; };
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
