@@ -41,7 +41,8 @@ jobs:
         id: opencode
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/advance-release-pin.sh opencode anomalyco/opencode
+        # The adapter targets the v1 config schema; v2 needs a separate migration.
+        run: bash .github/scripts/advance-release-pin.sh opencode anomalyco/opencode v1.
 
       - name: Update all inputs
         id: lock
@@ -69,6 +70,7 @@ jobs:
           OPENCODE_BEFORE: ${{ steps.versions-before.outputs.opencode-version }}
           OPENCODE_AFTER: ${{ steps.lock.outputs.opencode-version }}
           OPENCODE_LATEST: ${{ steps.opencode.outputs.latest }}
+          OPENCODE_TAG_PREFIX: ${{ steps.opencode.outputs.tag-prefix }}
           CODEX_BEFORE: ${{ steps.versions-before.outputs.codex-version }}
           CODEX_AFTER: ${{ steps.lock.outputs.codex-version }}
           CLAUDE_BEFORE: ${{ steps.versions-before.outputs.claude-version }}

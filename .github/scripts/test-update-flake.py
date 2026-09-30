@@ -88,9 +88,16 @@ class UpdateFlakeTests(unittest.TestCase):
             ('v18.2.4', '', None),
             ('missing', 'v18.2.5', None),
         ]
-        for (input_name, repo), (before, latest, after) in product(
+        cases = [(*case, '') for case in cases] + [
+            ('v1.18.33', 'v2.0.9', 'v2.0.9', ''),
+            ('v1.18.33', 'v2.0.9', 'v1.18.33', 'v1.'),
+            ('v1.18.33', 'v10.0.0', 'v1.18.33', 'v1.'),
+            ('v1.18.33', 'v1.18.34', 'v1.18.34', 'v1.'),
+            ('v1.18.33', 'v1.18.32', 'v1.18.33', 'v1.'),
+        ]
+        for (input_name, repo), (before, latest, after, prefix) in product(
                 [('oh-my-pi', 'can1357/oh-my-pi'), ('opencode', 'anomalyco/opencode')], cases):
-            with self.subTest(input=input_name, before=before, latest=latest), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(input=input_name, before=before, latest=latest, prefix=prefix), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 flake = root / 'flake.nix'
                 original = f'{input_name}.url = "github:{repo}/{before}";\n'
@@ -101,7 +108,10 @@ class UpdateFlakeTests(unittest.TestCase):
                 output = root / 'outputs'
                 env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
                            TEST_LATEST=latest, GITHUB_OUTPUT=str(output))
-                result = subprocess.run(['bash', str(SCRIPTS / 'advance-release-pin.sh'), input_name, repo],
+                args = ['bash', str(SCRIPTS / 'advance-release-pin.sh'), input_name, repo]
+                if prefix:
+                    args.append(prefix)
+                result = subprocess.run(args,
                                         cwd=root, env=env, capture_output=True, text=True)
                 if after is None:
                     self.assertNotEqual(result.returncode, 0)
@@ -110,14 +120,16 @@ class UpdateFlakeTests(unittest.TestCase):
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(flake.read_text(), original.replace(before, after))
-                    self.assertEqual(output.read_text(), f'before={before}\nafter={after}\nlatest={latest}\n')
+                    prefix_output = f'tag-prefix={prefix}\n' if prefix else ''
+                    self.assertEqual(output.read_text(),
+                                     f'before={before}\nafter={after}\nlatest={latest}\n' + prefix_output)
 
     def report(self, root, **overrides):
         (root / 'flake-update.log').write_text('skills revision changed\n')
         env = dict(os.environ, OMP_BEFORE='v18.2.4', OMP_AFTER='v18.2.4', OMP_LATEST='v18.2.3',
                    CODEX_BEFORE='0.153.0', CODEX_AFTER='0.153.0',
                    CLAUDE_BEFORE='2.1.273', CLAUDE_AFTER='2.1.273',
-                   OPENCODE_BEFORE='1.18.33', OPENCODE_AFTER='1.18.33', OPENCODE_LATEST='v1.18.33',
+                   OPENCODE_BEFORE='1.18.33', OPENCODE_AFTER='1.18.33', OPENCODE_LATEST='v1.18.33', OPENCODE_TAG_PREFIX='v1.',
                    PINS_BEFORE='{}', PINS_AFTER='{}',
                    GITHUB_SERVER_URL='https://github.com', GITHUB_REPOSITORY='juspay/agent-distro',
                    GITHUB_RUN_ID='123', RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(root / 'outputs'))
@@ -157,6 +169,16 @@ class UpdateFlakeTests(unittest.TestCase):
                     self.assertIn('Codex unchanged (`0.153.0`)', body)
                 if not omp_changed:
                     self.assertIn('the pin only moves forward', body)
+
+    def test_report_explains_opencode_prefix_hold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outputs, body = self.report(
+                Path(directory), OPENCODE_BEFORE='1.18.33+abcdef0',
+                OPENCODE_AFTER='1.18.33+abcdef0', OPENCODE_LATEST='v2.0.9')
+            self.assertIn('latest release is `v2.0.9`; the pin is restricted to tag prefix `v1.`.', body)
+            opencode_note = body.split('**OpenCode', 1)[1].split('**Profile pins**', 1)[0]
+            self.assertNotIn('the pin only moves forward', opencode_note)
+            self.assertNotIn('OpenCode', outputs['pr-title'])
 
     def test_report_names_pins_by_where_they_are(self):
         notes = 'https://github.com/utensils/mcp-nixos/releases/tag/'

@@ -53,7 +53,11 @@ def main():
         "https://github.com/anomalyco/opencode/releases/tag/v",
     )
     if "v" + env["OPENCODE_AFTER"].split("+", 1)[0] != env["OPENCODE_LATEST"]:
-        opencode_note += f" — latest release is `{env['OPENCODE_LATEST']}`; the pin only moves forward."
+        prefix = env.get("OPENCODE_TAG_PREFIX", "")
+        reason = (f"the pin is restricted to tag prefix `{prefix}`"
+                  if prefix and not env["OPENCODE_LATEST"].startswith(prefix)
+                  else "the pin only moves forward")
+        opencode_note += f" — latest release is `{env['OPENCODE_LATEST']}`; {reason}."
     pin_changes, pin_note = describe_pins(
         json.loads(env["PINS_BEFORE"]), json.loads(env["PINS_AFTER"]),
     )
