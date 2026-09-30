@@ -1,7 +1,7 @@
 # agent-distro
 
 **Your team's coding agents, in one command.** Package your skills, MCP servers,
-and model gateway once, and run them in Oh My Pi, Codex, Claude Code, and OpenCode.
+and model gateway once, and run them in Oh My Pi, Codex, Claude Code, OpenCode v1, and OpenCode v2.
 
 ```sh
 nix run github:juspay/agent-distro
@@ -14,7 +14,7 @@ nix run github:juspay/agent-distro
 - **Always current.** Harnesses are updated daily, and an update lands only
   after the Linux/macOS builds and the NixOS VM tests pass.
 - **Write once.** One [Agent Plugins](https://agent-plugins.org) directory works
-  in all four harnesses; the per-harness translation is done for you.
+  in all five harnesses; the per-harness translation is done for you.
 - **Composes with your setup.** Your own plugins, settings, credentials, and
   sessions stay in place.
 - **Make it yours.** `nix flake init -t github:juspay/agent-distro` starts a
@@ -36,15 +36,17 @@ The list shows every profile's harnesses, the default profile's rows first:
   vanilla  Codex
   vanilla  Claude Code
   vanilla  OpenCode
+  vanilla  OpenCode v2
   juspay   Oh My Pi
   juspay   Codex
   juspay   Claude Code
   juspay   OpenCode
+  juspay   OpenCode v2
 ```
 
 | Variable | Values | Effect |
 | --- | --- | --- |
-| `AI_HARNESS` | `omp`, `codex`, `claude`, `opencode` | Launches that harness without the list; required in scripts and non-interactive shells |
+| `AI_HARNESS` | `omp`, `codex`, `claude`, `opencode`, `opencode2` | Launches that harness without the list; required in scripts and non-interactive shells |
 | `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 
@@ -58,6 +60,7 @@ Juspay skills + Kolu, via Juspay's LiteLLM gateway
   Codex
   Claude Code
   OpenCode
+  OpenCode v2
 ```
 
 Escape or ctrl-c leaves the list.
@@ -69,7 +72,7 @@ to use it; without it, Oh My Pi is built from source.
 
 ## Install
 
-Puts `omp`, `codex`, `claude`, and `opencode` on your `PATH` and updates them daily at
+Puts `omp`, `codex`, `claude`, `opencode`, and `opencode2` on your `PATH` and updates them daily at
 12:00 UTC, an hour after upstream's update. With Home Manager:
 
 ```nix
@@ -129,11 +132,11 @@ runs `nix run github:<you>/my-distribution`, and updates with
 
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
-# → packages.<system>.{default,omp,codex,claude,opencode,<profile.name>}
-#   apps.<system>.{default,omp,codex,claude,opencode}, homeManagerModules.default
+# → packages.<system>.{default,omp,codex,claude,opencode,opencode2,<profile.name>}
+#   apps.<system>.{default,omp,codex,claude,opencode,opencode2}, homeManagerModules.default
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → { omp; codex; claude; opencode; picker; bundle; }
+# → { omp; codex; claude; opencode; opencode2; picker; bundle; }
 ```
 
 A single-profile distribution draws the narrowed list above — one profile's
@@ -145,7 +148,7 @@ outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
 
 ```nix
-environment.systemPackages = with distro.packages.${system}; [ omp codex claude opencode ];
+environment.systemPackages = with distro.packages.${system}; [ omp codex claude opencode opencode2 ];
 ```
 
 `AI_GATEWAY=0 nix run .#omp` skips gateway initialization while keeping plugins.
@@ -232,6 +235,13 @@ LiteLLM proxy used by OMP and OpenCode.
   Custom-provider models come from the launcher's `/v1/models` fetch, with a
   cached list or the profile's two aliases as fallback when unavailable.
   `AI_GATEWAY=0` omits the generated provider configuration.
+- **OpenCode v2 (`opencode2`):** shares the OpenCode adapter and model cache,
+  emits v2's `skills` array, `mcp.servers`, and `providers` configuration, and
+  starts interactive sessions with `--standalone` so a shared background server
+  cannot supply another session's config. V2 has no small-model setting, so only
+  `model` is selected. For scripted runs use `opencode2 run --standalone`; for
+  inspection use `opencode2 api --standalone` because v2's `debug config` and
+  `mcp list` commands attach to the shared service.
 
 Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
 An invalid manifest fails the build with a message naming the field; skipped
@@ -269,19 +279,21 @@ pins that moved, approves the runs GitHub holds back for
 automation-created pull requests, and squash-merges once the Linux/macOS builds
 and the VM and template checks pass — the same checks `Require CI on main`
 requires. Consumers update with `nix flake update agent-distro`.
-OpenCode’s pin stays on v1 until the adapter is ported to v2’s config schema.
+OpenCode v1 stays on `v1.` release tags; OpenCode v2 advances independently with
+`advance-release-pin.sh opencode-v2 anomalyco/opencode v2. tags`, since upstream
+publishes v2 tags without GitHub releases.
 
 CI pushes every store path it realises to the OSS cache, so users and later runs
 fetch OMP and OpenCode instead of building them; `ATTIC_TOKEN` is required except
 on fork PRs, which build without pushing. Superseded PR runs are cancelled.
 
-For manual updates, advance `oh-my-pi.url` and `opencode.url` first, run `nix flake update`, then
+For manual updates, advance `oh-my-pi.url`, `opencode.url`, and `opencode-v2.url` first, run `nix flake update`, then
 `npins --directory profiles/<name>/npins update` per profile, then
 `bash test/update-lock.sh`.
 
 Consumers can import `test/lib.nix { pkgs; launchers; profile; }` and select
-`omp`, `codex`, `claude`, `opencode`, and `picker`. Gateway tests (`gateway`, `gatewayEnv`)
-and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`, `opencodePlugins`) are
+`omp`, `codex`, `claude`, `opencode`, `opencode2`, and `picker`. Gateway tests (`gateway`, `gatewayEnv`)
+and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`, `opencodePlugins`, `opencode2Plugins`) are
 separate attributes; `gateway` and rebuild tests additionally take `mkLaunchers`. Select
 plugin rebuild tests only for nonempty skill plugins. `test/flake.nix` runs
 every applicable attribute against every profile in `profiles/` and against a
