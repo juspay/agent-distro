@@ -9,7 +9,7 @@ def describe(name, before, after, release_url):
         return [], f"**{name} unchanged (`{after}`)**"
     return [f"{name} {before} → {after}"], (
         f"**{name} `{before}` → `{after}`**\n\n"
-        f"- release notes: {release_url}{after}"
+        f"- release notes: {release_url}{after.split('+', 1)[0]}"
     )
 
 
@@ -47,10 +47,16 @@ def main():
         "Claude Code", env["CLAUDE_BEFORE"], env["CLAUDE_AFTER"],
         "https://github.com/anthropics/claude-code/releases/tag/v",
     )
+    opencode_changes, opencode_note = describe(
+        "OpenCode", env["OPENCODE_BEFORE"], env["OPENCODE_AFTER"],
+        "https://github.com/anomalyco/opencode/releases/tag/v",
+    )
+    if "v" + env["OPENCODE_AFTER"].split("+", 1)[0] != env["OPENCODE_LATEST"]:
+        opencode_note += f" — latest release is `{env['OPENCODE_LATEST']}`; the pin only moves forward."
     pin_changes, pin_note = describe_pins(
         json.loads(env["PINS_BEFORE"]), json.loads(env["PINS_AFTER"]),
     )
-    changes = omp_changes + codex_changes + claude_changes + pin_changes
+    changes = omp_changes + codex_changes + claude_changes + opencode_changes + pin_changes
     title = "chore(flake): update inputs"
     if changes:
         title += " (" + "; ".join(changes) + ")"
@@ -60,7 +66,7 @@ def main():
     body = temporary / "flake-update-body.md"
     body.write_text(
         f"Automated flake input update.\n\n{omp_note}\n\n{codex_note}\n\n{claude_note}\n\n"
-        f"{pin_note}\n\n"
+        f"{opencode_note}\n\n{pin_note}\n\n"
         "Codex packaging: https://github.com/sadjow/codex-cli-nix\n\n"
         "Claude Code packaging: https://github.com/sadjow/claude-code-nix\n\n"
         f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"

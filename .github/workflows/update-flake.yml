@@ -35,7 +35,13 @@ jobs:
         id: omp
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/advance-omp-pin.sh
+        run: bash .github/scripts/advance-omp-pin.sh oh-my-pi can1357/oh-my-pi
+
+      - name: Advance the OpenCode release pin
+        id: opencode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/advance-omp-pin.sh opencode anomalyco/opencode
 
       - name: Update all inputs
         id: lock
@@ -60,6 +66,9 @@ jobs:
           OMP_BEFORE: ${{ steps.omp.outputs.before }}
           OMP_AFTER: ${{ steps.omp.outputs.after }}
           OMP_LATEST: ${{ steps.omp.outputs.latest }}
+          OPENCODE_BEFORE: ${{ steps.versions-before.outputs.opencode-version }}
+          OPENCODE_AFTER: ${{ steps.lock.outputs.opencode-version }}
+          OPENCODE_LATEST: ${{ steps.opencode.outputs.latest }}
           CODEX_BEFORE: ${{ steps.versions-before.outputs.codex-version }}
           CODEX_AFTER: ${{ steps.lock.outputs.codex-version }}
           CLAUDE_BEFORE: ${{ steps.versions-before.outputs.claude-version }}
