@@ -2,10 +2,10 @@
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
 
 from mcp_launcher import launcher
+from skills import materialise
 
 
 def main(schema, out, bash, env, gateway_path, *descriptions):
@@ -21,16 +21,8 @@ def main(schema, out, bash, env, gateway_path, *descriptions):
     for path in descriptions:
         description = json.loads(Path(path).read_text())
         plugin = description['manifest']['name']
-        skills = root / 'skills' / plugin
         if description['skills']:
-            for name, files in description['skills'].items():
-                for file in files:
-                    target = skills / name / file
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    # Only reader-approved files, dereferenced as in Claude's adapter.
-                    subprocess.run(['cp', '-L', '--', Path(description['root']) / 'skills' / name / file,
-                                    target], check=True)
-            skills_paths.append(str(skills))
+            skills_paths.append(materialise(root, description))
         for index, (name, server) in enumerate(description['mcpServers'].items()):
             if name in owners:
                 raise SystemExit(f'OpenCode: MCP server {json.dumps(name)} is declared by both '
