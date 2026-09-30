@@ -7,8 +7,8 @@
 let
   names = [ default ] ++ lib.remove default (lib.attrNames profiles);
   others = lib.remove default names;
-  harnesses = [ "omp" "codex" "claude" "opencode" ];
-  titles = { omp = "Oh My Pi"; codex = "Codex"; claude = "Claude Code"; opencode = "OpenCode"; };
+  harnesses = [ "omp" "codex" "claude" "opencode" "opencode2" ];
+  titles = { omp = "Oh My Pi"; codex = "Codex"; claude = "Claude Code"; opencode = "OpenCode"; opencode2 = "OpenCode v2"; };
 
   widest = strings: lib.foldl' lib.max 0 (map lib.stringLength strings);
   pad = width: text: text + lib.concatStrings (lib.genList (_: " ") (width - lib.stringLength text));
@@ -44,7 +44,7 @@ let
     names);
 
   quote = lib.escapeShellArg;
-  noTty = [ "Set AI_HARNESS to omp, codex, claude, or opencode, or run this from a terminal." ]
+  noTty = [ "Set AI_HARNESS to omp, codex, claude, opencode, or opencode2, or run this from a terminal." ]
     ++ lib.optional (others != [ ])
     "Set AI_PROFILE to one of ${lib.concatStringsSep ", " names}; it defaults to ${default}.";
   # Only a registry of several profiles has a wider list to fall back to.
