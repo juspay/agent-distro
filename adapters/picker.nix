@@ -7,8 +7,8 @@
 let
   names = [ default ] ++ lib.remove default (lib.attrNames profiles);
   others = lib.remove default names;
-  harnesses = [ "omp" "codex" "claude" "opencode" "opencode2" ];
-  titles = { omp = "Oh My Pi"; codex = "Codex"; claude = "Claude Code"; opencode = "OpenCode"; opencode2 = "OpenCode v2"; };
+  harnesses = [ "omp" "codex" "claude" "opencode" "opencode2" "pi" ];
+  titles = { omp = "Oh My Pi"; codex = "Codex"; claude = "Claude Code"; opencode = "OpenCode"; opencode2 = "OpenCode v2"; pi = "Pi"; };
 
   widest = strings: lib.foldl' lib.max 0 (map lib.stringLength strings);
   pad = width: text: text + lib.concatStrings (lib.genList (_: " ") (width - lib.stringLength text));

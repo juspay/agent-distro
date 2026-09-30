@@ -1,20 +1,10 @@
 # agent-distro
 
 **Your team's coding agents, in one command.** Package your skills, MCP servers,
-and model gateway once, and run them in Oh My Pi, Codex, Claude Code, OpenCode v1, and OpenCode v2.
+and model gateway once, and run them in Oh My Pi, Codex, Claude Code, OpenCode v1, OpenCode v2, and Pi.
 
-```sh
-nix run github:juspay/agent-distro
-```
-
-![Picking a harness from the list and landing in it](./doc/demo.gif)
-
-- **Nothing to install.** Nix fetches the agent you pick; arguments after `--`
-  go straight to it.
-- **Always current.** Harnesses are updated daily, and an update lands only
-  after the Linux/macOS builds and the NixOS VM tests pass.
 - **Write once.** One [Agent Plugins](https://agent-plugins.org) directory works
-  in all five harnesses; the per-harness translation is done for you.
+  in all six harnesses; the per-harness translation is done for you.
 - **Composes with your setup.** Your own plugins, settings, credentials, and
   sessions stay in place.
 - **Make it yours.** `nix flake init -t github:juspay/agent-distro` starts a
@@ -37,16 +27,18 @@ The list shows every profile's harnesses, the default profile's rows first:
   vanilla  Claude Code
   vanilla  OpenCode
   vanilla  OpenCode v2
+  vanilla  Pi
   juspay   Oh My Pi
   juspay   Codex
   juspay   Claude Code
   juspay   OpenCode
   juspay   OpenCode v2
+  juspay   Pi
 ```
 
 | Variable | Values | Effect |
 | --- | --- | --- |
-| `AI_HARNESS` | `omp`, `codex`, `claude`, `opencode`, `opencode2` | Launches that harness without the list; required in scripts and non-interactive shells |
+| `AI_HARNESS` | `omp`, `codex`, `claude`, `opencode`, `opencode2`, `pi` | Launches that harness without the list; required in scripts and non-interactive shells |
 | `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 
@@ -61,6 +53,7 @@ Juspay skills + Kolu, via Juspay's LiteLLM gateway
   Claude Code
   OpenCode
   OpenCode v2
+  Pi
 ```
 
 Escape or ctrl-c leaves the list.
@@ -72,7 +65,7 @@ to use it; without it, Oh My Pi is built from source.
 
 ## Install
 
-Puts `omp`, `codex`, `claude`, `opencode`, and `opencode2` on your `PATH` and updates them daily at
+Puts `omp`, `codex`, `claude`, `opencode`, `opencode2`, and `pi` on your `PATH` and updates them daily at
 12:00 UTC, an hour after upstream's update. With Home Manager:
 
 ```nix
@@ -132,11 +125,11 @@ runs `nix run github:<you>/my-distribution`, and updates with
 
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
-# → packages.<system>.{default,omp,codex,claude,opencode,opencode2,<profile.name>}
-#   apps.<system>.{default,omp,codex,claude,opencode,opencode2}, homeManagerModules.default
+# → packages.<system>.{default,omp,codex,claude,opencode,opencode2,pi,<profile.name>}
+#   apps.<system>.{default,omp,codex,claude,opencode,opencode2,pi}, homeManagerModules.default
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → { omp; codex; claude; opencode; opencode2; picker; bundle; }
+# → { omp; codex; claude; opencode; opencode2; pi; picker; bundle; }
 ```
 
 A single-profile distribution draws the narrowed list above — one profile's
@@ -148,7 +141,7 @@ outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
 
 ```nix
-environment.systemPackages = with distro.packages.${system}; [ omp codex claude opencode opencode2 ];
+environment.systemPackages = with distro.packages.${system}; [ omp codex claude opencode opencode2 pi ];
 ```
 
 `AI_GATEWAY=0 nix run .#omp` skips gateway initialization while keeping plugins.
@@ -212,7 +205,7 @@ release pin to the latest release, a branch pin to its head.
 
 A **profile** is harness-independent data. A **harness** is the agent application.
 A **plugin** is a portable Agent Plugins directory. A **gateway** is an optional
-LiteLLM proxy used by OMP and OpenCode.
+LiteLLM proxy used by OMP, OpenCode, and Pi.
 
 - **OMP:** passes plugins as `-e` roots, composing with user extensions. A gateway
   prompts for its key, sets the LiteLLM environment, and fills absent model roles
@@ -242,6 +235,16 @@ LiteLLM proxy used by OMP and OpenCode.
   `model` is selected. For scripted runs use `opencode2 run --standalone`; for
   inspection use `opencode2 api --standalone` because v2's `debug config` and
   `mcp list` commands attach to the shared service.
+- **Pi:** merges its MCP servers into `~/.pi/agent/mcp.json` (or
+  `PI_CODING_AGENT_DIR`), since Pi reads only that file and nothing per-launch
+  can shadow it: our entries are keyed by server name and rewritten on every
+  launch, the user's own servers are never touched, and the write is atomic.
+  Skills are passed as `--skill` roots per plugin. Gateway models extend the
+  profile's two aliases with the launcher's `/v1/models` fetch (cached list,
+  then the aliases alone, as fallback), and absent `defaultProvider`/
+  `defaultModel` settings are filled in. `AI_GATEWAY=0` skips all of it.
+  `pi mcp list --json` and RPC (`--no-session --mode rpc`) inspect MCP servers
+  and skills without a model or credentials.
 
 Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
 An invalid manifest fails the build with a message naming the field; skipped
@@ -272,7 +275,7 @@ python3 .github/scripts/test-update-flake.py
 ```
 
 Daily CI uses `.github/scripts/advance-release-pin.sh <input> <owner/repo>`
-to advance OMP's and OpenCode's release tags, updates the root lock, advances every
+to advance OMP's, OpenCode's, and Pi's release tags, updates the root lock, advances every
 `profiles/*/npins`, then updates `test/flake.lock` against this checkout. It
 opens a dependency pull request naming the harness versions and the profile
 pins that moved, approves the runs GitHub holds back for
@@ -283,10 +286,11 @@ OpenCode v1 stays on `v1.` release tags; OpenCode v2 uses upstream’s prebuilt 
 binaries because its Nix build is not reliable yet, with `advance-opencode-v2.py`
 advancing `pkgs/opencode-v2/sources.json` from upstream’s installer metadata
 (or npm’s `latest` dist-tag) only after all three platform downloads succeed.
+Pi tracks `github:sadjow/pi-nix`, a packaging repo that pins the current release
+binary, so its source input follows pi-nix's own daily updates.
 
 CI pushes every store path it realises to the OSS cache, so users and later runs
-fetch OMP and OpenCode instead of building them; `ATTIC_TOKEN` is required except
-on fork PRs, which build without pushing. Superseded PR runs are cancelled.
+fetch OMP, OpenCode, and Pi instead of building them; `ATTIC_TOKEN` is required except
 
 For manual updates, advance `oh-my-pi.url` and `opencode.url`, run
 `python3 .github/scripts/advance-opencode-v2.py`, then `nix flake update`,
@@ -294,8 +298,8 @@ For manual updates, advance `oh-my-pi.url` and `opencode.url`, run
 `bash test/update-lock.sh`.
 
 Consumers can import `test/lib.nix { pkgs; launchers; profile; }` and select
-`omp`, `codex`, `claude`, `opencode`, `opencode2`, and `picker`. Gateway tests (`gateway`, `gatewayEnv`)
-and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`, `opencodePlugins`, `opencode2Plugins`) are
+`omp`, `codex`, `claude`, `opencode`, `opencode2`, `pi`, and `picker`. Gateway tests (`gateway`, `gatewayEnv`)
+and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`, `opencodePlugins`, `opencode2Plugins`, `piPlugins`) are
 separate attributes; `gateway` and rebuild tests additionally take `mkLaunchers`. Select
 plugin rebuild tests only for nonempty skill plugins. `test/flake.nix` runs
 every applicable attribute against every profile in `profiles/` and against a
