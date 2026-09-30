@@ -44,7 +44,7 @@ let
     names);
 
   quote = lib.escapeShellArg;
-  noTty = [ "Set AI_HARNESS to omp, codex, claude, opencode, or opencode2, or run this from a terminal." ]
+  noTty = [ "Set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, or run this from a terminal." ]
     ++ lib.optional (others != [ ])
     "Set AI_PROFILE to one of ${lib.concatStringsSep ", " names}; it defaults to ${default}.";
   # Only a registry of several profiles has a wider list to fall back to.

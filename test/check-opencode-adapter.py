@@ -18,13 +18,8 @@ cache_config = runpy.run_path(str(ADAPTER / 'cache-config.py'))['main']
 class AdapterTests(unittest.TestCase):
     schema = "v1"
 
-    @property
-    def provider_key(self):
-        return "providers" if self.schema == "v2" else "provider"
-
-    @property
-    def settings_key(self):
-        return "settings" if self.schema == "v2" else "options"
+    provider_key = "provider"
+    settings_key = "options"
 
     def test_server_names_and_collisions(self):
         local = {'type': 'stdio', 'command': 'echo', 'args': [], 'env': {}}
@@ -161,6 +156,8 @@ class AdapterTests(unittest.TestCase):
 
 class AdapterV2Tests(AdapterTests):
     schema = 'v2'
+    provider_key = 'providers'
+    settings_key = 'settings'
 
 
 if __name__ == '__main__':
