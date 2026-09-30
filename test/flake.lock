@@ -10,7 +10,8 @@
           "nixpkgs"
         ],
         "oh-my-pi": "oh-my-pi",
-        "opencode": "opencode"
+        "opencode": "opencode",
+        "pi": "pi"
       },
       "locked": {
         "path": "..",
@@ -297,6 +298,22 @@
         "type": "github"
       }
     },
+    "nixpkgs_5": {
+      "locked": {
+        "lastModified": 1788690626,
+        "narHash": "sha256-+v4I4LawmRD/mVxO7QIAerRrCkElp3YImzWkkUnvOTg=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c25784012c9982bca5b3e0de87e90bbdac8927d3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "oh-my-pi": {
       "inputs": {
         "bun2nix": "bun2nix",
@@ -337,6 +354,24 @@
         "owner": "anomalyco",
         "ref": "v1.18.33",
         "repo": "opencode",
+        "type": "github"
+      }
+    },
+    "pi": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_5"
+      },
+      "locked": {
+        "lastModified": 1790800403,
+        "narHash": "sha256-jJU7snwqI2Z5DkJzzD25yRsHNpaTIuf+qI0h4lqTprQ=",
+        "owner": "sadjow",
+        "repo": "pi-nix",
+        "rev": "a005988f819d15db87606cc1db315679db7c1fc6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sadjow",
+        "repo": "pi-nix",
         "type": "github"
       }
     },

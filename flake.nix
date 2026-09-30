@@ -1,5 +1,5 @@
 {
-  description = "Build a coding-agent distribution: Oh My Pi, Codex, Claude Code, OpenCode v1, and OpenCode v2 preloaded with a profile of Agent Plugins";
+  description = "Build a coding-agent distribution: Oh My Pi, Codex, Claude Code, OpenCode v1, OpenCode v2, and Pi preloaded with a profile of Agent Plugins";
 
   nixConfig = {
     extra-substituters = "https://cache.nixos.asia/oss";
@@ -24,6 +24,10 @@
     codex-cli.url = "github:sadjow/codex-cli-nix";
     claude-code.url = "github:sadjow/claude-code-nix";
 
+    # A packaging repo like the two above: pi-nix tracks the current release
+    # binary and keeps its own nixpkgs.
+    pi.url = "github:sadjow/pi-nix";
+
     # Upstream's package set, followed rather than shadowed. omp is built from
     # source there, so its derivation hash is the interface to every binary
     # cache — ours included — and overriding `oh-my-pi.inputs.nixpkgs` would
@@ -33,11 +37,11 @@
     nixpkgs.follows = "oh-my-pi/nixpkgs";
   };
 
-  outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, ... }:
+  outputs = { nixpkgs, oh-my-pi, codex-cli, claude-code, opencode, pi, ... }:
     let
       inherit (nixpkgs) lib;
       opencode-v2 = pkgs: pkgs.callPackage ./pkgs/opencode-v2 { };
-      upstream = { inherit oh-my-pi codex-cli claude-code opencode opencode-v2; };
+      upstream = { inherit oh-my-pi codex-cli claude-code opencode opencode-v2 pi; };
       mkLaunchers = import ./lib/mk-launchers.nix upstream;
       mkFlake = import ./lib/mk-flake.nix (upstream // { inherit nixpkgs; });
       systems = import ./lib/systems.nix;
@@ -73,7 +77,7 @@
         });
     in
     {
-      # The picker stays the runnable default; profile bundles install all five commands.
+      # The picker stays the runnable default; profile bundles install all six commands.
       packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; });
       homeManagerModules.default = import ./modules/home-manager.nix {
         inherit bundles;
@@ -92,6 +96,7 @@
         claude = claude-code.packages.${system}.default;
         opencode = opencode.packages.${system}.default;
         opencode2 = opencode-v2 nixpkgs.legacyPackages.${system};
+        pi = pi.packages.${system}.default;
       });
 
       lib = { inherit mkLaunchers mkFlake; };
