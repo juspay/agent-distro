@@ -1,4 +1,4 @@
-# Upstream's build.ts runs codesign on Darwin, but its Nix recipe supplies none.
+# Upstream's build.ts needs codesign and codesign_allocate, absent from its stdenvNoCC.
 { pkgs }:
 let
   upstream = import ../../lib/flake-source.nix {
@@ -8,6 +8,6 @@ let
 in
 if pkgs.stdenv.hostPlatform.isDarwin then
   upstream.overrideAttrs (old: {
-    nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.darwin.sigtool ];
+    nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.darwin.sigtool pkgs.darwin.cctools ];
   })
 else upstream

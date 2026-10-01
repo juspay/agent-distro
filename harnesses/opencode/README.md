@@ -10,6 +10,8 @@ OpenCode v1 uses an npins release pin bounded below v2. Its source build is
 loaded with the shared pinned flake-compat, honouring upstream’s lock to
 preserve binary-cache paths.
 
-The Darwin override supplies `codesign` from nixpkgs' `darwin.sigtool` for the
-ad-hoc signing step added in v1.18.34. Remove it when upstream's Nix recipe
-supplies its own signing tool; Linux keeps the upstream derivation unchanged.
+The Darwin override supplies `codesign` from nixpkgs' `darwin.sigtool` and
+`codesign_allocate` from `darwin.cctools` for the ad-hoc signing step added in
+v1.18.34. Upstream's `stdenvNoCC` supplies neither tool. Remove the override
+when upstream's Nix recipe supplies both; Linux keeps the upstream derivation
+unchanged.
