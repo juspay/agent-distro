@@ -103,7 +103,7 @@ nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
-Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`.
+Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`. Each run logs one line saying what it did: on Linux `journalctl --user -u agent-distro-update` shows it, and on macOS it lands in `~/.local/state/agent-distro/<source>/update.log`.
 
 ## Build your own distribution
 
