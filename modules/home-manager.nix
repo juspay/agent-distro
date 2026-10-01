@@ -31,10 +31,26 @@ let
     set -eu
     ${state}
     ${pkgs.coreutils}/bin/mkdir -p "$state"
+    # Empty before the first run: readlink -f also resolves paths that do not exist.
+    old=""
+    if [ -e "$state/current" ] || [ -L "$state/current" ]; then
+      old=$(${pkgs.coreutils}/bin/readlink -f "$state/current")
+    fi
+    status=0
     ${lib.getExe (if config.nix.package != null then config.nix.package else pkgs.nix)} build \
-      ${lib.escapeShellArg "${cfg.flake}#${cfg.profile}"} --refresh --out-link "$state/current"
+      ${lib.escapeShellArg "${cfg.flake}#${cfg.profile}"} --refresh --out-link "$state/current" || status=$?
+    if [ "$status" -ne 0 ]; then
+      ${pkgs.coreutils}/bin/echo "agent-distro: ${cfg.profile} update failed (exit $status)" >&2
+      exit "$status"
+    fi
+    new=$(${pkgs.coreutils}/bin/readlink -f "$state/current")
     ${pkgs.coreutils}/bin/date -u +%s > "$state/last-success.tmp"
     ${pkgs.coreutils}/bin/mv "$state/last-success.tmp" "$state/last-success"
+    if [ "$new" = "$old" ]; then
+      ${pkgs.coreutils}/bin/echo "agent-distro: ${cfg.profile} unchanged ($new)"
+    else
+      ${pkgs.coreutils}/bin/echo "agent-distro: ${cfg.profile} updated ''${old:-nothing} -> $new"
+    fi
   '';
   # launchd has no start-limit counter, so bound retries within this invocation.
   launchdUpdater = pkgs.writeShellScript "agent-distro-update-retry" ''
@@ -46,6 +62,7 @@ let
     for attempt in 1 2 3; do
       ${updater} && exit 0
       [ "$attempt" -lt 3 ] || exit 1
+      ${pkgs.coreutils}/bin/echo "agent-distro: attempt $attempt of 3 failed; retrying in 5 minutes" >&2
       ${pkgs.coreutils}/bin/sleep 300
     done
   '';
@@ -75,6 +92,13 @@ in
       message = "services.agent-distro.frequency on macOS supports only the default: ${defaultFrequency}.";
     }];
     home.packages = [ shims ];
+    home.activation.agent-distro-state = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      (
+        ${state}
+        # launchd opens update.log before the updater runs, and creates no directories.
+        run ${pkgs.coreutils}/bin/mkdir -p "$state"
+      )
+    '';
     home.activation.agent-distro-prune = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       (
         ${state}
@@ -111,6 +135,8 @@ in
       enable = true;
       config = {
         ProgramArguments = [ "${launchdUpdater}" ];
+        StandardOutPath = "${stateDirectory}/update.log";
+        StandardErrorPath = "${stateDirectory}/update.log";
         # Hourly wake-ups avoid encoding a UTC boundary in launchd's local time.
         StartCalendarInterval = [{ Minute = 0; }];
       };
