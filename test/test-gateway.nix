@@ -81,7 +81,7 @@ in {
     assert {m["id"] for m in provider["models"]} == aliases | {"served-large", "served-small"}
     assert provider["baseUrl"] == "http://127.0.0.1:8080/v1"
     assert provider["api"] == "openai-completions"
-    assert provider["apiKey"] == "$${profile.gateway.keyEnv}"
+    assert provider["apiKey"] == "$" + "${profile.gateway.keyEnv}", provider
     assert models["providers"]["personal"] == personal_provider
     assert pi_read("settings")["defaultProvider"] == "litellm"
     assert pi_read("settings")["defaultModel"] == "${profile.gateway.models.large}"
