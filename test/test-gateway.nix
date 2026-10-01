@@ -164,7 +164,7 @@ in {
 
     # Served ids ride along in the cache even when the gateway is down.
     machine.succeed("systemctl stop fake-gateway.service")
-    run_as_user("rm -rf /home/testuser/.cache /home/testuser/.pi")
+    run_as_user("rm -rf /home/testuser/.pi")
     run_as_user(f"mkdir -p {PI}")
     run_as_user("AI_GATEWAY=1 pi --version")
     cached = json.loads(run_as_user("cat /home/testuser/.cache/agent-distro/pi/*/models.json"))["providers"]["litellm"]
