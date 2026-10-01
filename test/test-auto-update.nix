@@ -1,5 +1,6 @@
 { pkgs, agent-distro, home-manager }:
 let
+  collision = builtins.head commands;
   commands = agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla.commands;
   homeConfig = {
     imports = [ agent-distro.homeManagerModules.default ];
@@ -59,7 +60,7 @@ in
   nodes.machine = { ... }: {
     imports = [ (import ./common.nix).baseNode home-manager.nixosModules.home-manager ];
     users.users.testuser.linger = true;
-    environment.systemPackages = [ (pkgs.writeShellScriptBin "omp" "exit 99") ];
+    environment.systemPackages = [ (pkgs.writeShellScriptBin collision "exit 99") ];
     nix.settings = {
       experimental-features = [ "nix-command" "flakes" ];
       substituters = pkgs.lib.mkForce [ ];
@@ -78,9 +79,9 @@ in
     machine.wait_for_unit("home-manager-testuser.service")
     machine.wait_for_unit("user@1000.service")
     activation = machine.succeed("journalctl -u home-manager-testuser.service --no-pager")
-    assert "warning: agent-distro PATH collision for omp: /run/current-system/sw/bin/omp; bare omp runs /home/testuser/.nix-profile/bin/omp" in activation, activation
-    assert "PATH collision for codex" not in activation, activation
-    assert "PATH collision for claude" not in activation, activation
+    assert "warning: agent-distro PATH collision for ${collision}: /run/current-system/sw/bin/${collision}; bare ${collision} runs /home/testuser/.nix-profile/bin/${collision}" in activation, activation
+    for name in ${builtins.toJSON (builtins.tail commands)}:
+        assert "PATH collision for " + name not in activation, activation
 
     def user(command):
         return "su - testuser -c " + shlex.quote(command)
@@ -89,13 +90,12 @@ in
         return user("XDG_RUNTIME_DIR=/run/user/1000 systemctl --user " + command)
 
     def journal_has(line):
-        journal = "XDG_RUNTIME_DIR=/run/user/1000 journalctl --user -u agent-distro-update --no-pager"
-        machine.wait_until_succeeds(user(journal + " | grep -F " + shlex.quote(line)))
+        journal = "journalctl _UID=1000 _SYSTEMD_USER_UNIT=agent-distro-update.service --no-pager"
+        machine.wait_until_succeeds(journal + " | grep -F " + shlex.quote(line))
 
     source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     machine.succeed("test ! -e " + state)
-    assert "pi" in ${builtins.toJSON commands}
     for name in ${builtins.toJSON commands}:
         output = machine.succeed(user(name + " --version"))
         assert "updated-" not in output, output
@@ -148,6 +148,6 @@ in
     # A greeting and a native binary before the shim must still give a precise warning.
     machine.succeed(user("printf 'export PATH=/run/current-system/sw/bin:$PATH\\n' > ~/.bash_profile"))
     warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate 2>&1"))
-    assert "PATH collision for omp: /run/current-system/sw/bin/omp; bare omp runs /run/current-system/sw/bin/omp" in warning, warning
+    assert "PATH collision for ${collision}: /run/current-system/sw/bin/${collision}; bare ${collision} runs /run/current-system/sw/bin/${collision}" in warning, warning
   '';
 }

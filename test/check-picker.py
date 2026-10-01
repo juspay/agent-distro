@@ -13,6 +13,9 @@ import time
 
 MENU = json.loads(sys.argv[1])
 DEFAULT, OTHERS = MENU['default'], MENU['others']
+ROWS = MENU['rows']
+FIRST = ROWS[0]['title'].encode()
+NAMES = [row['name'] for row in ROWS]
 DOWN = b'\x1b[B'
 ESCAPE = b'\x1b'
 CURSOR = '❯ '.encode()
@@ -45,7 +48,7 @@ def run(keys, expected, overrides=None, status=0):
         if not chunk:
             break
         output += chunk
-        if pending is not None and b'Oh My Pi' in ANSI.sub(b'', output):
+        if pending is not None and FIRST in ANSI.sub(b'', output):
             # The first frame is drawn, so gum is in its key loop.
             time.sleep(0.5)
             os.write(fd, pending)
@@ -67,45 +70,38 @@ def heading(drawn):
     return drawn.split(CURSOR)[0]
 
 
-drawn = run(b'\r', b'Oh My Pi')
+drawn = run(b'\r', FIRST)
 
 if OTHERS:
     # The whole registry: no header, and every row names its profile in a
     # column of its own.
     assert not re.search(rb'[A-Za-z]', heading(drawn)), drawn
-    assert re.search(re.escape(DEFAULT.encode()) + rb' +Oh My Pi', drawn), drawn
+    assert re.search(re.escape(DEFAULT.encode()) + rb' +' + re.escape(FIRST), drawn), drawn
 else:
     # One profile: its description heads the list and the rows need no tag.
     assert re.search(rb'[A-Za-z]', heading(drawn)), drawn
-    assert drawn.startswith(heading(drawn) + CURSOR + b'Oh My Pi'), drawn
+    assert drawn.startswith(heading(drawn) + CURSOR + FIRST), drawn
 
-run(DOWN + b'\r', b'codex-cli')
-run(DOWN * 2 + b'\r', b'(Claude Code)')
-for row, harness in enumerate(['opencode', 'opencode2', 'pi'], start=3):
-    version = subprocess.check_output(
-        ['ai', '--version'],
-        env=dict(os.environ, AI_GATEWAY='0', AI_PROFILE=DEFAULT, AI_HARNESS=harness),
-        timeout=60,
-    ).strip()
-    run(DOWN * row + b'\r', version)
-assert b'OpenCode v2' in drawn, drawn
-assert re.search(rb'(?:^|[ \r\n])Pi(?:[ \r\n]|$)', drawn), drawn
-
-for index, name in enumerate(OTHERS):
-    assert re.search(re.escape(name.encode()) + rb' +Codex', drawn), drawn
-    run(DOWN * (6 * (index + 1) + 1) + b'\r', b'codex-cli')
+for index, profile in enumerate([DEFAULT] + OTHERS):
+    for row, harness in enumerate(ROWS):
+        version = subprocess.check_output(
+            ['ai', '--version'],
+            env=dict(os.environ, AI_GATEWAY='0', AI_PROFILE=profile, AI_HARNESS=harness['name']),
+            timeout=60,
+        ).strip()
+        run(DOWN * (len(ROWS) * index + row) + b'\r', version)
 
 # AI_PROFILE narrows the list to one profile, which then needs no tag and gets
 # its description back as the header.
 for name in [DEFAULT] + OTHERS:
-    narrowed = run(b'\r', b'Oh My Pi', {'AI_PROFILE': name})
+    narrowed = run(b'\r', FIRST, {'AI_PROFILE': name})
     assert re.search(rb'[A-Za-z]', heading(narrowed)), narrowed
-    assert narrowed.startswith(heading(narrowed) + CURSOR + b'Oh My Pi'), narrowed
+    assert narrowed.startswith(heading(narrowed) + CURSOR + FIRST), narrowed
 
 # A known harness skips the list; the profile falls back to the default.
-run(None, b'codex-cli', {'AI_HARNESS': 'codex'})
-run(None, b'valid values: omp, codex, claude, opencode, opencode2, pi', {'AI_HARNESS': 'bad'}, status=1)
+run(None, subprocess.check_output(['ai', '--version'], env=dict(os.environ, AI_GATEWAY='0', AI_HARNESS=NAMES[0])).strip(), {'AI_HARNESS': NAMES[0]})
+run(None, ('valid values: ' + ', '.join(NAMES)).encode(), {'AI_HARNESS': 'bad'}, status=1)
 run(None, b'Invalid AI_PROFILE', {'AI_PROFILE': 'nonesuch'}, status=1)
 
 # Escape declines the list, which is how you leave it.
-run(ESCAPE, b'Oh My Pi')
+run(ESCAPE, FIRST)

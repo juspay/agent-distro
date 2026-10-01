@@ -5,12 +5,7 @@ Set `my-skills.url` in `flake.nix` to your Agent Plugins repository, then edit
 
 ```sh
 nix run           # choose a harness
-nix run .#omp
-nix run .#codex
-nix run .#claude
-nix run .#opencode
-nix run .#opencode2
-nix run .#pi
+nix run .#omp    # or any directory name under agent-distro/harnesses/
 AI_HARNESS=omp nix run . -- --version
 AI_GATEWAY=0 nix run .#omp   # skip gateway initialization, keep plugins
 ```
@@ -22,7 +17,7 @@ personal models in OMP or Pi if you previously used gateway defaults.
 Commit `flake.lock` for reproducible builds. Run `nix flake update` to update
 the framework and skills together.
 
-To install `omp`, `codex`, `claude`, `opencode`, `opencode2`, and `pi` and update them daily, with Home
+To install every harness and update them daily, with Home
 Manager:
 
 ```nix
@@ -37,3 +32,6 @@ Manager:
 
 Binary cache and manual install: see agent-distro's
 [Install](https://github.com/juspay/agent-distro#install).
+
+To add a harness to the framework, create `harnesses/<name>/` with `meta.nix`,
+`default.nix`, `source.nix`, and `README.md`; see [Adding a harness](https://github.com/juspay/agent-distro#adding-a-harness).

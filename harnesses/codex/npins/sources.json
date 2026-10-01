@@ -1,0 +1,18 @@
+{
+  "pins": {
+    "codex-cli-nix": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "sadjow",
+        "repo": "codex-cli-nix"
+      },
+      "branch": "main",
+      "submodules": false,
+      "revision": "65edd6ed0a1ef40e384c27d6da661a999b098f45",
+      "url": "https://github.com/sadjow/codex-cli-nix/archive/65edd6ed0a1ef40e384c27d6da661a999b098f45.tar.gz",
+      "hash": "sha256-3yzoUUAuFPx/mJaRwDklzvIiaflJ3Clu1vSH7jWxlKE="
+    }
+  },
+  "version": 8
+}

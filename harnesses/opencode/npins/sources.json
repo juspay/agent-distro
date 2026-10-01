@@ -1,0 +1,21 @@
+{
+  "pins": {
+    "opencode": {
+      "type": "GitRelease",
+      "repository": {
+        "type": "GitHub",
+        "owner": "anomalyco",
+        "repo": "opencode"
+      },
+      "submodules": false,
+      "revision": "51ef4be1d3c122f18fefb510dca8d778571f4f18",
+      "url": "https://github.com/anomalyco/opencode/archive/51ef4be1d3c122f18fefb510dca8d778571f4f18.tar.gz",
+      "hash": "sha256-x1ZG4/zsL1/EfpelNByRMi5mSHumXfmoq/LPQ3+jhrc=",
+      "pre_releases": false,
+      "version_upper_bound": "2",
+      "release_prefix": null,
+      "version": "v1.18.33"
+    }
+  },
+  "version": 8
+}

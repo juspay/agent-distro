@@ -1,7 +1,7 @@
 # agent-distro
 
 **Your team's coding agents, in one command.** Package your skills, MCP servers,
-and model gateway once, and run them in Oh My Pi, Codex, Claude Code, OpenCode v1, OpenCode v2, and Pi.
+and model gateway once, and run them in every [harness](./harnesses).
 
 ```sh
 nix run github:juspay/agent-distro
@@ -14,7 +14,7 @@ nix run github:juspay/agent-distro
 - **Always current.** Harnesses are updated daily, and an update lands only
   after the Linux/macOS builds and the NixOS VM tests pass.
 - **Write once.** One [Agent Plugins](https://agent-plugins.org) directory works
-  in all six harnesses; the per-harness translation is done for you.
+  in every harness; the per-harness translation is done for you.
 - **Composes with your setup.** Your own plugins, settings, credentials, and
   sessions stay in place.
 - **Make it yours.** `nix flake init -t github:juspay/agent-distro` starts a
@@ -48,7 +48,7 @@ The list shows every profile's harnesses, the default profile's rows first:
 
 | Variable | Values | Effect |
 | --- | --- | --- |
-| `AI_HARNESS` | `omp`, `codex`, `claude`, `opencode`, `opencode2`, `pi` | Launches that harness without the list; required in scripts and non-interactive shells |
+| `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list; required in scripts and non-interactive shells |
 | `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 
@@ -75,7 +75,7 @@ to use it; without it, Oh My Pi is built from source.
 
 ## Install
 
-Puts `omp`, `codex`, `claude`, `opencode`, `opencode2`, and `pi` on your `PATH` and updates them daily at
+Puts every harness on your `PATH` and updates them daily at
 12:00 UTC, an hour after upstream's update. With Home Manager:
 
 ```nix
@@ -135,11 +135,11 @@ runs `nix run github:<you>/my-distribution`, and updates with
 
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
-# → packages.<system>.{default,omp,codex,claude,opencode,opencode2,pi,<profile.name>}
-#   apps.<system>.{default,omp,codex,claude,opencode,opencode2,pi}, homeManagerModules.default
+# → packages.<system>: every harness, default picker, and <profile.name> bundle
+#   apps.<system>: every harness and default picker; homeManagerModules.default
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → { omp; codex; claude; opencode; opencode2; pi; picker; bundle; }
+# → every harness launcher, plus picker and bundle
 ```
 
 A single-profile distribution draws the narrowed list above — one profile's
@@ -151,7 +151,7 @@ outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
 
 ```nix
-environment.systemPackages = with distro.packages.${system}; [ omp codex claude opencode opencode2 pi ];
+environment.systemPackages = [ distro.packages.${system}.my-profile ];
 ```
 
 `AI_GATEWAY=0 nix run .#omp` skips gateway initialization while keeping plugins.
@@ -217,37 +217,7 @@ A **profile** is harness-independent data. A **harness** is the agent applicatio
 A **plugin** is a portable Agent Plugins directory. A **gateway** is an optional
 LiteLLM proxy used by OMP, Pi, and OpenCode.
 
-- **OMP:** passes plugins as `-e` roots, composing with user extensions. A gateway
-  prompts for its key, sets the LiteLLM environment, and fills absent model roles
-  in user YAML while preserving existing values and comments.
-- **Codex:** registers a store-built marketplace and installs plugins when its
-  store path changes. Steady launches preserve disabled/removed plugins; a new
-  build reinstalls them. Unrelated settings, credentials, and sessions persist.
-  Vanilla skips registration entirely. Local sessions default to `--no-daemon`
-  to avoid experimental background-server startup failures. The launcher does
-  not install, start, or update a shared server. Explicit `--remote` connections
-  and daemon-management subcommands remain available.
-- **Claude Code:** writes each plugin as a self-contained Claude Code plugin
-  root, passed with `--plugin-dir` for that session: its manifest, its
-  discovered skills, and a `.mcp.json`. Each stdio MCP server runs through a
-  generated launcher that provides `PLUGIN_ROOT`, `PLUGIN_DATA`, placeholder
-  expansion, and the plugin root as working directory, as the spec requires.
-  Extra user plugins compose with them; no persistent installation is needed.
-- **OpenCode:** generates a session config with skills and MCP servers, loaded
-  through `OPENCODE_CONFIG` after global settings and before project settings.
-  Custom-provider models come from the launcher's `/v1/models` fetch, with a
-  cached list or the profile's two aliases as fallback when unavailable.
-  `AI_GATEWAY=0` omits the generated provider configuration.
-- **OpenCode v2 (`opencode2`):** shares the OpenCode adapter and model cache,
-  emits v2's `skills` array, `mcp.servers`, and `providers` configuration, and
-  adds `--standalone` only to interactive TUI launches so a shared background server
-  cannot supply another session's config. V2 has no small-model setting, so only
-  `model` is selected. For scripted runs use `opencode2 run --standalone`; for
-  inspection use `opencode2 api --standalone` because v2's `debug config` and
-  `mcp list` commands attach to the shared service.
-- **Pi:** merges plugin MCP servers and materialized skill paths into its user
-  JSON files, preserving personal entries, auth, and sessions. Gateway models
-  share OpenCode's fetch/cache; model defaults fill only absent settings.
+Harness design notes live in each directory under [harnesses/](./harnesses).
 
 Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
 An invalid manifest fails the build with a message naming the field; skipped
@@ -277,34 +247,43 @@ just demo              # re-record doc/demo.gif
 python3 .github/scripts/test-update-flake.py
 ```
 
-Daily CI uses `.github/scripts/advance-release-pin.sh <input> <owner/repo>`
-to advance OMP's and OpenCode's release tags, updates the root lock, advances every
-`profiles/*/npins`, then updates `test/flake.lock` against this checkout. It
-opens a dependency pull request naming the harness versions and the profile
-pins that moved, approves the runs GitHub holds back for
-automation-created pull requests, and squash-merges once the Linux/macOS builds
-and the VM and template checks pass — the same checks `Require CI on main`
-requires. Consumers update with `nix flake update agent-distro`.
-OpenCode v1 stays on `v1.` release tags; OpenCode v2 uses upstream’s prebuilt npm
-binaries because its Nix build is not reliable yet, with `advance-opencode-v2.py`
-advancing `pkgs/opencode-v2/sources.json` from upstream’s installer metadata
-(or npm’s `latest` dist-tag) only after all three platform downloads succeed.
+Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
+directories under `profiles/`, `harnesses/`, and `lib/`, and runs each harness's
+`update.py`. CI then updates the root and test locks. The update report reads
+resolved versions and each harness's release-note metadata.
 
-CI pushes every store path it realises to the OSS cache, so users and later runs
-fetch OMP and OpenCode instead of building them; `ATTIC_TOKEN` is required except
-on fork PRs, which build without pushing. Superseded PR runs are cancelled.
+CI pushes realised paths to the OSS cache (`ATTIC_TOKEN` is needed except on
+fork PRs). The daily update PR merges only after the required Linux/macOS builds
+and VM/template checks pass. The update workflow approves runs GitHub holds
+back for automation-created pull requests and squash-merges after the checks
+required by `Require CI on main` pass. Superseded PR runs are cancelled.
+Consumers run `nix flake update agent-distro`.
 
-For manual updates, advance `oh-my-pi.url` and `opencode.url`, run
-`python3 .github/scripts/advance-opencode-v2.py`, then `nix flake update`,
-`npins --directory profiles/<name>/npins update` per profile, and
-`bash test/update-lock.sh`.
+For manual updates, run `bash .github/scripts/update-sources.sh`,
+`nix flake update`, and then `bash test/update-lock.sh`.
 
-Consumers can import `test/lib.nix { pkgs; launchers; profile; }` and select
-`omp`, `codex`, `claude`, `opencode`, `opencode2`, `pi`, and `picker`. Gateway tests (`gateway`, `gatewayEnv`)
-and plugin rebuild tests (`ompPlugins`, `codexPlugins`, `claudePlugins`, `opencodePlugins`, `opencode2Plugins`, `piPlugins`) are
-separate attributes; `gateway` and rebuild tests additionally take `mkLaunchers`. Select
-plugin rebuild tests only for nonempty skill plugins. `test/flake.nix` runs
-every applicable attribute against every profile in `profiles/` and against a
-test-only `fixtures` profile of spec-shaped plugins in `test/fixtures/`, plus
-`registry` — the same `picker` check over the whole registry — and `reader`,
-the plugin reader's own checks, which need no VM.
+Consumers can import `test/lib.nix { pkgs; launchers; profile; features; }`.
+Checks are selected by required features (`plugins`, `gateway`, `kolu`, `spec`)
+from each harness's metadata; `picker` is shared. Rebuild and gateway checks
+also accept `mkLaunchers`. Select plugin rebuild checks only for nonempty skill
+plugins. The test flake covers vanilla, Juspay, and spec fixtures, plus `registry`
+(the picker over the whole profile registry) and `reader` (plugin-reader checks
+without a VM).
+
+## Adding a harness
+
+Create `harnesses/<name>/` with four files: `meta.nix` (title, order,
+`releaseNotes = version: URL`, and checks), `default.nix` (the adapter accepting
+`{ pkgs, plugins, gateway, package, profileName }`), `source.nix` (`{ pkgs }` to
+package), and `README.md` (design notes). Put pins in `npins/`, scripts in `tests/`, and an
+optional custom updater in `update.py`. Nothing outside this directory needs
+registration: the picker, bundles, outputs, reserved names, checks, and daily
+report all discover it. The explicit `profileName` argument supports
+profile-specific registration, such as Codex’s marketplace name.
+
+Checks declare `{ name; script; requires ? []; packages ? []; env ? {}; diskSize ? null; }`.
+Packages can name `updated`, `upstream`, `koluFixture`, or `recordFixture`.
+`script` is VM-driver Python. Use `import ../../test/guest-script.nix ./tests/check.py`
+to run a guest script as the unprivileged VM user. Gateway checks receive the shared fake service and
+launchers configured against it. `mkLaunchers` also accepts a `sources = name: pkgs: …`
+hook for package fixtures.

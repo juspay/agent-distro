@@ -29,38 +29,26 @@ jobs:
 
       - name: Read the pinned package versions
         id: versions-before
-        run: bash .github/scripts/read-versions.sh
+        run: |
+          versions=$(bash .github/scripts/read-versions.sh)
+          pins=$(python3 .github/scripts/read-pins.py)
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+          echo "pins=$pins" >> "$GITHUB_OUTPUT"
 
-      - name: Advance the oh-my-pi release pin
-        id: omp
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/advance-release-pin.sh oh-my-pi can1357/oh-my-pi
+      - name: Advance directory-local sources
+        run: bash .github/scripts/update-sources.sh
 
-      - name: Advance the OpenCode release pin
-        id: opencode
-        env:
-          GH_TOKEN: ${{ github.token }}
-        # Keep the two major versions independently pinned.
-        run: bash .github/scripts/advance-release-pin.sh opencode anomalyco/opencode v1.
-
-      - name: Advance the OpenCode v2 npm pin
-        id: opencode2
-        run: python3 .github/scripts/advance-opencode-v2.py
-
-      - name: Update all inputs
+      - name: Update the root lock
         id: lock
         shell: bash
         run: |
           nix flake update --log-format raw 2>&1 | tee "$RUNNER_TEMP/flake-update.log"
-          # A profile's plugins and packages are pinned with npins so they stay
-          # out of the framework's lock, which also puts them out of
-          # `nix flake update`'s reach: each profile's pins are advanced here,
-          # a branch pin to its head and a release pin to the latest release.
-          for pins in profiles/*/npins; do
-            nix run nixpkgs#npins -- --directory "$pins" update
-          done
-          bash .github/scripts/read-versions.sh
+          versions=$(bash .github/scripts/read-versions.sh)
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+          pins=$(python3 .github/scripts/read-pins.py)
+          metadata=$(nix eval --json .#harnessMeta --apply "meta: meta (builtins.fromJSON ''$versions'')")
+          echo "pins=$pins" >> "$GITHUB_OUTPUT"
+          echo "metadata=$metadata" >> "$GITHUB_OUTPUT"
 
       - name: Update the test lock after the root lock
         run: bash test/update-lock.sh
@@ -68,22 +56,9 @@ jobs:
       - name: Describe the locked versions
         id: report
         env:
-          OMP_BEFORE: ${{ steps.omp.outputs.before }}
-          OMP_AFTER: ${{ steps.omp.outputs.after }}
-          OMP_LATEST: ${{ steps.omp.outputs.latest }}
-          OPENCODE_BEFORE: ${{ steps.versions-before.outputs.opencode-version }}
-          OPENCODE_AFTER: ${{ steps.lock.outputs.opencode-version }}
-          OPENCODE_LATEST: ${{ steps.opencode.outputs.latest }}
-          OPENCODE_TAG_PREFIX: ${{ steps.opencode.outputs.tag-prefix }}
-          OPENCODE2_BEFORE: ${{ steps.versions-before.outputs.opencode2-version }}
-          OPENCODE2_AFTER: ${{ steps.lock.outputs.opencode2-version }}
-          OPENCODE2_LATEST: ${{ steps.opencode2.outputs.latest }}
-          CODEX_BEFORE: ${{ steps.versions-before.outputs.codex-version }}
-          CODEX_AFTER: ${{ steps.lock.outputs.codex-version }}
-          PI_BEFORE: ${{ steps.versions-before.outputs.pi-version }}
-          PI_AFTER: ${{ steps.lock.outputs.pi-version }}
-          CLAUDE_BEFORE: ${{ steps.versions-before.outputs.claude-version }}
-          CLAUDE_AFTER: ${{ steps.lock.outputs.claude-version }}
+          VERSIONS_BEFORE: ${{ steps.versions-before.outputs.versions }}
+          VERSIONS_AFTER: ${{ steps.lock.outputs.versions }}
+          HARNESS_META: ${{ steps.lock.outputs.metadata }}
           PINS_BEFORE: ${{ steps.versions-before.outputs.pins }}
           PINS_AFTER: ${{ steps.lock.outputs.pins }}
         run: python3 .github/scripts/describe-flake-update.py
@@ -97,8 +72,9 @@ jobs:
             flake.nix
             flake.lock
             test/flake.lock
-            profiles/*/npins/sources.json
-            pkgs/opencode-v2/sources.json
+            harnesses
+            profiles
+            lib/npins
           title: ${{ steps.report.outputs.pr-title }}
           body-path: ${{ steps.report.outputs.pr-body-path }}
           commit-message: "chore(flake): update inputs"

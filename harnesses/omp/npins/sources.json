@@ -1,0 +1,21 @@
+{
+  "pins": {
+    "oh-my-pi": {
+      "type": "GitRelease",
+      "repository": {
+        "type": "GitHub",
+        "owner": "can1357",
+        "repo": "oh-my-pi"
+      },
+      "submodules": false,
+      "revision": "8ac1309bd8adaddc891eeb389c545345073875be",
+      "url": "https://github.com/can1357/oh-my-pi/archive/8ac1309bd8adaddc891eeb389c545345073875be.tar.gz",
+      "hash": "sha256-S8Oz/xYEJCIc36S9u2UWXqYYQhjFxKMMzgFiB9PRVcY=",
+      "pre_releases": false,
+      "version_upper_bound": null,
+      "release_prefix": null,
+      "version": "v18.4.4"
+    }
+  },
+  "version": 8
+}

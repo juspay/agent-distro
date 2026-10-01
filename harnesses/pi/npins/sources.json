@@ -1,0 +1,18 @@
+{
+  "pins": {
+    "pi-nix": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "sadjow",
+        "repo": "pi-nix"
+      },
+      "branch": "main",
+      "submodules": false,
+      "revision": "a005988f819d15db87606cc1db315679db7c1fc6",
+      "url": "https://github.com/sadjow/pi-nix/archive/a005988f819d15db87606cc1db315679db7c1fc6.tar.gz",
+      "hash": "sha256-jJU7snwqI2Z5DkJzzD25yRsHNpaTIuf+qI0h4lqTprQ="
+    }
+  },
+  "version": 8
+}
