@@ -1,10 +1,10 @@
-{ launchers, profile, opencodeLaunchers }:
+{ launchers, profile, gatewayLaunchers }:
 let common = import ./common.nix;
 in {
   name = "gateway";
   nodes.machine = { pkgs, ... }: {
     imports = [ common.baseNode ];
-    environment.systemPackages = [ launchers.omp launchers.pi opencodeLaunchers.opencode opencodeLaunchers.opencode2 pkgs.python3 ];
+    environment.systemPackages = [ launchers.omp gatewayLaunchers.pi gatewayLaunchers.opencode gatewayLaunchers.opencode2 pkgs.python3 ];
     systemd.services.fake-gateway = {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${pkgs.python3}/bin/python ${./opencode-gateway-fixture.py}";

@@ -85,7 +85,7 @@ in
 
   gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix {
     inherit launchers profile;
-    opencodeLaunchers = ((if mkLaunchers != null then mkLaunchers else throw "Gateway tests require mkLaunchers") {
+    gatewayLaunchers = ((if mkLaunchers != null then mkLaunchers else throw "Gateway tests require mkLaunchers") {
       inherit pkgs;
       profile = profile // {
         gateway = profile.gateway // { url = "http://127.0.0.1:8080"; };
