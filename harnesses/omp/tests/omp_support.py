@@ -9,13 +9,7 @@ import tempfile
 import time
 
 expected = json.loads(sys.argv[1])
-# Portable fixtures without an OMP extension manifest expose no skills in ACP.
-roots = [Path(root) for root in json.loads(sys.argv[4])]
-supported = set()
-for root in roots:
-    if any((root / directory / 'plugin.json').exists() for directory in ['.omp-plugin', '.claude-plugin']):
-        supported.add(json.loads((root / 'plugin.json').read_text())['name'])
-expected_skills = {skill for plugin, skills in expected.items() if plugin in supported for skill in skills}
+expected_skills = {skill for skills in expected.values() for skill in skills}
 
 
 def discover(launcher='omp', env=None):

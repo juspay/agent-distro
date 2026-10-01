@@ -67,7 +67,7 @@ let
           machine.wait_for_open_port(8080)
         ''}
         ${if driver then gatewayBody else ''
-          command = "python ${scripts}/${baseNameOf script} " + shlex.quote('${builtins.toJSON expected}') + " " + shlex.quote('${profile.name}-ai') + " " + shlex.quote('${if gateway then gatewayProfile.gateway.url else if (profile.gateway or null) == null then "" else profile.gateway.url}') + " " + shlex.quote('${builtins.toJSON (map toString profile.plugins)}')
+          command = "python ${scripts}/${baseNameOf script} " + shlex.quote('${builtins.toJSON expected}') + " " + shlex.quote('${profile.name}-ai') + " " + shlex.quote('${if gateway then gatewayProfile.gateway.url else if (profile.gateway or null) == null then "" else profile.gateway.url}')
           machine.succeed("su - testuser -c " + shlex.quote(command))
         ''}
       '';
