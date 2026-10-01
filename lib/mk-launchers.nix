@@ -1,5 +1,5 @@
 # Bind upstream binaries once; consumers supply their package set and profile.
-{ oh-my-pi, codex-cli, claude-code, opencode
+{ oh-my-pi, codex-cli, claude-code, opencode, pi
 , opencode-v2 ? (pkgs: pkgs.callPackage ../pkgs/opencode-v2 { }) }@upstream:
 { pkgs, profile }:
 let
@@ -24,8 +24,12 @@ let
         '';
       };
 
-  commands = { inherit omp codex claude opencode opencode2; };
+  commands = { inherit omp codex claude opencode opencode2 pi; };
 
+  pi = withPackages (pkgs.callPackage ../adapters/pi {
+    inherit plugins gateway;
+    pi = upstream.pi.packages.${system}.default;
+  });
   omp = withPackages (pkgs.callPackage ../adapters/omp {
     inherit plugins gateway;
     omp = oh-my-pi.packages.${system}.default;
