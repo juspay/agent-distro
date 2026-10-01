@@ -30,8 +30,10 @@ jobs:
       - name: Read the pinned package versions
         id: versions-before
         run: |
-          echo "versions=$(bash .github/scripts/read-versions.sh)" >> "$GITHUB_OUTPUT"
-          echo "pins=$(python3 .github/scripts/read-pins.py)" >> "$GITHUB_OUTPUT"
+          versions=$(bash .github/scripts/read-versions.sh)
+          pins=$(python3 .github/scripts/read-pins.py)
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+          echo "pins=$pins" >> "$GITHUB_OUTPUT"
 
       - name: Advance directory-local pins
         run: |
@@ -49,12 +51,15 @@ jobs:
 
       - name: Update the root lock
         id: lock
+        shell: bash
         run: |
           nix flake update --log-format raw 2>&1 | tee "$RUNNER_TEMP/flake-update.log"
           versions=$(bash .github/scripts/read-versions.sh)
           echo "versions=$versions" >> "$GITHUB_OUTPUT"
-          echo "pins=$(python3 .github/scripts/read-pins.py)" >> "$GITHUB_OUTPUT"
-          echo "metadata=$(nix eval --json .#harnessMeta --apply "meta: meta (builtins.fromJSON ''$versions'')")" >> "$GITHUB_OUTPUT"
+          pins=$(python3 .github/scripts/read-pins.py)
+          metadata=$(nix eval --json .#harnessMeta --apply "meta: meta (builtins.fromJSON ''$versions'')")
+          echo "pins=$pins" >> "$GITHUB_OUTPUT"
+          echo "metadata=$metadata" >> "$GITHUB_OUTPUT"
 
       - name: Update the test lock after the root lock
         run: bash test/update-lock.sh
