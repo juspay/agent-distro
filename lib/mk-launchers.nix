@@ -1,10 +1,6 @@
-# Bind upstream binaries once; consumers supply their package set and profile.
-{ oh-my-pi, codex-cli, claude-code, opencode, pi
-, opencode-v2 ? (pkgs: pkgs.callPackage ../pkgs/opencode-v2 { }) }@upstream:
-{ pkgs, profile }:
+{ pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }) }:
 let
   inherit (pkgs) lib;
-  system = pkgs.stdenv.hostPlatform.system;
   inherit (profile) plugins;
   gateway = profile.gateway or null;
 
@@ -24,42 +20,21 @@ let
         '';
       };
 
-  commands = { inherit omp codex claude opencode opencode2 pi; };
+  harnesses = (import ./discover-harnesses.nix).ordered;
+  commands = lib.genAttrs harnesses (name: withPackages (import (../harnesses + "/${name}/default.nix") {
+    inherit pkgs plugins gateway;
+    # Adapter context only; this does not change the underlying derivation.
+    package = sources name pkgs // { profileName = profile.name; };
+  }));
 
-  omp = withPackages (pkgs.callPackage ../adapters/omp {
-    inherit plugins gateway;
-    omp = oh-my-pi.packages.${system}.default;
-  });
-  codex = withPackages (pkgs.callPackage ../adapters/codex {
-    inherit plugins;
-    marketplaceName = "${profile.name}-ai";
-    codex = codex-cli.packages.${system}.default;
-  });
-  claude = withPackages (pkgs.callPackage ../adapters/claude {
-    inherit plugins;
-    claude = claude-code.packages.${system}.default;
-  });
-  opencode = withPackages (pkgs.callPackage ../adapters/opencode {
-    inherit plugins gateway;
-    opencode = upstream.opencode.packages.${system}.default;
-  });
-  opencode2 = withPackages (pkgs.callPackage ../adapters/opencode {
-    inherit plugins gateway;
-    schema = "v2";
-    opencode = opencode-v2 pkgs;
-  });
-  pi = withPackages (pkgs.callPackage ../adapters/pi {
-    inherit plugins gateway;
-    pi = upstream.pi.packages.${system}.default;
-  });
 in
 commands // {
   bundle = pkgs.symlinkJoin {
     name = "agent-distro-${profile.name}";
-    paths = builtins.attrValues commands;
-    passthru.commands = builtins.attrNames commands;
+    paths = map (name: commands.${name}) harnesses;
+    passthru.commands = harnesses;
   };
-  picker = pkgs.callPackage ../adapters/picker.nix {
+  picker = pkgs.callPackage ./picker.nix {
     default = profile.name;
     profiles.${profile.name} = { inherit profile; launchers = commands; };
   };

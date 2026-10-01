@@ -1,0 +1,12 @@
+{
+  "provider": [
+    "provider",
+    "litellm"
+  ],
+  "url": [
+    "options",
+    "baseURL"
+  ],
+  "models": "map",
+  "label": "OpenCode"
+}

@@ -1,26 +1,14 @@
 # A profile's packages are what every harness finds by bare name. Stub
 # harnesses report the lookup themselves, so this needs no VM and no network.
-{ pkgs, bindLaunchers }:
+{ pkgs, mkLaunchers }:
 let
   inherit (pkgs) lib;
-  system = pkgs.stdenv.hostPlatform.system;
-  stub = name: {
-    packages.${system}.default =
-      pkgs.writeShellScriptBin name "command -v profile-tool" // { version = "0"; };
-  };
+  sources = name: pkgs: pkgs.writeShellScriptBin name "command -v profile-tool" // { version = "0"; };
   tool = pkgs.writeShellScriptBin "profile-tool" "";
   decoy = pkgs.writeShellScriptBin "profile-tool" "";
   profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; gateway = null; };
-  mkLaunchers = bindLaunchers {
-    oh-my-pi = stub "omp";
-    codex-cli = stub "codex";
-    claude-code = stub "claude";
-    pi = stub "pi";
-    opencode = stub "opencode";
-    opencode-v2 = _: (stub "opencode2").packages.${system}.default;
-  };
-  packaged = mkLaunchers { inherit pkgs; profile = profile // { packages = _: [ tool ]; }; };
-  bare = mkLaunchers { inherit pkgs profile; };
+  packaged = mkLaunchers { inherit pkgs sources; profile = profile // { packages = _: [ tool ]; }; };
+  bare = mkLaunchers { inherit pkgs profile sources; };
 in
 pkgs.runCommand "packages" { } ''
   for launcher in ${lib.escapeShellArgs (map (h: lib.getExe packaged.${h}) packaged.bundle.commands)}; do

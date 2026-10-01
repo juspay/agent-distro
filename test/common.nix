@@ -20,6 +20,13 @@
     system.stateVersion = "24.05";
   };
 
+  gatewayNode = { pkgs, ... }: {
+    systemd.services.fake-gateway = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.ExecStart = "${pkgs.python3}/bin/python ${./support/gateway-fixture.py}";
+    };
+  };
+
   testPreamble = ''
     machine.start()
     machine.wait_for_unit("multi-user.target")

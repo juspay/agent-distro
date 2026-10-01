@@ -1,12 +1,13 @@
-# Each attribute is independent. Select only tests applicable to your profile.
-{ pkgs, launchers, profile, mkLaunchers ? null }:
+# Metadata selects the checks; shared code supplies only VM and fixture plumbing.
+{ pkgs, launchers, profile, mkLaunchers ? import ../lib/mk-launchers.nix, features ? [ ] }:
 let
+  inherit (pkgs) lib;
   common = import ./common.nix;
+  discovered = import ../lib/discover-harnesses.nix;
   expected = builtins.listToAttrs (map
     (plugin:
       let
         manifest = builtins.fromJSON (builtins.readFile "${plugin}/plugin.json");
-        # Discovery per the spec, kept independent of the reader under test.
         skills = "${plugin}/skills";
         entries = if builtins.pathExists skills then builtins.readDir skills else { };
       in
@@ -15,102 +16,75 @@ let
         value = builtins.filter (name: builtins.pathExists "${skills}/${name}/SKILL.md") (builtins.attrNames entries);
       })
     profile.plugins);
-  # Both mkLaunchers guards are lazy: vanilla checks can omit it because only
-  # plugin rebuild checks force updated or upstreamCodex. Keep the guards here.
-  updated = common.updatedLaunchers
-    (if mkLaunchers != null then mkLaunchers else throw "Plugin rebuild tests require mkLaunchers")
-    pkgs
-    profile;
-  mkCheck = { diskSize ? 1024 }: harness: name: script: extraPackages: environment:
+  updated = common.updatedLaunchers mkLaunchers pkgs profile;
+  upstream = mkLaunchers { inherit pkgs; profile = profile // { plugins = [ ]; gateway = null; }; };
+  gatewayProfile = profile // { gateway = profile.gateway // { url = "http://127.0.0.1:8080"; }; };
+  gatewayLaunchers = mkLaunchers { inherit pkgs; profile = gatewayProfile; };
+  fixtures = harness: {
+    updated = pkgs.writeShellScriptBin "${harness}-updated" ''
+      exec ${lib.getExe updated.${harness}} "$@"
+    '';
+    upstream = pkgs.writeShellScriptBin "${harness}-upstream" ''
+      exec ${lib.getExe upstream.${harness}} "$@"
+    '';
+    koluFixture = pkgs.writeShellScriptBin "kolu" ''
+      exec ${pkgs.python3}/bin/python ${./support/kolu-mcp-fixture.py} "$@"
+    '';
+    recordFixture = pkgs.writeShellScriptBin "fixture-record" ''
+      exec ${pkgs.python3}/bin/python ${./fixtures/spec-plugin/bin/record} "$@"
+    '';
+  };
+  mkCheck = harness: { name, script, requires ? [ ], packages ? [ ], env ? { }, diskSize ? null }:
     let
-      # Both OpenCode harnesses share opencode_support.py.
-      # Keep imports beside the script without coupling unrelated harness tests.
+      gateway = builtins.elem "gateway" requires;
+      selected = if gateway then gatewayLaunchers else launchers;
       scripts = builtins.path {
-        path = ./.;
-        name = "agent-distro-test-scripts";
-        filter = path: type: builtins.elem (baseNameOf path) [ script "${if harness == "opencode2" then "opencode" else harness}_support.py" ];
+        path = builtins.dirOf script;
+        name = "${harness}-test-scripts";
+        filter = path: type: type == "directory" || lib.hasSuffix ".py" path;
       };
+      body = builtins.readFile script;
+      driver = lib.hasPrefix "# nixos-test-driver" body;
+      gatewayBody = lib.replaceStrings
+        [ "@keyEnv@" "@models.large@" "@models.small@" ]
+        [ profile.gateway.keyEnv profile.gateway.models.large profile.gateway.models.small ]
+        body;
     in
     pkgs.testers.runNixOSTest {
       inherit name;
       nodes.machine = { ... }: {
-        imports = [ common.baseNode ];
-        virtualisation.diskSize = diskSize;
-        environment.systemPackages = [ launchers.${harness} pkgs.python3 ] ++ extraPackages;
-        environment.variables = environment;
+        imports = [ common.baseNode ] ++ lib.optional gateway common.gatewayNode;
+        virtualisation.diskSize = if diskSize == null then 1024 else diskSize;
+        environment.systemPackages = [ selected.${harness} pkgs.python3 ] ++ map (key: (fixtures harness).${key}) packages;
+        environment.variables = lib.optionalAttrs gateway { ${profile.gateway.keyEnv} = "test-api-key"; } // env;
       };
       testScript = ''
+        import json
         import shlex
         ${common.testPreamble}
-        command = "python ${scripts}/${script} " + shlex.quote('${builtins.toJSON expected}') + " " + shlex.quote('${profile.name}-ai') + " " + shlex.quote('${if (profile.gateway or null) == null then "" else profile.gateway.url}')
-        machine.succeed("su - testuser -c " + shlex.quote(command))
+        ${lib.optionalString gateway ''
+          machine.wait_for_unit("fake-gateway.service")
+          machine.wait_for_open_port(8080)
+        ''}
+        ${if driver then gatewayBody else ''
+          command = "python ${scripts}/${baseNameOf script} " + shlex.quote('${builtins.toJSON expected}') + " " + shlex.quote('${profile.name}-ai') + " " + shlex.quote('${if gateway then gatewayProfile.gateway.url else if (profile.gateway or null) == null then "" else profile.gateway.url}') + " " + shlex.quote('${builtins.toJSON (map toString profile.plugins)}')
+          machine.succeed("su - testuser -c " + shlex.quote(command))
+        ''}
       '';
     };
-  updatedBin = harness: pkgs.writeShellScriptBin "${harness}-updated" ''
-    exec ${pkgs.lib.getExe updated.${harness}} "$@"
-  '';
-  # A plugin-free launcher is the same upstream Codex, without registration.
-  upstreamCodex = (if mkLaunchers != null then mkLaunchers else throw "Codex rebuild tests require mkLaunchers") {
-    inherit pkgs;
-    profile = profile // { plugins = [ ]; gateway = null; };
-  };
-  codexUpstream = pkgs.writeShellScriptBin "codex-upstream" ''
-    exec ${pkgs.lib.getExe upstreamCodex.codex} "$@"
-  '';
-  koluFixture = pkgs.writeShellScriptBin "kolu" ''
-    exec ${pkgs.python3}/bin/python ${./kolu-mcp-fixture.py} "$@"
-  '';
-  # The spec fixture's recorder, on PATH for the bare-command server.
-  recordFixture = pkgs.writeShellScriptBin "fixture-record" ''
-    exec ${pkgs.python3}/bin/python ${./fixtures/spec-plugin/bin/record} "$@"
-  '';
-  gatewayEnvironment = { ${profile.gateway.keyEnv} = "test-api-key"; };
+  checks = lib.concatMap
+    (harness: map (check: { name = check.name; value = mkCheck harness check; })
+      (builtins.filter
+        (check:
+          assert builtins.all (feature: builtins.elem feature [ "plugins" "gateway" "kolu" "spec" ]) (check.requires or [ ]);
+          builtins.all (feature: builtins.elem feature features) (check.requires or [ ]))
+        discovered.metadata.${harness}.checks))
+    discovered.ordered;
 in
-{
-  omp = mkCheck { } "omp" "omp" (if (profile.gateway or null) == null then "check-no-gateway.py" else "check-omp.py") [ ] { AI_GATEWAY = "0"; };
-  codex = mkCheck { } "codex" "codex" "check-codex.py" [ ] { };
-  codexCli = mkCheck { } "codex" "codex-cli" "check-codex-cli.py" [ ] {
-    CODEX_SESSION_DEFAULTS = "${../adapters/codex/session-defaults.sh}";
-  };
-  codexTerminal = mkCheck { } "codex" "codex-terminal" "check-codex-terminal.py" [ ] { };
-  claude = mkCheck { } "claude" "claude" "check-claude.py" [ ] { };
-  opencode = mkCheck { } "opencode" "opencode" "check-opencode.py" [ ] { AI_GATEWAY = "0"; };
-  opencode2 = mkCheck { } "opencode2" "opencode2" "check-opencode2.py" [ ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
-  pi = mkCheck { } "pi" "pi" "check-pi.py" [ ] { AI_GATEWAY = "0"; };
+builtins.listToAttrs checks // {
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
     profiles = { ${profile.name} = profile; };
     default = profile.name;
   });
-
-  gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix {
-    inherit launchers profile;
-    opencodeLaunchers = ((if mkLaunchers != null then mkLaunchers else throw "Gateway tests require mkLaunchers") {
-      inherit pkgs;
-      profile = profile // {
-        gateway = profile.gateway // { url = "http://127.0.0.1:8080"; };
-      };
-    });
-  });
-  gatewayEnv = mkCheck { } "omp" "gateway-env" "check-gateway-env.py" [ ] gatewayEnvironment;
-
-  # Nonempty plugin profiles only: same home, different plugin store paths (#181).
-  piPlugins = mkCheck { } "pi" "pi-plugins" "check-pi-plugins.py" [ (updatedBin "pi") ] { AI_GATEWAY = "0"; };
-  ompPlugins = mkCheck { } "omp" "omp-plugins" "check-omp-plugins.py" [ (updatedBin "omp") ] { };
-  codexPlugins = mkCheck { } "codex" "codex-plugins" "check-codex-plugins.py" [ (updatedBin "codex") codexUpstream ] { };
-  codexStaleMarketplace = mkCheck { } "codex" "codex-stale-marketplace" "check-codex-stale-marketplace.py" [ codexUpstream ] { };
-  opencodePlugins = mkCheck { } "opencode" "opencode-plugins" "check-opencode-plugins.py" [ (updatedBin "opencode") ] { AI_GATEWAY = "0"; };
-  opencode2Plugins = mkCheck { } "opencode2" "opencode2-plugins" "check-opencode2-plugins.py" [ (updatedBin "opencode2") ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
-  claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
-
-  # Profiles containing Kolu's plugin only; the server is an offline fixture.
-  piKolu = mkCheck { } "pi" "pi-kolu" "check-pi-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
-  ompKolu = mkCheck { } "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
-  codexKolu = mkCheck { } "codex" "codex-kolu" "check-codex-kolu.py" [ koluFixture ] { };
-  opencodeKolu = mkCheck { } "opencode" "opencode-kolu" "check-opencode-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
-  opencode2Kolu = mkCheck { } "opencode2" "opencode2-kolu" "check-opencode2-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
-  claudeKolu = mkCheck { } "claude" "claude-kolu" "check-claude-kolu.py" [ koluFixture ] { };
-
-  # Profiles containing test/fixtures/{spec-plugin,mcp-only} only.
-  claudeSpec = mkCheck { } "claude" "claude-spec" "check-claude-spec.py" [ recordFixture ] { };
 }

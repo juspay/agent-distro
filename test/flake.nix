@@ -14,15 +14,15 @@
       inherit (agent-distro.lib) mkLaunchers;
       # Profiles are tested through the public builder, the same way a
       # third-party distribution reaches them.
-      suite = profile: import ./lib.nix {
-        inherit pkgs profile mkLaunchers;
+      suite = features: profile: import ./lib.nix {
+        inherit pkgs profile mkLaunchers features;
         launchers = mkLaunchers { inherit pkgs profile; };
       };
-      vanilla = suite agent-distro.profiles.vanilla;
-      juspay = suite agent-distro.profiles.juspay;
+      vanilla = suite [ ] agent-distro.profiles.vanilla;
+      juspay = suite [ "plugins" "gateway" "kolu" ] agent-distro.profiles.juspay;
       # Test-only: the plugin shapes the Agent Plugins spec allows beyond what
       # the real profiles happen to use.
-      fixtures = suite {
+      fixtures = suite [ "plugins" "spec" ] {
         name = "fixtures";
         description = "Agent Plugins test fixtures";
         plugins = [ ./fixtures/spec-plugin ./fixtures/mcp-only ./fixtures/my-skills ];
@@ -33,26 +33,21 @@
     in
     {
       checks.${system} =
-        # No plugins and no gateway, so only the core launcher checks apply.
-        named "vanilla" { inherit (vanilla) omp codex codexCli codexTerminal claude opencode opencode2 pi picker; }
-        # Plugins, a gateway, and Kolu's MCP server: every check applies.
-        // named "juspay" {
-          inherit (juspay) omp codex codexTerminal claude opencode opencode2 pi picker gateway gatewayEnv
-            ompPlugins codexPlugins codexStaleMarketplace claudePlugins opencodePlugins opencode2Plugins ompKolu codexKolu claudeKolu opencodeKolu opencode2Kolu piPlugins piKolu;
-        }
-        # MCP-only, skills-only, and every MCP shape the translation handles.
-        # No `omp`: OMP 18.4.1 loads no skills from these plugins as `-e` roots
-        # (the real profiles' plugins also carry harness-specific manifests).
-        // named "fixtures" { inherit (fixtures) codex claude opencode opencode2 pi piPlugins opencodePlugins opencode2Plugins claudeSpec; }
+        named "vanilla" vanilla
+        // named "juspay" juspay
+        // named "fixtures" fixtures
+        // lib.listToAttrs (lib.concatMap
+          (harness:
+            let directory = "${agent-distro}/harnesses/${harness}";
+            in lib.optional (builtins.pathExists "${directory}/tests/check-adapter.py") {
+              name = "${harness}-adapter";
+              value = pkgs.runCommand "${harness}-adapter-checks" { } ''
+                PYTHONPATH=${agent-distro}/lib ${pkgs.python3.interpreter} ${directory}/tests/check-adapter.py ${directory}
+                touch "$out"
+              '';
+            })
+          (import "${agent-distro}/lib/discover-harnesses.nix").ordered)
         // {
-          pi-adapter = pkgs.runCommand "pi-adapter-checks" { } ''
-            PYTHONPATH=${agent-distro}/lib ${pkgs.python3.interpreter} ${./check-pi-adapter.py} ${agent-distro}/adapters/pi
-            touch "$out"
-          '';
-          opencode-adapter = pkgs.runCommand "opencode-adapter-checks" { } ''
-            PYTHONPATH=${agent-distro}/lib ${pkgs.python3.interpreter} ${./check-opencode-adapter.py} ${agent-distro}/adapters/opencode
-            touch "$out"
-          '';
           # The reader alone, without a VM: invalid manifests, skipped
           # components, and a failed build that names the field.
           reader = pkgs.runCommand "read-plugin-checks"
@@ -77,20 +72,17 @@
           auto-update = pkgs.testers.runNixOSTest (import ./test-auto-update.nix {
             inherit pkgs agent-distro home-manager;
           });
-          reserved-profile = assert builtins.all (name:
-            !(builtins.tryEval (agent-distro.lib.mkFlake {
-              profile = agent-distro.profiles.vanilla // { inherit name; };
-            })).success) [ "default" "omp" "codex" "claude" "opencode" "opencode2" "pi" ]; pkgs.runCommand "reserved-profile" { nativeBuildInputs = [ pkgs.nix ]; } ''
-            export NIX_STATE_DIR="$TMPDIR/nix-state"
-            if nix-instantiate --eval --expr '(import ${agent-distro}/lib/validate-profile.nix) { name = "opencode2"; }' 2>error; then
-              exit 1
-            fi
-            grep -F 'Profile "opencode2" uses a reserved name; reserved names: default, omp, codex, claude, opencode, opencode2, pi.' error
-            touch "$out"
-          '';
+          discovery = import ./test-discovery.nix { inherit pkgs agent-distro nixpkgs; };
+          reserved-profile = assert builtins.all
+            (name:
+              !(builtins.tryEval (agent-distro.lib.mkFlake {
+                profile = agent-distro.profiles.vanilla // { inherit name; };
+              })).success)
+            ([ "default" ] ++ (import "${agent-distro}/lib/discover-harnesses.nix").ordered);
+            pkgs.runCommand "reserved-profile" { } "touch $out";
           packages = import ./test-packages.nix {
             inherit pkgs;
-            bindLaunchers = import "${agent-distro}/lib/mk-launchers.nix";
+            inherit mkLaunchers;
           };
         };
     };

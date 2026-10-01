@@ -1,0 +1,11 @@
+{
+  "provider": [
+    "providers",
+    "litellm"
+  ],
+  "url": [
+    "baseUrl"
+  ],
+  "models": "list",
+  "label": "Pi"
+}

@@ -2,7 +2,9 @@
 let
   common = import ./common.nix;
   names = [ default ] ++ builtins.filter (n: n != default) (builtins.attrNames profiles);
+  harnesses = (import ../lib/discover-harnesses.nix).ordered;
   menuShape = {
+    rows = menu.rows;
     inherit default;
     others = builtins.filter (n: n != default) names;
   };
@@ -20,7 +22,7 @@ in
     # Without a terminal the picker says what to set instead of guessing.
     status, output = machine.execute("su - testuser -c 'ai --version </dev/null 2>&1'")
     assert status == 1, output
-    assert "Set AI_HARNESS to omp, codex, claude, opencode, opencode2, or pi" in output, output
+    assert "Set AI_HARNESS to ${builtins.concatStringsSep ", " (builtins.genList (i: builtins.elemAt harnesses i) (builtins.length harnesses - 1))}, or ${builtins.elemAt harnesses (builtins.length harnesses - 1)}" in output, output
     assert "github:" not in output, output
 
     for override in ["AI_HARNESS=bad", "AI_HARNESS="]:
@@ -33,7 +35,7 @@ in
 
     # Every profile reaches every harness with no list in the way.
     for profile in ${builtins.toJSON names}:
-        for harness in ["omp", "codex", "claude", "opencode", "opencode2", "pi"]:
+        for harness in ${builtins.toJSON harnesses}:
             machine.succeed(
                 f"su - testuser -c 'AI_GATEWAY=0 AI_PROFILE={profile} AI_HARNESS={harness} ai --version </dev/null'"
             )
