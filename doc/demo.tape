@@ -12,6 +12,7 @@ Set WaitTimeout 120s
 Type "AI_PROFILE=juspay XDG_STATE_HOME=$(mktemp -d) nix run github:juspay/agent-distro -- --version"
 Sleep 500ms
 Enter
+Wait+Screen /agent-distro · juspay/
 Wait+Screen /Claude Code/
 Sleep 1500ms
 Down

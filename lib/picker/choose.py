@@ -1,4 +1,4 @@
-"""Draw a menu and return a choice; launching and persistence belong to ai."""
+"""Draw a menu and return a choice; launching and persistence belong to agent-distro."""
 import argparse
 import curses
 import json
@@ -53,6 +53,11 @@ class Menu:
             return True
         return False
 
+    def banner(self):
+        if self.profile:
+            return ' · ' + self.profile['name']
+        return f' · {len(self.profiles)} profiles · {len(self.harnesses)} harnesses'
+
     def draw(self, screen):
         curses.curs_set(0)
         curses.set_escdelay(25)
@@ -61,15 +66,18 @@ class Menu:
             if height < 8 or width < 40:
                 raise TooSmall
             screen.erase()
+            screen.addnstr(0, 0, 'agent-distro', width - 1, curses.A_BOLD)
+            screen.addnstr(0, len('agent-distro'), self.banner(),
+                           width - len('agent-distro') - 1, curses.A_DIM)
             header = self.profile['description'] if self.profile else 'Choose a profile'
-            screen.addnstr(0, 0, header, width - 1)
+            screen.addnstr(1, 0, header, width - 1)
             rows = self.rows()
             self.index = min(self.index, max(0, len(rows) - 1))
             title_width = max((len(r['title']) for r in rows), default=0)
-            count = height - 5
+            count = height - 6
             start = max(0, self.index - count + 1)
-            for y, row in enumerate(rows[start:start + count], 2):
-                selected = start + y - 2 == self.index
+            for y, row in enumerate(rows[start:start + count], 3):
+                selected = start + y - 3 == self.index
                 version = row.get('version', '')
                 marked = self.profile and self.remembered == self.profile['name'] + '/' + row['name']
                 prefix = ('❯ ' if selected else '  ') + ('· ' if marked else '  ')
@@ -81,9 +89,13 @@ class Menu:
                 if version:
                     screen.addnstr(y, max(0, right), version, width - max(0, right) - 1)
             if not rows:
-                screen.addstr(2, 2, 'No matches')
+                screen.addstr(3, 2, 'No matches')
+            hints = 'Enter choose  / filter  q quit'
+            if self.profile:
+                back = '  ← back to profiles' if len(self.profiles) > 1 else ''
+                hints = '↑/↓ j/k  Enter choose' + back + '  / filter  q quit'
             screen.addnstr(height - 2, 0, '/' + self.query if self.filtering else
-                           '↑/↓ j/k  Enter choose  ←/h back  / filter  q quit', width - 1, curses.A_DIM)
+                           hints, width - 1, curses.A_DIM)
             screen.refresh()
             key = screen.get_wch()
             # Some PTY clients send normal-mode arrows despite keypad mode.
@@ -135,7 +147,9 @@ class Menu:
     def plain(self):
         while True:
             rows = self.rows()
+            print('agent-distro' + self.banner(), file=sys.stderr)
             print(self.profile['description'] if self.profile else 'Choose a profile', file=sys.stderr)
+            print(file=sys.stderr)
             for i, row in enumerate(rows, 1):
                 print(f"{i}. {row['title']}  {row['tagline']}  "
                       f"{row.get('version', '')}", file=sys.stderr)

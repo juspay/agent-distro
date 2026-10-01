@@ -24,14 +24,14 @@ let
       harnesses)
     names);
   quote = lib.escapeShellArg;
-  noTty = [ "Set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, use ai <harness>, or run this from a terminal." ]
+  noTty = [ "Set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, use agent-distro <harness>, or run this from a terminal." ]
     ++ lib.optional (lib.length names > 1)
     "Set AI_PROFILE to one of ${lib.concatStringsSep ", " names}; it defaults to ${default}.";
   listing = lib.concatMapStringsSep "\n" (profile: lib.concatMapStringsSep "\n"
     (row: "${profile} ${row.name} ${row.title} ${displayVersion profile row.name}") rows) names;
 in
 writeShellApplication {
-  name = "ai";
+  name = "agent-distro";
   runtimeInputs = [ python3 ];
   passthru.rows = rows;
   text = ''

@@ -33,7 +33,7 @@ def run(keys, expected, overrides=None, status=0, args=None):
         env.pop('AI_PROFILE', None)
         env.pop('AI_HARNESS', None)
         env.update(overrides or {})
-        os.execvpe('ai', ['ai'] + (args if args is not None else ['--version']), env)
+        os.execvpe('agent-distro', ['agent-distro'] + (args if args is not None else ['--version']), env)
     # Give curses a usable terminal before it starts.
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 120, 0, 0))
     output = b''
@@ -70,13 +70,20 @@ def flow(keys, profile_index=0):
 
 def version(profile, harness):
     return subprocess.check_output(
-        ['ai', '--version'],
+        ['agent-distro', '--version'],
         env=dict(os.environ, AI_GATEWAY='0', AI_PROFILE=profile, AI_HARNESS=harness),
         timeout=60,
     ).strip()
 
 
 drawn = run(flow(b'\r'), FIRST)
+assert b'agent-distro' in drawn, drawn
+if OTHERS:
+    assert f'agent-distro · {len(PROFILES)} profiles · {len(ROWS)} harnesses'.encode() in drawn, drawn
+    assert '← back to profiles'.encode() in drawn, drawn
+else:
+    assert ('agent-distro · ' + DEFAULT).encode() in drawn, drawn
+    assert '← back to profiles'.encode() not in drawn, drawn
 for row in ROWS:
     assert not row['tagline'].startswith(row['title']), row
     assert '+' not in row['version'], row
@@ -90,6 +97,7 @@ for index, profile in enumerate(PROFILES):
         run(None, expected, args=[profile, harness['name'], '--version'])
     narrowed = run(b'\r', FIRST, {'AI_PROFILE': profile})
     assert b'Choose a profile' not in narrowed, narrowed
+    assert '← back to profiles'.encode() not in narrowed, narrowed
     narrowed = run(b'\r', FIRST, args=[profile, '--version'])
     assert b'Choose a profile' not in narrowed, narrowed
 
@@ -105,7 +113,7 @@ run(None, version(DEFAULT, NAMES[0]), {'AI_HARNESS': NAMES[0]})
 run(None, ('valid values: ' + ', '.join(NAMES)).encode(), {'AI_HARNESS': 'bad'}, status=1)
 run(None, b'Invalid AI_PROFILE', {'AI_PROFILE': 'nonesuch'}, status=1)
 
-listing = subprocess.check_output(['ai', '--list']).decode().splitlines()
+listing = subprocess.check_output(['agent-distro', '--list']).decode().splitlines()
 assert listing == [f"{profile} {row['name']} {row['title']} {row['version']}"
                    for profile in PROFILES for row in ROWS], listing
 
