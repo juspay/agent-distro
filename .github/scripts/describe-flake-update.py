@@ -7,15 +7,14 @@ from pathlib import Path
 def describe(name, before, after, release_url):
     if before == after:
         return [], f"**{name} unchanged (`{after}`)**"
-    # OpenCode's upstream package version carries +<rev>, but release tags do not.
     return [f"{name} {before} → {after}"], (
         f"**{name} `{before}` → `{after}`**\n\n"
-        f"- release notes: {release_url}{after.split('+', 1)[0]}"
+        f"- release notes: {release_url}"
     )
 
 
 def describe_pins(before, after):
-    """One line per `profiles/<name>/npins` pin, keyed `<profile>/<pin>`.
+    """One line per directory-local pin, keyed `<directory>/<pin>`.
 
     `npins update` moves pins; the two reads always see the same ones. Where a
     pin is — a release or a short revision — is read-pins.py's to say.
@@ -29,49 +28,25 @@ def describe_pins(before, after):
             changes.append(f"{pin} {old['at']} → {new['at']}")
             notes = f" — release notes: {new['notes']}" if "notes" in new else ""
             lines.append(f"- `{pin}` `{old['at']}` → `{new['at']}`{notes}")
-    return changes, "**Profile pins**\n\n" + "\n".join(lines)
+    return changes, "**Source pins**\n\n" + "\n".join(lines)
 
 
 def main():
     env = os.environ
-    omp_changes, omp_note = describe(
-        "oh-my-pi", env["OMP_BEFORE"], env["OMP_AFTER"],
-        "https://github.com/can1357/oh-my-pi/releases/tag/",
-    )
-    if env["OMP_AFTER"] != env["OMP_LATEST"]:
-        omp_note += f" — latest release is `{env['OMP_LATEST']}`; the pin only moves forward."
-    codex_changes, codex_note = describe(
-        "Codex", env["CODEX_BEFORE"], env["CODEX_AFTER"],
-        "https://github.com/openai/codex/releases/tag/rust-v",
-    )
-    claude_changes, claude_note = describe(
-        "Claude Code", env["CLAUDE_BEFORE"], env["CLAUDE_AFTER"],
-        "https://github.com/anthropics/claude-code/releases/tag/v",
-    )
-    opencode_changes, opencode_note = describe(
-        "OpenCode", env["OPENCODE_BEFORE"], env["OPENCODE_AFTER"],
-        "https://github.com/anomalyco/opencode/releases/tag/v",
-    )
-    if "v" + env["OPENCODE_AFTER"].split("+", 1)[0] != env["OPENCODE_LATEST"]:
-        prefix = env.get("OPENCODE_TAG_PREFIX", "")
-        reason = (f"the pin is restricted to tag prefix `{prefix}`"
-                  if prefix and not env["OPENCODE_LATEST"].startswith(prefix)
-                  else "the pin only moves forward")
-        opencode_note += f" — latest release is `{env['OPENCODE_LATEST']}`; {reason}."
-    opencode2_changes, opencode2_note = describe(
-        "OpenCode v2", env["OPENCODE2_BEFORE"], env["OPENCODE2_AFTER"],
-        "https://github.com/anomalyco/opencode/releases/tag/v",
-    )
-    if env["OPENCODE2_AFTER"] != env["OPENCODE2_LATEST"]:
-        opencode2_note += f" — latest v2 npm version is `{env['OPENCODE2_LATEST']}`; the pin only moves forward."
-    pi_changes, pi_note = describe(
-        "Pi", env["PI_BEFORE"], env["PI_AFTER"],
-        "https://github.com/earendil-works/pi/releases/tag/v",
-    )
+    before = json.loads(env["VERSIONS_BEFORE"])
+    after = json.loads(env["VERSIONS_AFTER"])
+    metadata = json.loads(env["HARNESS_META"])
+    changes, notes = [], []
+    for name in sorted(after, key=lambda name: (metadata[name]["order"], name)):
+        changed, note = describe(metadata[name]["title"], before.get(name, "added"),
+                                 after[name], metadata[name]["releaseNotes"])
+        changes.extend(changed)
+        notes.append(note)
     pin_changes, pin_note = describe_pins(
         json.loads(env["PINS_BEFORE"]), json.loads(env["PINS_AFTER"]),
     )
-    changes = omp_changes + codex_changes + claude_changes + opencode_changes + opencode2_changes + pi_changes + pin_changes
+    changes.extend(pin_changes)
+    notes.append(pin_note)
     title = "chore(flake): update inputs"
     if changes:
         title += " (" + "; ".join(changes) + ")"
@@ -80,12 +55,8 @@ def main():
     lock_log = (temporary / "flake-update.log").read_text().rstrip()
     body = temporary / "flake-update-body.md"
     body.write_text(
-        f"Automated flake input update.\n\n{omp_note}\n\n{codex_note}\n\n{claude_note}\n\n"
-        f"{opencode_note}\n\n{opencode2_note}\n\n{pi_note}\n\n{pin_note}\n\n"
-        "Codex packaging: https://github.com/sadjow/codex-cli-nix\n\n"
-        "Claude Code packaging: https://github.com/sadjow/claude-code-nix\n\n"
-        "Pi packaging: https://github.com/sadjow/pi-nix\n\n"
-        f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"
+        "Automated input update.\n\n" + "\n\n".join(notes) + "\n\n"
+        + f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"
         f"The [Update Flake]({run_url}) workflow approves the runs GitHub holds "
         "back for automation-created pull requests, waits for this pull request's "
         "checks — `build (ubuntu-latest)` and `build (macos-latest)`, the contexts "
