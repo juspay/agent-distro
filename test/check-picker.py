@@ -21,7 +21,7 @@ NAMES = [row['name'] for row in ROWS]
 DOWN = b'\x1b[B'
 ESCAPE = b'\x1b'
 # Match displayed text independently of terminal attributes.
-ANSI = re.compile(rb'\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])')
+ANSI = re.compile(rb'\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[()][0-~]|[@-Z\\-_])')
 
 
 def run(keys, expected, overrides=None, status=0, args=None):
