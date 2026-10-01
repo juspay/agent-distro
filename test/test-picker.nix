@@ -20,16 +20,17 @@ in
     ${common.testPreamble}
 
     # Without a terminal the picker says what to set instead of guessing.
-    status, output = machine.execute("su - testuser -c 'ai --version </dev/null 2>&1'")
+    status, output = machine.execute("su - testuser -c 'agent-distro --version </dev/null 2>&1'")
     assert status == 1, output
     assert "Set AI_HARNESS to ${builtins.concatStringsSep ", " (builtins.genList (i: builtins.elemAt harnesses i) (builtins.length harnesses - 1))}, or ${builtins.elemAt harnesses (builtins.length harnesses - 1)}" in output, output
+    assert "agent-distro <harness>" in output, output
     assert "github:" not in output, output
 
     for override in ["AI_HARNESS=bad", "AI_HARNESS="]:
-        status, output = machine.execute(f"su - testuser -c '{override} ai --version </dev/null 2>&1'")
+        status, output = machine.execute(f"su - testuser -c '{override} agent-distro --version </dev/null 2>&1'")
         assert status == 1 and "valid values:" in output, output
 
-    status, output = machine.execute("su - testuser -c 'AI_PROFILE=nonesuch ai --version </dev/null 2>&1'")
+    status, output = machine.execute("su - testuser -c 'AI_PROFILE=nonesuch agent-distro --version </dev/null 2>&1'")
     assert status == 1, output
     assert "valid values: ${builtins.concatStringsSep ", " names}" in output, output
 
@@ -37,12 +38,12 @@ in
     for profile in ${builtins.toJSON names}:
         for harness in ${builtins.toJSON harnesses}:
             machine.succeed(
-                f"su - testuser -c 'AI_GATEWAY=0 AI_PROFILE={profile} AI_HARNESS={harness} ai --version </dev/null'"
+                f"su - testuser -c 'AI_GATEWAY=0 AI_PROFILE={profile} AI_HARNESS={harness} agent-distro --version </dev/null'"
             )
 
     machine.succeed(
         "su - testuser -c " + shlex.quote(
-            "python ${./check-picker.py} " + shlex.quote('${builtins.toJSON menuShape}')
+            "python ${./check-picker.py} " + shlex.quote(${builtins.toJSON (builtins.toJSON menuShape)})
         )
     )
   '';

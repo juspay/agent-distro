@@ -12,6 +12,8 @@ let
     xdg.stateHome = "/home/testuser/custom-state";
     services.agent-distro = {
       enable = true;
+      # The offline update fixture below exports the vanilla bundle.
+      profile = "vanilla";
       flake = "path:/home/testuser/update-flake";
       # Avoid a timer firing before the fallback assertions.
       frequency = "2099-01-01";

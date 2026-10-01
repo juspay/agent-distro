@@ -29,44 +29,73 @@ AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
 
 To keep the agents installed and updated daily, see [Install](#install).
 
-The list shows every profile's harnesses, the default profile's rows first:
+With several profiles, choose a profile first (the default is highlighted),
+then choose a harness. The profile screen looks like this:
 
 ```
-❯ vanilla  Oh My Pi
-  vanilla  Codex
-  vanilla  Claude Code
-  vanilla  OpenCode
-  vanilla  OpenCode v2
-  vanilla  Pi
-  juspay   Oh My Pi
-  juspay   Codex
-  juspay   Claude Code
-  juspay   OpenCode
-  juspay   OpenCode v2
-  juspay   Pi
+agent-distro · 2 profiles · 6 harnesses
+Choose a profile
+
+❯   juspay   Juspay skills + Kolu, via Juspay's LiteLLM gateway
+    vanilla  Upstream harnesses with your own provider
+
+Enter choose  / filter  q quit
 ```
 
-| Variable | Values | Effect |
+| Variable (names unchanged for script compatibility) | Values | Effect |
 | --- | --- | --- |
-| `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list; required in scripts and non-interactive shells |
+| `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list; also usable in scripts and non-interactive shells |
 | `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 
-Narrowed to one profile, the list needs no profile column and gets the
-profile's description as a header:
+Use `agent-distro <harness>` to launch directly, `agent-distro <profile> <harness>` to select
+both, or `agent-distro <profile>` to narrow the chooser. For example:
+
+```sh
+agent-distro codex --version
+agent-distro juspay claude --version
+agent-distro juspay
+agent-distro --list                      # profile harness title version, one row per line
+```
+
+`AI_HARNESS` and `AI_PROFILE` take precedence over positional selections;
+the profile otherwise defaults to the registry default. Recognized leading
+names are consumed; other arguments and everything after `--` are passed to
+the harness unchanged.
+
+After selecting `juspay`, the harness list looks like this (versions reflect
+the packages pinned at build time, without revision suffixes):
 
 ```
+agent-distro · juspay
 Juspay skills + Kolu, via Juspay's LiteLLM gateway
 
-❯ Oh My Pi
-  Codex
-  Claude Code
-  OpenCode
-  OpenCode v2
-  Pi
+❯   Oh My Pi     gateway or own provider · extensions                                       18.4.4
+    Codex        OpenAI login · plugins via marketplace                                    0.159.3
+    Claude Code  Anthropic login · plugin dirs per session                                 2.1.286
+    OpenCode     v1 · gateway or own provider                                              1.18.33
+    OpenCode v2  v2 preview · private server per launch                                     2.0.20
+    Pi           OMP's upstream · gateway via models.json                                   0.99.2
+
+↑/↓ j/k  Enter choose  ← back to profiles  / filter  q quit
 ```
 
-Escape or ctrl-c leaves the list.
+Narrowed to one profile, the chooser opens this harness list directly and omits
+`← back to profiles`.
+
+Use arrows or `j`/`k` to move and Enter to choose. On a harness list with
+multiple profiles, `← back to profiles` means Left, `h`, or Escape returns to
+profiles. Escape otherwise exits, and `q` or Ctrl-C exits. `/` filters by
+title or tagline; Escape clears the filter. Small or unsupported terminals
+get a numbered list instead.
+
+An interactive selection is remembered in
+`${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
+the profile screen starts on that profile, and its harness list starts on that
+harness, marked with `·`.
+Every interactive choice updates it, including `agent-distro <profile>`. Direct selections
+with `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro <profile> <harness>` never update it.
+An unavailable state directory is silently ignored.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
@@ -83,7 +112,7 @@ Puts every harness on your `PATH` and updates them daily at
   imports = [ inputs.agent-distro.homeManagerModules.default ];
   services.agent-distro = {
     enable = true;
-    profile = "juspay"; # default: vanilla
+    profile = "vanilla"; # default: juspay
   };
 }
 ```
@@ -162,8 +191,8 @@ used gateway defaults. Codex and Claude Code always use their own login.
 
 | Profile | What it is |
 | --- | --- |
-| `vanilla` (default) | Upstream harnesses with your own provider; no plugins, no gateway |
-| `juspay` | Juspay skills + Kolu, via Juspay's LiteLLM gateway |
+| `vanilla` | Upstream harnesses with your own provider; no plugins, no gateway |
+| `juspay` (default) | Juspay skills + Kolu, via Juspay's LiteLLM gateway |
 
 <details>
 <summary>Using the Juspay profile</summary>
