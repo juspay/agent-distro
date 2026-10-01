@@ -42,6 +42,7 @@ class UpdateFlakeTests(unittest.TestCase):
                            '  .#harnesses.x86_64-linux.claude.version) printf 2.1.273 ;;\n'
                            '  .#harnesses.x86_64-linux.opencode.version) printf 1.18.33 ;;\n'
                            '  .#harnesses.x86_64-linux.opencode2.version) printf 2.0.20 ;;\n'
+                           '  .#harnesses.x86_64-linux.pi.version) printf 0.70.0 ;;\n'
                            '  *) exit 1 ;;\n'
                            'esac\n')
             nix.chmod(0o755)
@@ -52,7 +53,7 @@ class UpdateFlakeTests(unittest.TestCase):
                        GITHUB_OUTPUT=str(output))
             result = subprocess.run(['bash', str(SCRIPTS / 'read-versions.sh')],
                                     cwd=root, env=env, capture_output=True, text=True)
-            expected = ('codex-version=0.153.0\nclaude-version=2.1.273\nopencode-version=1.18.33\nopencode2-version=2.0.20\n'
+            expected = ('codex-version=0.153.0\nclaude-version=2.1.273\nopencode-version=1.18.33\nopencode2-version=2.0.20\npi-version=0.70.0\n'
                         'pins={"juspay/kolu": {"at": "bbbbbbb"}, "juspay/skills": {"at": "aaaaaaa"}}\n')
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, expected)
@@ -224,6 +225,7 @@ print(json.dumps({'hash': 'bad' if os.environ['PREFETCH'] == 'bad-hash' else 'sh
                    CLAUDE_BEFORE='2.1.273', CLAUDE_AFTER='2.1.273',
                    OPENCODE_BEFORE='1.18.33', OPENCODE_AFTER='1.18.33', OPENCODE_LATEST='v1.18.33', OPENCODE_TAG_PREFIX='v1.',
                    OPENCODE2_BEFORE='2.0.20', OPENCODE2_AFTER='2.0.20', OPENCODE2_LATEST='2.0.20',
+                   PI_BEFORE='0.70.0', PI_AFTER='0.70.0',
                    PINS_BEFORE='{}', PINS_AFTER='{}',
                    GITHUB_SERVER_URL='https://github.com', GITHUB_REPOSITORY='juspay/agent-distro',
                    GITHUB_RUN_ID='123', RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(root / 'outputs'))
@@ -233,11 +235,12 @@ print(json.dumps({'hash': 'bad' if os.environ['PREFETCH'] == 'bad-hash' else 'sh
         return outputs, Path(outputs['pr-body-path']).read_text()
 
     def test_report_uses_resolved_versions_and_preserves_lock_log(self):
-        for omp_changed, codex_changed, claude_changed, opencode_changed, opencode2_changed in product([False, True], repeat=5):
+        for omp_changed, codex_changed, claude_changed, opencode_changed, opencode2_changed, pi_changed in product([False, True], repeat=6):
             with self.subTest(omp=omp_changed, codex=codex_changed, claude=claude_changed, opencode=opencode_changed), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 outputs, body = self.report(
                     root,
+                    PI_AFTER='0.71.0' if pi_changed else '0.70.0',
                     OMP_AFTER='v18.2.5' if omp_changed else 'v18.2.4',
                     OMP_LATEST='v18.2.5' if omp_changed else 'v18.2.3',
                     CODEX_AFTER='0.154.0' if codex_changed else '0.153.0',
@@ -252,6 +255,10 @@ print(json.dumps({'hash': 'bad' if os.environ['PREFETCH'] == 'bad-hash' else 'sh
                 self.assertEqual('Claude Code 2.1.273 → 2.1.274' in outputs['pr-title'], claude_changed)
                 self.assertEqual('OpenCode 1.18.33 → 1.18.34+abcdef0' in outputs['pr-title'], opencode_changed)
                 self.assertEqual('OpenCode v2 2.0.20 → 2.0.21' in outputs['pr-title'], opencode2_changed)
+                self.assertEqual('Pi 0.70.0 → 0.71.0' in outputs['pr-title'], pi_changed)
+                self.assertIn('Pi packaging: https://github.com/sadjow/pi-nix', body)
+                self.assertIn('https://github.com/earendil-works/pi/releases/tag/v0.71.0' if pi_changed
+                              else 'Pi unchanged (`0.70.0`)', body)
                 if opencode2_changed:
                     self.assertIn('/releases/tag/v2.0.21', body)
                 else:

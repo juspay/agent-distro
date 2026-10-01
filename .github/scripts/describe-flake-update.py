@@ -64,10 +64,14 @@ def main():
     )
     if env["OPENCODE2_AFTER"] != env["OPENCODE2_LATEST"]:
         opencode2_note += f" — latest v2 npm version is `{env['OPENCODE2_LATEST']}`; the pin only moves forward."
+    pi_changes, pi_note = describe(
+        "Pi", env["PI_BEFORE"], env["PI_AFTER"],
+        "https://github.com/earendil-works/pi/releases/tag/v",
+    )
     pin_changes, pin_note = describe_pins(
         json.loads(env["PINS_BEFORE"]), json.loads(env["PINS_AFTER"]),
     )
-    changes = omp_changes + codex_changes + claude_changes + opencode_changes + opencode2_changes + pin_changes
+    changes = omp_changes + codex_changes + claude_changes + opencode_changes + opencode2_changes + pi_changes + pin_changes
     title = "chore(flake): update inputs"
     if changes:
         title += " (" + "; ".join(changes) + ")"
@@ -77,7 +81,8 @@ def main():
     body = temporary / "flake-update-body.md"
     body.write_text(
         f"Automated flake input update.\n\n{omp_note}\n\n{codex_note}\n\n{claude_note}\n\n"
-        f"{opencode_note}\n\n{opencode2_note}\n\n{pin_note}\n\n"
+        f"{opencode_note}\n\n{opencode2_note}\n\n{pi_note}\n\n{pin_note}\n\n"
+        "Pi packaging: https://github.com/sadjow/pi-nix\n\n"
         "Codex packaging: https://github.com/sadjow/codex-cli-nix\n\n"
         "Claude Code packaging: https://github.com/sadjow/claude-code-nix\n\n"
         f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"
