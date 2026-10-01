@@ -92,6 +92,13 @@ in
       message = "services.agent-distro.frequency on macOS supports only the default: ${defaultFrequency}.";
     }];
     home.packages = [ shims ];
+    home.activation.agent-distro-state = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      (
+        ${state}
+        # launchd opens update.log before the updater runs, and creates no directories.
+        run ${pkgs.coreutils}/bin/mkdir -p "$state"
+      )
+    '';
     home.activation.agent-distro-prune = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       (
         ${state}
@@ -100,8 +107,6 @@ in
           [ -d "$previous" ] && [ "$previous" != "$state" ] || continue
           run ${pkgs.coreutils}/bin/rm -rf -- "$previous"
         done
-        # launchd opens update.log before the updater runs, and creates no directories.
-        run ${pkgs.coreutils}/bin/mkdir -p "$state"
       )
     '';
     systemd.user.services.agent-distro-update = lib.mkIf pkgs.stdenv.isLinux {
