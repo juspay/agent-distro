@@ -11,7 +11,6 @@ in
   inherit name;
   nodes.machine = { pkgs, ... }: {
     imports = [ common.baseNode ];
-    environment.variables.PI_SKIP_VERSION_CHECK = "1";
     environment.systemPackages = [ menu pkgs.python3 ];
   };
   testScript = ''

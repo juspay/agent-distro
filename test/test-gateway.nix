@@ -9,7 +9,6 @@ in {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${pkgs.python3}/bin/python ${./opencode-gateway-fixture.py}";
     };
-    environment.variables.PI_SKIP_VERSION_CHECK = "1";
     environment.variables.${profile.gateway.keyEnv} = "test-api-key";
   };
   testScript = ''

@@ -25,7 +25,7 @@ def run(keys, expected, overrides=None, status=0):
     pending = keys
     pid, fd = pty.fork()
     if pid == 0:
-        env = dict(os.environ, AI_GATEWAY='0', PI_SKIP_VERSION_CHECK='1', TERM='xterm-256color')
+        env = dict(os.environ, AI_GATEWAY='0', TERM='xterm-256color')
         env.pop('AI_PROFILE', None)
         env.pop('AI_HARNESS', None)
         env.update(overrides or {})

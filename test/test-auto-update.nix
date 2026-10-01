@@ -54,10 +54,8 @@ in
 {
   name = "auto-update";
   nodes.machine = { ... }: {
-    imports = [ home-manager.nixosModules.home-manager ];
-    users.users.testuser = { isNormalUser = true; uid = 1000; linger = true; };
-    environment.variables.PI_SKIP_VERSION_CHECK = "1";
-    system.stateVersion = "24.05";
+    imports = [ (import ./common.nix).baseNode home-manager.nixosModules.home-manager ];
+    users.users.testuser.linger = true;
     environment.systemPackages = [ (pkgs.writeShellScriptBin "omp" "exit 99") ];
     nix.settings = {
       experimental-features = [ "nix-command" "flakes" ];

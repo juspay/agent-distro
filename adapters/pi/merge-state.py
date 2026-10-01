@@ -1,6 +1,7 @@
 """Merge Pi state: ours replace ours, user entries stay untouched,
 and invalid JSON aborts before any write.
 """
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -16,18 +17,12 @@ def read_object(path):
     return data
 
 
-def object_field(data, key):
-    value = data.setdefault(key, {})
-    if not isinstance(value, dict):
-        raise ValueError(f'{key} must be a JSON object')
-    return value
-
-
 def prepare(directory, fragment, gateway):
     paths = {name: (Path(directory) / f'{name}.json').resolve()
              for name in ['mcp', 'settings'] + (['models'] if gateway else [])}
     # Validate every input before any write, including files another merge owns.
-    data = {name: read_object(path) for name, path in paths.items()}
+    original = {name: read_object(path) for name, path in paths.items()}
+    data = deepcopy(original)
     servers = data['mcp'].get('mcpServers', {})
     if not isinstance(servers, dict):
         raise ValueError('mcpServers must be a JSON object')
@@ -41,27 +36,27 @@ def prepare(directory, fragment, gateway):
     if refreshed != skills:
         data['settings']['skills'] = refreshed
     if gateway:
-        object_field(data['models'], 'providers')['litellm'] = gateway['providers']['litellm']
+        providers = data['models'].setdefault('providers', {})
+        if not isinstance(providers, dict):
+            raise ValueError('providers must be a JSON object')
+        providers['litellm'] = gateway['providers']['litellm']
         for key in ['defaultProvider', 'defaultModel']:
             data['settings'].setdefault(key, gateway[key])
-    return paths, data
+    return {paths[name]: value for name, value in data.items() if value != original[name]}
 
 
 def main(mode, directory, fragment_path, gateway_path=None):
     fragment = json.loads(Path(fragment_path).read_text())
     gateway = json.loads(Path(gateway_path).read_text()) if gateway_path else None
-    paths, data = prepare(directory, fragment, gateway)
+    changes = prepare(directory, fragment, gateway)
     staged = []
     try:
-        for name, path in paths.items():
-            # An absent file is an empty object, not a reason to create one.
-            if read_object(path) == data[name]:
-                continue
+        for path, data in changes.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             fd, temporary = tempfile.mkstemp(prefix='.pi-', dir=path.parent)
             staged.append((Path(temporary), path))
             with os.fdopen(fd, 'w') as stream:
-                json.dump(data[name], stream, indent=2)
+                json.dump(data, stream, indent=2)
                 stream.write('\n')
                 os.fchmod(stream.fileno(), stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600)
         if mode != '--check':
