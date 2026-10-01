@@ -1,3 +1,4 @@
+# Upstream's build.ts runs codesign on Darwin, but its Nix recipe supplies none.
 { pkgs }:
 let
   upstream = import ../../lib/flake-source.nix {
@@ -7,6 +8,6 @@ let
 in
 if pkgs.stdenv.hostPlatform.isDarwin then
   upstream.overrideAttrs (old: {
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.darwin.sigtool ];
+    nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.darwin.sigtool ];
   })
 else upstream
