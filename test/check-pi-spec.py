@@ -12,12 +12,14 @@ def record(server):
     return json.loads((records / f'{server}.json').read_text())
 
 
-run('--version')  # the launcher's merge writes our servers into mcp.json
-listing = json.loads(run('mcp', 'list', '--json').stdout)
+listing = json.loads(run('mcp', 'list', '--json', check=False).stdout)
+# mcp list exits 1 when an enabled server is unreachable, so inspect without
+# the exit check and assert on per-server state; the `remote` fixture's URL
+# is dead by design.
 servers = {server['name']: server for server in listing['servers']}
 for server in ['placeholders', 'explicit-cwd', 'data-cwd', 'bare']:
     assert servers[server]['state'] == 'connected', servers[server]
-assert 'remote' in servers, servers  # streamable-http maps to a URL entry.
+assert servers['remote']['state'] == 'failed', servers['remote']  # dead URL.
 assert 'invalid' not in servers, servers  # skipped at build time.
 assert 'sse' not in servers, servers  # SSE is unsupported; reported at build time.
 
