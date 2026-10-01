@@ -1,3 +1,3 @@
 {
-  default = "vanilla";
+  default = "juspay";
 }

@@ -105,7 +105,7 @@ Puts every harness on your `PATH` and updates them daily at
   imports = [ inputs.agent-distro.homeManagerModules.default ];
   services.agent-distro = {
     enable = true;
-    profile = "juspay"; # default: vanilla
+    profile = "vanilla"; # default: juspay
   };
 }
 ```
