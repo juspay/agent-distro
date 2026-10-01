@@ -77,6 +77,8 @@ def version(profile, harness):
 
 drawn = run(flow(b'\r'), FIRST)
 for row in ROWS:
+    assert not row['tagline'].startswith(row['title']), row
+    assert '+' not in row['version'], row
     for field in ('title', 'tagline', 'version'):
         assert row[field].encode() in drawn, drawn
 
@@ -106,7 +108,11 @@ listing = subprocess.check_output(['ai', '--list']).decode().splitlines()
 assert listing == [f"{profile} {row['name']} {row['title']} {row['version']}"
                    for profile in [DEFAULT] + OTHERS for row in ROWS], listing
 
-run(flow(b'/OpenCode v2\r'), version(DEFAULT, 'opencode2'))
+query = max(ROWS, key=lambda row: len(row['title']))['title']
+# A title may also occur in another row's tagline; Enter picks the first match.
+match = next(row for row in ROWS
+             if query.casefold() in (row['title'] + ' ' + row['tagline']).casefold())
+run(flow(b'/' + query.encode() + b'\r'), version(DEFAULT, match['name']))
 run(flow(b'/no-matches' + ESCAPE + b'\r'), version(DEFAULT, NAMES[0]))
 run(flow(b'q'), FIRST)
 if OTHERS:
@@ -131,3 +137,12 @@ with tempfile.TemporaryDirectory() as state:
     assert open(path).read().strip() == remembered
     run(b'k\r', version(([DEFAULT] + OTHERS)[-1], NAMES[-2]), overrides)
     assert open(path).read().strip().endswith('/' + NAMES[-2])
+
+    # Narrowing still shows the chooser, so its selection must be remembered.
+    run(b'/no-matches' + ESCAPE + b'\r', version(DEFAULT, NAMES[0]), overrides,
+        args=[DEFAULT, '--version'])
+    assert open(path).read().strip() == DEFAULT + '/' + NAMES[0]
+    for args, extra in [([DEFAULT, NAMES[-1], '--version'], {}),
+                        (['--version'], {'AI_HARNESS': NAMES[-1]})]:
+        run(None, version(DEFAULT, NAMES[-1]), overrides | extra, args=args)
+        assert open(path).read().strip() == DEFAULT + '/' + NAMES[0]

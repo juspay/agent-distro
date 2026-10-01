@@ -1,4 +1,5 @@
 """Draw a menu and return a choice; launching and persistence belong to ai."""
+import argparse
 import curses
 import json
 import os
@@ -70,7 +71,7 @@ class Menu:
                 detail = row.get('tagline', row.get('description', ''))
                 version = row.get('version', '')
                 marked = self.profile and self.remembered == self.profile['name'] + '/' + row['name']
-                prefix = ('❯ ' if selected else '  ') + ('· ' if marked else '')
+                prefix = ('❯ ' if selected else '  ') + ('· ' if marked else '  ')
                 right = width - len(version) - 2
                 label = prefix + title.ljust(title_width) + '  '
                 screen.addnstr(y, 0, label, max(1, right - 1), curses.A_BOLD if selected else 0)
@@ -159,7 +160,19 @@ class Menu:
 
 
 def main():
-    menu = Menu(json.loads(sys.argv[1]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('menu', type=json.loads)
+    parser.add_argument('--profile', default='')
+    parser.add_argument('--remembered', default=None)
+    args = parser.parse_args()
+    data = args.menu
+    if args.profile:
+        data['profiles'] = [p for p in data['profiles'] if p['name'] == args.profile]
+        if not data['profiles']:
+            parser.error('unknown profile: ' + args.profile)
+    if args.remembered is not None:
+        data['remembered'] = args.remembered
+    menu = Menu(data)
     # Shell captures stdout for the result; curses must draw on the terminal.
     output = os.dup(1)
     try:

@@ -5,10 +5,11 @@ let
   names = [ default ] ++ lib.remove default (lib.attrNames profiles);
   discovered = import ./discover-harnesses.nix;
   harnesses = discovered.ordered;
+  displayVersion = profile: harness: lib.head (lib.splitString "+" profiles.${profile}.launchers.${harness}.version);
   rows = map (name: {
     inherit name;
     inherit (discovered.metadata.${name}) title tagline;
-    version = profiles.${default}.launchers.${name}.version;
+    version = displayVersion default name;
   }) harnesses;
   menu = builtins.toJSON {
     inherit default;
@@ -27,7 +28,7 @@ let
     ++ lib.optional (lib.length names > 1)
     "Set AI_PROFILE to one of ${lib.concatStringsSep ", " names}; it defaults to ${default}.";
   listing = lib.concatMapStringsSep "\n" (profile: lib.concatMapStringsSep "\n"
-    (row: "${profile} ${row.name} ${row.title} ${profiles.${profile}.launchers.${row.name}.version}") rows) names;
+    (row: "${profile} ${row.name} ${row.title} ${displayVersion profile row.name}") rows) names;
 in
 writeShellApplication {
   name = "ai";
@@ -49,12 +50,11 @@ writeShellApplication {
       exit 0
     fi
 
-    positional=0
     selected_profile=""
     selected_harness=""
     case "''${1-}" in
-      ${lib.concatStringsSep "|" names}) selected_profile=$1; positional=1; shift ;;
-      ${lib.concatStringsSep "|" harnesses}) selected_harness=$1; positional=1; shift ;;
+      ${lib.concatStringsSep "|" names}) selected_profile=$1; shift ;;
+      ${lib.concatStringsSep "|" harnesses}) selected_harness=$1; shift ;;
     esac
     if [ -n "$selected_profile" ]; then
       case "''${1-}" in
@@ -88,26 +88,17 @@ writeShellApplication {
     fi
     narrow=""
     if [ "''${AI_PROFILE+x}" = x ] || [ -n "$selected_profile" ]; then narrow=$profile; fi
-    menu=$(python3 -c '
-    import json, sys
-    data = json.loads(sys.argv[1])
-    if sys.argv[2]:
-        data["profiles"] = [p for p in data["profiles"] if p["name"] == sys.argv[2]]
-    data["remembered"] = sys.argv[3]
-    print(json.dumps(data))
-    ' ${quote menu} "$narrow" "$remembered")
-    choice=$(python3 ${./picker/choose.py} "$menu") || exit 0
+    choice=$(python3 ${./picker/choose.py} ${quote menu} --profile "$narrow" --remembered "$remembered") || exit 0
     if [ -n "$choice" ]; then
-      if [ "$positional" = 0 ]; then
-        # A failed state write must never prevent launching the selected agent.
-        (
-          mkdir -p "$state_dir" || exit 0
-          temporary=$(mktemp "$state_dir/.last-choice.XXXXXX") || exit 0
-          trap 'rm -f "$temporary"' EXIT
-          printf '%s\n' "$choice" > "$temporary" || exit 0
-          mv -f "$temporary" "$state_dir/last-choice"
-        ) 2>/dev/null || true
-      fi
+      # Only the chooser reaches here; direct selections never update state.
+      # A failed state write must never prevent launching the selected agent.
+      (
+        mkdir -p "$state_dir" || exit 0
+        temporary=$(mktemp "$state_dir/.last-choice.XXXXXX") || exit 0
+        trap 'rm -f "$temporary"' EXIT
+        printf '%s\n' "$choice" > "$temporary" || exit 0
+        mv -f "$temporary" "$state_dir/last-choice"
+      ) 2>/dev/null || true
       launch "$choice" "$@"
     fi
   '';

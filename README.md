@@ -31,17 +31,17 @@ To keep the agents installed and updated daily, see [Install](#install).
 
 With several profiles, choose a profile first (the default is highlighted),
 then choose a harness. After selecting `vanilla`, the list looks like this
-(versions reflect the packages pinned at build time):
+(versions reflect the packages pinned at build time, without revision suffixes):
 
 ```
 Upstream harnesses with your own provider
 
-❯ Oh My Pi     Oh My Pi · batteries included                             18.4.4
-  Codex        Codex · OpenAI login                                     0.159.3
-  Claude Code  Claude Code · Anthropic login                           2.1.286
-  OpenCode     OpenCode v1 · terminal agent                    1.18.33+51ef4be
-  OpenCode v2  OpenCode v2 · preview, private server per launch           2.0.20
-  Pi           Pi · OMP's upstream                                      0.99.2
+❯   Oh My Pi     gateway or own provider · extensions                   18.4.4
+    Codex        OpenAI login · plugins via marketplace                0.159.3
+    Claude Code  Anthropic login · plugin dirs per session             2.1.286
+    OpenCode     v1 · gateway or own provider                          1.18.33
+    OpenCode v2  v2 preview · private server per launch                 2.0.20
+    Pi           OMP's upstream · gateway via models.json               0.99.2
 ```
 
 | Variable | Values | Effect |
@@ -70,12 +70,12 @@ Narrowed to one profile, the chooser opens its harness list directly:
 ```
 Juspay skills + Kolu, via Juspay's LiteLLM gateway
 
-❯ Oh My Pi     Oh My Pi · batteries included                             18.4.4
-  Codex        Codex · OpenAI login                                     0.159.3
-  Claude Code  Claude Code · Anthropic login                           2.1.286
-  OpenCode     OpenCode v1 · terminal agent                    1.18.33+51ef4be
-  OpenCode v2  OpenCode v2 · preview, private server per launch           2.0.20
-  Pi           Pi · OMP's upstream                                      0.99.2
+❯   Oh My Pi     gateway or own provider · extensions                   18.4.4
+    Codex        OpenAI login · plugins via marketplace                0.159.3
+    Claude Code  Anthropic login · plugin dirs per session             2.1.286
+    OpenCode     v1 · gateway or own provider                          1.18.33
+    OpenCode v2  v2 preview · private server per launch                 2.0.20
+    Pi           OMP's upstream · gateway via models.json               0.99.2
 ```
 
 Use arrows or `j`/`k` to move and Enter to choose. Left or `h` goes back to
@@ -86,8 +86,9 @@ get a numbered list instead.
 An interactive selection is remembered in
 `${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
 the chooser opens that profile and preselects that harness with a `·` marker.
-Environment-selected harnesses and positional shortcuts never update it;
-an unavailable state directory is silently ignored.
+Every interactive choice updates it, including `ai <profile>`. Direct selections
+with `AI_HARNESS`, `ai <harness>`, or `ai <profile> <harness>` never update it.
+An unavailable state directory is silently ignored.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 

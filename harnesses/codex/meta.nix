@@ -1,6 +1,6 @@
 {
   title = "Codex";
-  tagline = "Codex · OpenAI login";
+  tagline = "OpenAI login · plugins via marketplace";
   order = 1;
   releaseNotes = version: "https://github.com/openai/codex/releases/tag/rust-v${builtins.head (builtins.split "\\+" version)}";
   checks = [

@@ -1,6 +1,6 @@
 {
   title = "Pi";
-  tagline = "Pi · OMP's upstream";
+  tagline = "OMP's upstream · gateway via models.json";
   order = 5;
   releaseNotes = version: "https://github.com/earendil-works/pi/releases/tag/v${builtins.head (builtins.split "\\+" version)}";
   checks = [
