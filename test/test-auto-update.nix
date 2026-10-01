@@ -42,13 +42,16 @@ let
       };
     }
   '';
-  fixture = fixtureFlake "updated-agents" ''
+  agentsScript = ''
     ${pkgs.coreutils}/bin/mkdir -p "$out/bin"
     for name in ${pkgs.lib.escapeShellArgs commands}; do
       printf '#!${pkgs.bash}/bin/bash\necho updated-%s "$@"\n' "$name" > "$out/bin/$name"
       ${pkgs.coreutils}/bin/chmod +x "$out/bin/$name"
     done
   '';
+  fixture = fixtureFlake "updated-agents" agentsScript;
+  # A renamed derivation is a distinct store path, enough to exercise old -> new.
+  fixtureV2 = fixtureFlake "updated-agents-v2" agentsScript;
   broken = fixtureFlake "broken-agents" "exit 1";
 in
 {
@@ -62,7 +65,7 @@ in
       substituters = pkgs.lib.mkForce [ ];
     };
     # Alternate generations must be registered in the VM store for activation's GC roots.
-    virtualisation.additionalPaths = [ fixture broken pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
+    virtualisation.additionalPaths = [ fixture fixtureV2 broken pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
     environment.loginShellInit = ''
       echo "Welcome: this greeting is not a PATH"
     '';
@@ -85,6 +88,10 @@ in
     def systemctl(command):
         return user("XDG_RUNTIME_DIR=/run/user/1000 systemctl --user " + command)
 
+    def journal_has(line):
+        journal = "XDG_RUNTIME_DIR=/run/user/1000 journalctl --user -u agent-distro-update --no-pager"
+        machine.wait_until_succeeds(user(journal + " | grep -F " + shlex.quote(line)))
+
     source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     machine.succeed("test ! -e " + state)
@@ -102,24 +109,34 @@ in
     first = machine.succeed("readlink -f " + state).strip()
     assert first.startswith("/nix/store/"), first
     stamp = state.rsplit("/", 1)[0] + "/last-success"
-    successful_update = machine.succeed("cat " + stamp).strip()
-    assert successful_update.isdigit(), successful_update
+    journal_has("agent-distro: vanilla updated nothing -> " + first)
     for name in ${builtins.toJSON commands}:
         output = machine.succeed(user("unset XDG_STATE_HOME; " + name + " --version 'two words'"))
         assert output.strip().endswith("updated-" + name + " --version two words"), output
+    machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    second = machine.succeed("readlink -f " + state).strip()
+    assert second.startswith("/nix/store/") and second != first, second
+    journal_has("agent-distro: vanilla updated " + first + " -> " + second)
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    journal_has("agent-distro: vanilla unchanged (" + second + ")")
+    successful_update = machine.succeed("cat " + stamp).strip()
+    assert successful_update.isdigit(), successful_update
     machine.succeed(user("cp ${broken}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.fail(systemctl("start agent-distro-update.service"))
     machine.wait_until_succeeds(systemctl("is-failed agent-distro-update.service"))
     retries = machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value"))
     assert retries.strip().endswith("3"), retries
+    journal_has("agent-distro: vanilla update failed")
     assert machine.succeed("cat " + stamp).strip() == successful_update
-    assert machine.succeed("readlink -f " + state).strip() == first
+    assert machine.succeed("readlink -f " + state).strip() == second
     for name in ${builtins.toJSON commands}:
         assert "updated-" + name in machine.succeed(user(name + " --version"))
     # Reactivating the same source preserves its working update and GC root.
     machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate"))
-    assert machine.succeed("readlink -f " + state).strip() == first
+    assert machine.succeed("readlink -f " + state).strip() == second
     # Neither a changed profile nor a changed flake may reuse or keep rooting this update.
     for activation in ["${switchedProfile}", "${switchedFlake}"]:
         machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 " + activation + "/activate"))
