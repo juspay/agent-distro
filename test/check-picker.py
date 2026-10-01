@@ -14,6 +14,7 @@ import time
 
 MENU = json.loads(sys.argv[1])
 DEFAULT, OTHERS = MENU['default'], MENU['others']
+PROFILES = [DEFAULT] + OTHERS
 ROWS = MENU['rows']
 FIRST = ROWS[0]['title'].encode()
 NAMES = [row['name'] for row in ROWS]
@@ -82,7 +83,7 @@ for row in ROWS:
     for field in ('title', 'tagline', 'version'):
         assert row[field].encode() in drawn, drawn
 
-for index, profile in enumerate([DEFAULT] + OTHERS):
+for index, profile in enumerate(PROFILES):
     for row, harness in enumerate(ROWS):
         expected = version(profile, harness['name'])
         run(flow(DOWN * row + b'\r', index), expected)
@@ -99,20 +100,17 @@ for name in NAMES:
 run(None, version(DEFAULT, NAMES[0]), {'AI_HARNESS': NAMES[0]},
     args=[NAMES[-1], '--version'])
 run(None, version(DEFAULT, NAMES[0]), {'AI_PROFILE': DEFAULT},
-    args=[([DEFAULT] + OTHERS)[-1], NAMES[0], '--version'])
+    args=[PROFILES[-1], NAMES[0], '--version'])
 run(None, version(DEFAULT, NAMES[0]), {'AI_HARNESS': NAMES[0]})
 run(None, ('valid values: ' + ', '.join(NAMES)).encode(), {'AI_HARNESS': 'bad'}, status=1)
 run(None, b'Invalid AI_PROFILE', {'AI_PROFILE': 'nonesuch'}, status=1)
 
 listing = subprocess.check_output(['ai', '--list']).decode().splitlines()
 assert listing == [f"{profile} {row['name']} {row['title']} {row['version']}"
-                   for profile in [DEFAULT] + OTHERS for row in ROWS], listing
+                   for profile in PROFILES for row in ROWS], listing
 
-query = max(ROWS, key=lambda row: len(row['title']))['title']
-# A title may also occur in another row's tagline; Enter picks the first match.
-match = next(row for row in ROWS
-             if query.casefold() in (row['title'] + ' ' + row['tagline']).casefold())
-run(flow(b'/' + query.encode() + b'\r'), version(DEFAULT, match['name']))
+target = max(ROWS, key=lambda row: len(row['title']))
+run(flow(b'/' + target['title'].encode() + b'\r'), version(DEFAULT, target['name']))
 run(flow(b'/no-matches' + ESCAPE + b'\r'), version(DEFAULT, NAMES[0]))
 run(flow(b'q'), FIRST)
 if OTHERS:
@@ -125,17 +123,17 @@ else:
 with tempfile.TemporaryDirectory() as state:
     path = os.path.join(state, 'agent-distro', 'last-choice')
     os.makedirs(os.path.dirname(path))
-    remembered = ([DEFAULT] + OTHERS)[-1] + '/' + NAMES[-1]
+    remembered = PROFILES[-1] + '/' + NAMES[-1]
     with open(path, 'w') as handle:
         handle.write(remembered + '\n')
     overrides = {'XDG_STATE_HOME': state}
-    drawn = run(b'\r', version(([DEFAULT] + OTHERS)[-1], NAMES[-1]), overrides)
+    drawn = run(b'\r', version(PROFILES[-1], NAMES[-1]), overrides)
     assert '· '.encode() in drawn, drawn
     assert b'Choose a profile' not in drawn, drawn
     assert open(path).read().strip() == remembered
     run(None, version(DEFAULT, NAMES[0]), overrides, args=[NAMES[0], '--version'])
     assert open(path).read().strip() == remembered
-    run(b'k\r', version(([DEFAULT] + OTHERS)[-1], NAMES[-2]), overrides)
+    run(b'k\r', version(PROFILES[-1], NAMES[-2]), overrides)
     assert open(path).read().strip().endswith('/' + NAMES[-2])
 
     # Narrowing still shows the chooser, so its selection must be remembered.

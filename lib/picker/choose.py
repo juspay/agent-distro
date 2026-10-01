@@ -12,29 +12,23 @@ class TooSmall(Exception):
 
 class Menu:
     def __init__(self, data):
-        self.profiles = data['profiles']
+        self.profiles = [dict(p, title=p['name'], tagline=p['description']) for p in data['profiles']]
         self.harnesses = data['harnesses']
         self.remembered = data.get('remembered', '')
-        previous = self.remembered.split('/')
         self.profile = self.profiles[0] if len(self.profiles) == 1 else None
         self.index = next((i for i, p in enumerate(self.profiles)
-                           if p['name'] == data['default']), 0)
-        if len(previous) == 2:
-            profile = next((p for p in self.profiles if p['name'] == previous[0]), None)
-            index = next((i for i, h in enumerate(self.harnesses)
-                          if h['name'] == previous[1]), None)
-            if profile is not None and index is not None:
-                self.profile, self.index = profile, index
-        if len(self.profiles) == 1 and self.profile['name'] != previous[0]:
-            self.index = 0
+                           if p['name'] == data['default']), 0) if not self.profile else 0
+        for profile in self.profiles:
+            for index, harness in enumerate(self.harnesses):
+                if self.remembered == profile['name'] + '/' + harness['name']:
+                    self.profile, self.index = profile, index
         self.query = ''
         self.filtering = False
 
     def rows(self):
         rows = self.harnesses if self.profile else self.profiles
         return [r for r in rows if self.query.casefold() in
-                (r.get('title', r['name']) + ' ' +
-                 r.get('tagline', r.get('description', ''))).casefold()]
+                (r['title'] + ' ' + r['tagline']).casefold()]
 
     def select(self, row):
         if self.profile:
@@ -62,21 +56,19 @@ class Menu:
             screen.addnstr(0, 0, header, width - 1)
             rows = self.rows()
             self.index = min(self.index, max(0, len(rows) - 1))
-            title_width = max((len(r.get('title', r['name'])) for r in rows), default=0)
+            title_width = max((len(r['title']) for r in rows), default=0)
             count = height - 5
             start = max(0, self.index - count + 1)
             for y, row in enumerate(rows[start:start + count], 2):
                 selected = start + y - 2 == self.index
-                title = row.get('title', row['name'])
-                detail = row.get('tagline', row.get('description', ''))
                 version = row.get('version', '')
                 marked = self.profile and self.remembered == self.profile['name'] + '/' + row['name']
                 prefix = ('❯ ' if selected else '  ') + ('· ' if marked else '  ')
                 right = width - len(version) - 2
-                label = prefix + title.ljust(title_width) + '  '
+                label = prefix + row['title'].ljust(title_width) + '  '
                 screen.addnstr(y, 0, label, max(1, right - 1), curses.A_BOLD if selected else 0)
                 if len(label) < right - 1:
-                    screen.addnstr(y, len(label), detail, right - len(label) - 1, curses.A_DIM)
+                    screen.addnstr(y, len(label), row['tagline'], right - len(label) - 1, curses.A_DIM)
                 if version:
                     screen.addnstr(y, max(0, right), version, width - max(0, right) - 1)
             if not rows:
@@ -136,8 +128,7 @@ class Menu:
             rows = self.rows()
             print(self.profile['description'] if self.profile else 'Choose a profile', file=sys.stderr)
             for i, row in enumerate(rows, 1):
-                print(f"{i}. {row.get('title', row['name'])}  "
-                      f"{row.get('tagline', row.get('description', ''))}  "
+                print(f"{i}. {row['title']}  {row['tagline']}  "
                       f"{row.get('version', '')}", file=sys.stderr)
             print(f'Choice [{self.index + 1}], h back, q quit: ', end='', file=sys.stderr, flush=True)
             line = sys.stdin.readline()
