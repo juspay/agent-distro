@@ -11,6 +11,7 @@ in
   inherit name;
   nodes.machine = { pkgs, ... }: {
     imports = [ common.baseNode ];
+    environment.variables.PI_SKIP_VERSION_CHECK = "1";
     environment.systemPackages = [ menu pkgs.python3 ];
   };
   testScript = ''
@@ -20,7 +21,7 @@ in
     # Without a terminal the picker says what to set instead of guessing.
     status, output = machine.execute("su - testuser -c 'ai --version </dev/null 2>&1'")
     assert status == 1, output
-    assert "Set AI_HARNESS to omp, codex, claude, opencode, or opencode2" in output, output
+    assert "Set AI_HARNESS to omp, codex, claude, opencode, opencode2, or pi" in output, output
     assert "github:" not in output, output
 
     for override in ["AI_HARNESS=bad", "AI_HARNESS="]:
@@ -33,7 +34,7 @@ in
 
     # Every profile reaches every harness with no list in the way.
     for profile in ${builtins.toJSON names}:
-        for harness in ["omp", "codex", "claude", "opencode", "opencode2"]:
+        for harness in ["omp", "codex", "claude", "opencode", "opencode2", "pi"]:
             machine.succeed(
                 f"su - testuser -c 'AI_GATEWAY=0 AI_PROFILE={profile} AI_HARNESS={harness} ai --version </dev/null'"
             )

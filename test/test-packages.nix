@@ -15,6 +15,7 @@ let
     oh-my-pi = stub "omp";
     codex-cli = stub "codex";
     claude-code = stub "claude";
+    pi = stub "pi";
     opencode = stub "opencode";
     opencode-v2 = _: (stub "opencode2").packages.${system}.default;
   };

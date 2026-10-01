@@ -25,7 +25,7 @@ def run(keys, expected, overrides=None, status=0):
     pending = keys
     pid, fd = pty.fork()
     if pid == 0:
-        env = dict(os.environ, AI_GATEWAY='0', TERM='xterm-256color')
+        env = dict(os.environ, AI_GATEWAY='0', PI_SKIP_VERSION_CHECK='1', TERM='xterm-256color')
         env.pop('AI_PROFILE', None)
         env.pop('AI_HARNESS', None)
         env.update(overrides or {})
@@ -81,7 +81,7 @@ else:
 
 run(DOWN + b'\r', b'codex-cli')
 run(DOWN * 2 + b'\r', b'(Claude Code)')
-for row, harness in enumerate(['opencode', 'opencode2'], start=3):
+for row, harness in enumerate(['opencode', 'opencode2', 'pi'], start=3):
     version = subprocess.check_output(
         ['ai', '--version'],
         env=dict(os.environ, AI_GATEWAY='0', AI_PROFILE=DEFAULT, AI_HARNESS=harness),
@@ -89,10 +89,11 @@ for row, harness in enumerate(['opencode', 'opencode2'], start=3):
     ).strip()
     run(DOWN * row + b'\r', version)
 assert b'OpenCode v2' in drawn, drawn
+assert re.search(rb'(?:^|[ \r\n])Pi(?:[ \r\n]|$)', drawn), drawn
 
 for index, name in enumerate(OTHERS):
     assert re.search(re.escape(name.encode()) + rb' +Codex', drawn), drawn
-    run(DOWN * (5 * (index + 1) + 1) + b'\r', b'codex-cli')
+    run(DOWN * (6 * (index + 1) + 1) + b'\r', b'codex-cli')
 
 # AI_PROFILE narrows the list to one profile, which then needs no tag and gets
 # its description back as the header.
@@ -103,7 +104,7 @@ for name in [DEFAULT] + OTHERS:
 
 # A known harness skips the list; the profile falls back to the default.
 run(None, b'codex-cli', {'AI_HARNESS': 'codex'})
-run(None, b'valid values: omp, codex, claude, opencode, opencode2', {'AI_HARNESS': 'bad'}, status=1)
+run(None, b'valid values: omp, codex, claude, opencode, opencode2, pi', {'AI_HARNESS': 'bad'}, status=1)
 run(None, b'Invalid AI_PROFILE', {'AI_PROFILE': 'nonesuch'}, status=1)
 
 # Escape declines the list, which is how you leave it.

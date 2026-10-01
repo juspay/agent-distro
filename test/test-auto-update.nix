@@ -56,6 +56,7 @@ in
   nodes.machine = { ... }: {
     imports = [ home-manager.nixosModules.home-manager ];
     users.users.testuser = { isNormalUser = true; uid = 1000; linger = true; };
+    environment.variables.PI_SKIP_VERSION_CHECK = "1";
     system.stateVersion = "24.05";
     environment.systemPackages = [ (pkgs.writeShellScriptBin "omp" "exit 99") ];
     nix.settings = {
@@ -89,6 +90,7 @@ in
     source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     machine.succeed("test ! -e " + state)
+    assert "pi" in ${builtins.toJSON commands}
     for name in ${builtins.toJSON commands}:
         output = machine.succeed(user(name + " --version"))
         assert "updated-" not in output, output
