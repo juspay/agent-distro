@@ -57,8 +57,10 @@ def merge_skills(user, configured):
     """
     skills = user.get('skills')
     if skills is None:
+        if not configured:
+            return  # nothing to add; do not invent an empty key.
         skills = user['skills'] = []
-    if not isinstance(skills, list):
+    elif not isinstance(skills, list):
         sys.exit('pi: cannot update settings.json: "skills" must be an array')
     user['skills'] = [entry for entry in skills if OUR_SKILLS not in str(entry)] + configured
 
