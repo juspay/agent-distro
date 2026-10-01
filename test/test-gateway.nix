@@ -197,7 +197,8 @@ in {
     run_as_user("env -u ${profile.gateway.keyEnv} AI_GATEWAY=0 pi --version")
     assert run_as_user(f"cat {PI}/models.json") == before
     settings = json.loads(run_as_user(f"cat {PI}/settings.json"))
-    assert "defaultProvider" not in settings and "defaultModel" not in settings and "skills" in settings, settings
+    assert settings["defaultProvider"] == "personal" and settings["defaultModel"] == "personal/model", settings
+    assert "skills" in settings, settings  # skills are fused unconditionally.
     # Missing credentials fail before launching Pi or changing config.
     machine.fail("su - testuser -c 'env -u ${profile.gateway.keyEnv} AI_GATEWAY=1 pi --version </dev/null'")
     assert run_as_user(f"cat {PI}/models.json") == before
