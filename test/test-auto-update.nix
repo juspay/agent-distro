@@ -54,9 +54,8 @@ in
 {
   name = "auto-update";
   nodes.machine = { ... }: {
-    imports = [ home-manager.nixosModules.home-manager ];
-    users.users.testuser = { isNormalUser = true; uid = 1000; linger = true; };
-    system.stateVersion = "24.05";
+    imports = [ (import ./common.nix).baseNode home-manager.nixosModules.home-manager ];
+    users.users.testuser.linger = true;
     environment.systemPackages = [ (pkgs.writeShellScriptBin "omp" "exit 99") ];
     nix.settings = {
       experimental-features = [ "nix-command" "flakes" ];
@@ -89,6 +88,7 @@ in
     source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     machine.succeed("test ! -e " + state)
+    assert "pi" in ${builtins.toJSON commands}
     for name in ${builtins.toJSON commands}:
         output = machine.succeed(user(name + " --version"))
         assert "updated-" not in output, output

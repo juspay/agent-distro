@@ -76,6 +76,7 @@ in
   claude = mkCheck { } "claude" "claude" "check-claude.py" [ ] { };
   opencode = mkCheck { } "opencode" "opencode" "check-opencode.py" [ ] { AI_GATEWAY = "0"; };
   opencode2 = mkCheck { } "opencode2" "opencode2" "check-opencode2.py" [ ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
+  pi = mkCheck { } "pi" "pi" "check-pi.py" [ ] { AI_GATEWAY = "0"; };
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
     profiles = { ${profile.name} = profile; };
@@ -94,6 +95,7 @@ in
   gatewayEnv = mkCheck { } "omp" "gateway-env" "check-gateway-env.py" [ ] gatewayEnvironment;
 
   # Nonempty plugin profiles only: same home, different plugin store paths (#181).
+  piPlugins = mkCheck { } "pi" "pi-plugins" "check-pi-plugins.py" [ (updatedBin "pi") ] { AI_GATEWAY = "0"; };
   ompPlugins = mkCheck { } "omp" "omp-plugins" "check-omp-plugins.py" [ (updatedBin "omp") ] { };
   codexPlugins = mkCheck { } "codex" "codex-plugins" "check-codex-plugins.py" [ (updatedBin "codex") codexUpstream ] { };
   codexStaleMarketplace = mkCheck { } "codex" "codex-stale-marketplace" "check-codex-stale-marketplace.py" [ codexUpstream ] { };
@@ -102,6 +104,7 @@ in
   claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
 
   # Profiles containing Kolu's plugin only; the server is an offline fixture.
+  piKolu = mkCheck { } "pi" "pi-kolu" "check-pi-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
   ompKolu = mkCheck { } "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };
   codexKolu = mkCheck { } "codex" "codex-kolu" "check-codex-kolu.py" [ koluFixture ] { };
   opencodeKolu = mkCheck { } "opencode" "opencode-kolu" "check-opencode-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };

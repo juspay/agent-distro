@@ -80,6 +80,8 @@ jobs:
           OPENCODE2_LATEST: ${{ steps.opencode2.outputs.latest }}
           CODEX_BEFORE: ${{ steps.versions-before.outputs.codex-version }}
           CODEX_AFTER: ${{ steps.lock.outputs.codex-version }}
+          PI_BEFORE: ${{ steps.versions-before.outputs.pi-version }}
+          PI_AFTER: ${{ steps.lock.outputs.pi-version }}
           CLAUDE_BEFORE: ${{ steps.versions-before.outputs.claude-version }}
           CLAUDE_AFTER: ${{ steps.lock.outputs.claude-version }}
           PINS_BEFORE: ${{ steps.versions-before.outputs.pins }}

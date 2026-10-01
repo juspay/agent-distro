@@ -15,6 +15,7 @@
   };
 
   baseNode = {
+    environment.variables.PI_SKIP_VERSION_CHECK = "1";
     users.users.testuser = { isNormalUser = true; uid = 1000; };
     system.stateVersion = "24.05";
   };
