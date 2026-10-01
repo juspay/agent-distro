@@ -15,13 +15,15 @@ class Menu:
         self.profiles = [dict(p, title=p['name'], tagline=p['description']) for p in data['profiles']]
         self.harnesses = data['harnesses']
         self.remembered = data.get('remembered', '')
+        # A remembered choice only moves the cursor: the profile screen still
+        # shows whenever there is more than one profile.
         self.profile = self.profiles[0] if len(self.profiles) == 1 else None
-        self.index = next((i for i, p in enumerate(self.profiles)
-                           if p['name'] == data['default']), 0) if not self.profile else 0
-        for profile in self.profiles:
-            for index, harness in enumerate(self.harnesses):
-                if self.remembered == profile['name'] + '/' + harness['name']:
-                    self.profile, self.index = profile, index
+        if self.profile:
+            self.index = self.harness_index(self.profile)
+        else:
+            names = [p['name'] for p in self.profiles]
+            start = self.remembered.split('/', 1)[0] if '/' in self.remembered else data['default']
+            self.index = names.index(start) if start in names else 0
         self.query = ''
         self.filtering = False
 
@@ -30,10 +32,17 @@ class Menu:
         return [r for r in rows if self.query.casefold() in
                 (r['title'] + ' ' + r['tagline']).casefold()]
 
+    def harness_index(self, profile):
+        """The remembered harness under this profile, else the first row."""
+        for index, harness in enumerate(self.harnesses):
+            if self.remembered == profile['name'] + '/' + harness['name']:
+                return index
+        return 0
+
     def select(self, row):
         if self.profile:
             return self.profile['name'] + '/' + row['name']
-        self.profile, self.index = row, 0
+        self.profile, self.index = row, self.harness_index(row)
         self.query, self.filtering = '', False
 
     def back(self):

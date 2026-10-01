@@ -127,13 +127,15 @@ with tempfile.TemporaryDirectory() as state:
     with open(path, 'w') as handle:
         handle.write(remembered + '\n')
     overrides = {'XDG_STATE_HOME': state}
-    drawn = run(b'\r', version(PROFILES[-1], NAMES[-1]), overrides)
+    # The profile screen still shows; the remembered profile and harness are preselected.
+    remembered_flow = lambda keys: ([(b'Choose a profile', b'\r')] if OTHERS else []) + [(FIRST, keys)]
+    drawn = run(remembered_flow(b'\r'), version(PROFILES[-1], NAMES[-1]), overrides)
     assert '· '.encode() in drawn, drawn
-    assert b'Choose a profile' not in drawn, drawn
+    assert (b'Choose a profile' in drawn) == bool(OTHERS), drawn
     assert open(path).read().strip() == remembered
     run(None, version(DEFAULT, NAMES[0]), overrides, args=[NAMES[0], '--version'])
     assert open(path).read().strip() == remembered
-    run(b'k\r', version(PROFILES[-1], NAMES[-2]), overrides)
+    run(remembered_flow(b'k\r'), version(PROFILES[-1], NAMES[-2]), overrides)
     assert open(path).read().strip().endswith('/' + NAMES[-2])
 
     # Narrowing still shows the chooser, so its selection must be remembered.

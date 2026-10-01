@@ -85,7 +85,8 @@ get a numbered list instead.
 
 An interactive selection is remembered in
 `${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
-the chooser opens that profile and preselects that harness with a `·` marker.
+the profile screen starts on that profile, and its harness list starts on that
+harness, marked with `·`.
 Every interactive choice updates it, including `ai <profile>`. Direct selections
 with `AI_HARNESS`, `ai <harness>`, or `ai <profile> <harness>` never update it.
 An unavailable state directory is silently ignored.
