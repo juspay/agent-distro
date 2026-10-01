@@ -10,7 +10,7 @@ let
   initialization = lib.optionalString (gateway != null) ''
     if [ "''${AI_GATEWAY:-1}" != "0" ]; then
       ${import ../gateway-key.nix { inherit gum gateway; }}
-      config=$(${python3.interpreter} ${./cache-config.py} ${config}/gateway.json  \
+      config=$(PYTHONPATH=${../../lib} ${python3.interpreter} ${./cache-config.py} ${config}/gateway.json  \
         "''${XDG_CACHE_HOME:-$HOME/.cache}/agent-distro/${name}/${builtins.hashString "sha256" (toString config)}/opencode.json" \
         ${curl}/bin/curl ${lib.escapeShellArg gateway.keyEnv} ${schema})
     fi
