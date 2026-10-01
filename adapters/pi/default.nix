@@ -35,7 +35,7 @@ writeShellApplication {
     # empty key-env for gateway-less profiles disables the gateway work.
     agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.pi/agent}"
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
-      cache="''${XDG_CACHE_HOME:-''${HOME:-}}/agent-distro/pi/${builtins.hashString "sha256" (toString config)}/models.json"
+      cache="''${XDG_CACHE_HOME:-''${HOME:-$agent_dir}/.cache}/agent-distro/pi/${builtins.hashString "sha256" (toString config)}/models.json"
       PYTHONPATH=${../../lib} ${python3.interpreter} ${./pi-state.py} "$agent_dir" ${config} ${lib.optionalString (gateway != null) (lib.escapeShellArg gateway.keyEnv)} "$cache" ${curl}/bin/curl
     fi
 

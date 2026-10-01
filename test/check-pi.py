@@ -10,12 +10,19 @@ merged = json.loads(user_mcp.read_text())
 assert 'user-server' in merged['mcpServers'], merged
 settings = json.loads(user_settings.read_text())
 assert settings['personal'] == 'keep', settings
-assert 'skills' in settings, settings  # our materialised skill dirs.
+# Only profiles with skills gain a `skills` array; vanilla has none.
+if any(expected.values()):
+    assert 'skills' in settings, settings
 assert_skills()
 # Skills are served from the materialised skill dir (one SKILL.md each).
 commands = rpc()
 for name in skill_names():
     path = commands[f'skill:{name}']['sourceInfo']['path']
     assert path.endswith(f'/{name}/SKILL.md'), path
-# The second launch rewrote our entries in place; the user's own survive.
+# A byte-identical second launch must not touch mtime or inode.
+before = user_mcp.stat().st_mtime_ns, user_mcp.stat().st_ino, user_settings.stat().st_mtime_ns, user_settings.stat().st_ino
+run('--version')
+after = user_mcp.stat().st_mtime_ns, user_mcp.stat().st_ino, user_settings.stat().st_mtime_ns, user_settings.stat().st_ino
+assert after == before, (before, after)
+# The user's MCP server survives the merges.
 assert json.loads(user_mcp.read_text())['mcpServers']['user-server'] == {'command': 'true'}

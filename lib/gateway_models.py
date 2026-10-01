@@ -2,14 +2,12 @@
 
 Adapters differ in where the models land (a session-config cache, the user's
 models.json) and in what stands in when the gateway is unreachable; the fetch
-itself and the atomic cache write are the same everywhere.
+is the same everywhere, and each adapter writes the result with lib/write_json.
 """
 import json
 import os
 from pathlib import Path
 import subprocess
-
-from write_json import write_json
 
 
 def fetch_ids(curl, base_url, key_env):
@@ -33,7 +31,3 @@ def fetch_ids(curl, base_url, key_env):
         ids.append(name)
     return ids
 
-
-def write_atomic(target, data):
-    """Replace target with data, atomically and mode-preserving."""
-    write_json(target, data)

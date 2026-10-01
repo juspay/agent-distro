@@ -40,4 +40,3 @@ assert record('data-cwd')['cwd'] == data, record('data-cwd')
 bare = record('bare')
 assert bare['argv'] == ['bare', bare['env']['PLUGIN_ROOT']] and bare['cwd'] == bare['env']['PLUGIN_ROOT'], bare
 assert json.loads(Path(bare['cwd'], 'plugin.json').read_text())['name'] == 'mcp-only', bare
-

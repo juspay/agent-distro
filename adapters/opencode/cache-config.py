@@ -4,8 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from gateway_models import fetch_ids, write_atomic
-
+from gateway_models import fetch_ids
+from write_json import write_json
 
 def main(base, cache, curl, key_env, schema="v1"):
     config = json.loads(Path(base).read_text())
@@ -15,7 +15,7 @@ def main(base, cache, curl, key_env, schema="v1"):
     try:
         for name in fetch_ids(curl, settings['baseURL'], key_env):
             provider['models'][name] = {'name': name}
-        write_atomic(target, config)
+        write_json(target, config)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError,
             subprocess.SubprocessError):
         fallback = target if target.is_file() else Path(base)

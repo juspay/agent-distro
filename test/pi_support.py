@@ -64,8 +64,9 @@ def assert_skills(launcher='pi'):
 
 def assert_preserved():
     # The adapter never rewrites the user's own entries or settings; it only
-    # adds a `skills` array for our materialised skill dirs.
+    # adds a `skills` array when the profile has skills, leaving the rest.
     settings = json.loads(user_settings.read_text())
     assert 'user-server' in json.loads(user_mcp.read_text())['mcpServers']
     assert settings['personal'] == 'keep'
-    assert 'skills' in settings
+    if any(expected.values()):
+        assert 'skills' in settings

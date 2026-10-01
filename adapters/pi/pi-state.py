@@ -6,10 +6,13 @@ per-session config or CLI flag that could shadow any of them. The store paths
 the fragments name change between builds, so this step rewrites our entries on
 every launch, keeping the user's own entries untouched.
 
-The agent directory is not worth a failed launch: when it cannot be written,
-warn once and leave Pi to run with whatever it can read. Only invalid JSON in
-an *existing* file aborts, because that is the user's data, not our absence of
-a place to put it.
+Nothing is created or rewritten for its own sake: an absent file stays absent
+when we have nothing to add to it, and an existing file is replaced only when
+the merged content differs (byte-identical launches do not touch mtime or
+inode). The agent directory is not worth a failed launch: when it cannot be
+written, warn once and leave Pi to run with whatever it can read. Only invalid
+JSON in an *existing* file aborts, because that is the user's data, not our
+absence of a place to put it.
 
 Usage: pi-state.py AGENT_DIR CONFIG [KEY_ENV CACHE CURL]
 """
@@ -100,36 +103,52 @@ def merge_gateway(user, gateway_cfg, cache, key_env, curl):
     providers['litellm'] = dict(provider, models=selected)
 
 
+def write_if_changed(path, data):
+    """Write only when the merged content differs from what is on disk, so
+    byte-identical launches never touch mtime or inode."""
+    if read_json(path) == data:
+        return
+    write_json(path, data)
+
+
 def main(agent_dir, config, key_env=None, cache=None, curl=None):
     agent_dir = Path(agent_dir).resolve()
     config = Path(config)
     try:
-        agent_dir.mkdir(parents=True, exist_ok=True)
         mcp_fragment = json.loads((config / 'mcp.json').read_text())
         settings_fragment = json.loads((config / 'settings.json').read_text())
+        gateway_path = config / 'models.json'
+        gateway_active = (gateway_path.is_file() and key_env and cache and curl
+                          and os.environ.get('AI_GATEWAY', '1') != '0')
 
-        mcp_user = load_user(agent_dir / 'mcp.json', 'mcp.json')
-        settings_user = load_user(agent_dir / 'settings.json', 'settings.json')
+        mcp_path = agent_dir / 'mcp.json'
+        settings_path = agent_dir / 'settings.json'
+        mcp_user = load_user(mcp_path, 'mcp.json')
+        settings_user = load_user(settings_path, 'settings.json')
         merge_mcp(mcp_user, mcp_fragment)
         # Skills are not gateway-dependent: Pi loads the `skills` array from
         # user settings on every launch, so our entries are fused in whatever
         # the gateway state, and the subcommand breakage of a --skill flag
         # never happens in the first place.
         merge_skills(settings_user, settings_fragment.get('skills', []))
-        write_json(agent_dir / 'mcp.json', mcp_user)
-        write_json(agent_dir / 'settings.json', settings_user)
-
         # Absent gateway defaults ride along with the models: a user who
         # opted out (AI_GATEWAY=0) keeps their settings byte-for-byte.
-        gateway_path = config / 'models.json'
-        if (gateway_path.is_file() and key_env and cache and curl
-                and os.environ.get('AI_GATEWAY', '1') != '0'):
+        if gateway_active:
             merge_defaults(settings_user, settings_fragment.get('defaults', {}))
-            write_json(agent_dir / 'settings.json', settings_user)
-            gateway_fragment = json.loads(gateway_path.read_text())
             models_user = load_user(agent_dir / 'models.json', 'models.json')
-            merge_gateway(models_user, gateway_fragment, Path(cache), key_env, curl)
-            write_json(agent_dir / 'models.json', models_user)
+            merge_gateway(models_user, json.loads(gateway_path.read_text()),
+                          Path(cache), key_env, curl)
+            write_if_changed(agent_dir / 'models.json', models_user)
+
+        # An absent file stays absent when we have nothing to add to it; an
+        # existing file is rewritten only when the merged content differs, and
+        # settings.json is written once, after both merges.
+        if mcp_fragment['mcpServers'] or mcp_path.is_file():
+            write_if_changed(mcp_path, mcp_user)
+        if (settings_fragment.get('skills')
+                or (gateway_active and settings_fragment.get('defaults'))
+                or settings_path.is_file()):
+            write_if_changed(settings_path, settings_user)
     except OSError as error:
         print(f'pi: cannot write {agent_dir}: {error}; skipping state updates', file=sys.stderr)
 
