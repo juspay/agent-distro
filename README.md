@@ -132,7 +132,7 @@ nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
-Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`. Each run logs one line saying what it did: on Linux `journalctl --user -u agent-distro-update` shows it, and on macOS it lands in `~/.local/state/agent-distro/<source>/update.log`.
+Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`. Update and failure events go to `${XDG_STATE_HOME:-~/.local/state}/agent-distro/history.log` (Home Manager's `xdg.stateHome`), e.g. `2026-10-01T23:03:17Z juspay updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. Full run output is in `journalctl --user -u agent-distro-update` on Linux and `<stateHome>/agent-distro/<source>/update.log` on macOS.
 
 ## Build your own distribution
 
