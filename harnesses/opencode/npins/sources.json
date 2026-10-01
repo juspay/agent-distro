@@ -7,14 +7,14 @@
         "owner": "anomalyco",
         "repo": "opencode"
       },
-      "submodules": false,
-      "revision": "51ef4be1d3c122f18fefb510dca8d778571f4f18",
-      "url": "https://github.com/anomalyco/opencode/archive/51ef4be1d3c122f18fefb510dca8d778571f4f18.tar.gz",
-      "hash": "sha256-x1ZG4/zsL1/EfpelNByRMi5mSHumXfmoq/LPQ3+jhrc=",
       "pre_releases": false,
       "version_upper_bound": "2",
       "release_prefix": null,
-      "version": "v1.18.33"
+      "submodules": false,
+      "version": "v1.18.34",
+      "revision": "aec0b9a6d8898f68f923aaf08b7306d931fd9d76",
+      "url": "https://api.github.com/repos/anomalyco/opencode/tarball/refs/tags/v1.18.34",
+      "hash": "sha256-ygTBG79utH0A1Dmg+tjEeTA633bLO0OfDdi6AwwQnZw="
     }
   },
   "version": 8
