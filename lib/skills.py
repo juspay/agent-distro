@@ -6,7 +6,7 @@ from pathlib import Path
 def materialise(root, description):
     """Copy the description's approved skill files under root/skills/<plugin>
     and return that directory, the value a harness loads. Only reader-approved
-    files, dereferenced (`cp -L`) as in the Claude and OpenCode adapters."""
+    files, dereferenced (`cp -L`) as opencode's adapter does."""
     plugin = description['manifest']['name']
     target = Path(root) / 'skills' / plugin
     for name, files in description['skills'].items():

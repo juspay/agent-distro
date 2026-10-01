@@ -296,7 +296,7 @@ binary, so its source input follows pi-nix's own daily updates.
 
 CI pushes every store path it realises to the OSS cache, so users and later runs
 fetch OMP, OpenCode, and Pi instead of building them; `ATTIC_TOKEN` is required except
-
+on fork PRs, which build without pushing. Superseded PR runs are cancelled.
 For manual updates, advance `oh-my-pi.url` and `opencode.url`, run
 `python3 .github/scripts/advance-opencode-v2.py`, then `nix flake update`,
 `npins --directory profiles/<name>/npins update` per profile, and
