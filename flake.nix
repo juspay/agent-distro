@@ -88,12 +88,12 @@
       # Upstream's own packages, for the daily update to report: a harness
       # version is a property of the lock, not of any profile.
       harnesses = lib.genAttrs systems (system: {
-        pi = pi.packages.${system}.default;
         omp = oh-my-pi.packages.${system}.default;
         codex = codex-cli.packages.${system}.default;
         claude = claude-code.packages.${system}.default;
         opencode = opencode.packages.${system}.default;
         opencode2 = opencode-v2 nixpkgs.legacyPackages.${system};
+        pi = pi.packages.${system}.default;
       });
 
       lib = { inherit mkLaunchers mkFlake; };

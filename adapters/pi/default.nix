@@ -20,19 +20,19 @@ writeShellApplication {
         fi
       ''}
       status=0
-      ${python3.interpreter} ${./merge-mcp.py} --check "$agent_dir" ${config}/config.json "''${gateway[@]}" || status=$?
+      ${python3.interpreter} ${./merge-state.py} --check "$agent_dir" ${config}/config.json "''${gateway[@]}" || status=$?
       if [ "$status" = 1 ]; then exit 1; fi
       if [ "$status" = 0 ]; then
         ${lib.optionalString (gateway != null) ''
           if [ "''${AI_GATEWAY:-1}" != "0" ]; then
             ${import ../gateway-key.nix { inherit gum gateway; }}
-            cached=$(${python3.interpreter} ${../opencode/cache-config.py} ${config}/gateway.json \
+            cached=$(${python3.interpreter} ${../../lib/gateway_models.py} ${config}/gateway.json \
               "''${XDG_CACHE_HOME:-''${HOME:-$agent_dir}/.cache}/agent-distro/pi/${builtins.hashString "sha256" (toString config)}/models.json" \
               ${curl}/bin/curl ${lib.escapeShellArg gateway.keyEnv} pi)
             gateway=("$cached")
           fi
         ''}
-        ${python3.interpreter} ${./merge-mcp.py} --merge "$agent_dir" ${config}/config.json "''${gateway[@]}"
+        ${python3.interpreter} ${./merge-state.py} --merge "$agent_dir" ${config}/config.json "''${gateway[@]}"
       fi
     else
       echo 'Pi: warning: HOME and PI_CODING_AGENT_DIR are unset; skipping config merges.' >&2

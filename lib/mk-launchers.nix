@@ -26,10 +26,6 @@ let
 
   commands = { inherit omp codex claude opencode opencode2 pi; };
 
-  pi = withPackages (pkgs.callPackage ../adapters/pi {
-    inherit plugins gateway;
-    pi = upstream.pi.packages.${system}.default;
-  });
   omp = withPackages (pkgs.callPackage ../adapters/omp {
     inherit plugins gateway;
     omp = oh-my-pi.packages.${system}.default;
@@ -38,6 +34,10 @@ let
     inherit plugins;
     marketplaceName = "${profile.name}-ai";
     codex = codex-cli.packages.${system}.default;
+  });
+  claude = withPackages (pkgs.callPackage ../adapters/claude {
+    inherit plugins;
+    claude = claude-code.packages.${system}.default;
   });
   opencode = withPackages (pkgs.callPackage ../adapters/opencode {
     inherit plugins gateway;
@@ -48,9 +48,9 @@ let
     schema = "v2";
     opencode = opencode-v2 pkgs;
   });
-  claude = withPackages (pkgs.callPackage ../adapters/claude {
-    inherit plugins;
-    claude = claude-code.packages.${system}.default;
+  pi = withPackages (pkgs.callPackage ../adapters/pi {
+    inherit plugins gateway;
+    pi = upstream.pi.packages.${system}.default;
   });
 in
 commands // {

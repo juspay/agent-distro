@@ -1,4 +1,6 @@
-"""Refresh distro resources while retaining Pi's user state in its own directory."""
+"""Merge Pi state: ours replace ours, user entries stay untouched,
+and invalid JSON aborts before any write.
+"""
 import json
 import os
 from pathlib import Path
@@ -26,11 +28,18 @@ def prepare(directory, fragment, gateway):
              for name in ['mcp', 'settings'] + (['models'] if gateway else [])}
     # Validate every input before any write, including files another merge owns.
     data = {name: read_object(path) for name, path in paths.items()}
-    object_field(data['mcp'], 'mcpServers').update(fragment['mcpServers'])
+    servers = data['mcp'].get('mcpServers', {})
+    if not isinstance(servers, dict):
+        raise ValueError('mcpServers must be a JSON object')
+    if fragment['mcpServers']:
+        data['mcp']['mcpServers'] = servers | fragment['mcpServers']
     skills = data['settings'].get('skills', [])
     if not isinstance(skills, list) or any(not isinstance(s, str) for s in skills):
         raise ValueError('skills must be an array of paths')
-    data['settings']['skills'] = [s for s in skills if '-pi-config/skills/' not in s] + fragment['skills']
+    # Stale resource recognition relies on the pi-config derivation name.
+    refreshed = [s for s in skills if '-pi-config/skills/' not in s] + fragment['skills']
+    if refreshed != skills:
+        data['settings']['skills'] = refreshed
     if gateway:
         object_field(data['models'], 'providers')['litellm'] = gateway['providers']['litellm']
         for key in ['defaultProvider', 'defaultModel']:
@@ -45,21 +54,21 @@ def main(mode, directory, fragment_path, gateway_path=None):
     staged = []
     try:
         for name, path in paths.items():
-            changed = not path.exists() or read_object(path) != data[name]
+            # An absent file is an empty object, not a reason to create one.
+            if read_object(path) == data[name]:
+                continue
             path.parent.mkdir(parents=True, exist_ok=True)
             fd, temporary = tempfile.mkstemp(prefix='.pi-', dir=path.parent)
-            staged.append((Path(temporary), path, changed))
+            staged.append((Path(temporary), path))
             with os.fdopen(fd, 'w') as stream:
                 json.dump(data[name], stream, indent=2)
                 stream.write('\n')
                 os.fchmod(stream.fileno(), stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600)
         if mode != '--check':
-            for temporary, path, changed in staged:
-                # No-op launches preserve timestamps as well as user values.
-                if changed:
-                    temporary.replace(path)
+            for temporary, path in staged:
+                temporary.replace(path)
     finally:
-        for temporary, _, _ in staged:
+        for temporary, _ in staged:
             temporary.unlink(missing_ok=True)
 
 

@@ -82,9 +82,9 @@ def main():
     body.write_text(
         f"Automated flake input update.\n\n{omp_note}\n\n{codex_note}\n\n{claude_note}\n\n"
         f"{opencode_note}\n\n{opencode2_note}\n\n{pi_note}\n\n{pin_note}\n\n"
-        "Pi packaging: https://github.com/sadjow/pi-nix\n\n"
         "Codex packaging: https://github.com/sadjow/codex-cli-nix\n\n"
         "Claude Code packaging: https://github.com/sadjow/claude-code-nix\n\n"
+        "Pi packaging: https://github.com/sadjow/pi-nix\n\n"
         f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"
         f"The [Update Flake]({run_url}) workflow approves the runs GitHub holds "
         "back for automation-created pull requests, waits for this pull request's "

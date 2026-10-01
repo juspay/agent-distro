@@ -7,10 +7,36 @@ import sys
 import tempfile
 
 
+def add_map_model(models, name):
+    models[name] = {'name': name}
+
+
+def add_list_model(models, name):
+    if name not in {model['id'] for model in models}:
+        models.append({'id': name})
+
+
+SCHEMAS = {
+    'v1': {'provider': ('provider', 'litellm'), 'url': ('options', 'baseURL'),
+           'add_model': add_map_model, 'label': 'OpenCode'},
+    'v2': {'provider': ('providers', 'litellm'), 'url': ('settings', 'baseURL'),
+           'add_model': add_map_model, 'label': 'OpenCode'},
+    'pi': {'provider': ('providers', 'litellm'), 'url': ('baseUrl',),
+           'add_model': add_list_model, 'label': 'Pi'},
+}
+
+
+def at_path(value, path):
+    for key in path:
+        value = value[key]
+    return value
+
+
 def main(base, cache, curl, key_env, schema="v1"):
     config = json.loads(Path(base).read_text())
-    provider = config['providers' if schema in ('v2', 'pi') else 'provider']['litellm']
-    url = provider['baseUrl'] if schema == 'pi' else provider['settings' if schema == 'v2' else 'options']['baseURL']
+    shape = SCHEMAS[schema]
+    provider = at_path(config, shape['provider'])
+    url = at_path(provider, shape['url'])
     target = Path(cache)
     try:
         header = 'Authorization: Bearer ' + os.environ[key_env]
@@ -30,11 +56,7 @@ def main(base, cache, curl, key_env, schema="v1"):
             name = model['id']
             if not isinstance(name, str) or not name:
                 raise ValueError('model id is not a nonempty string')
-            if schema == 'pi':
-                if name not in {m['id'] for m in provider['models']}:
-                    provider['models'].append({'id': name})
-            else:
-                provider['models'][name] = {'name': name}
+            shape['add_model'](provider['models'], name)
         target.parent.mkdir(parents=True, exist_ok=True)
         # Concurrent launches must never see a partially written config.
         with tempfile.NamedTemporaryFile(mode='w', dir=target.parent, delete=False) as output:
@@ -47,7 +69,7 @@ def main(base, cache, curl, key_env, schema="v1"):
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         fallback = target if target.is_file() else Path(base)
         source = 'cached model list' if fallback == target else 'two profile aliases'
-        print(f'{"Pi" if schema == "pi" else "OpenCode"}: gateway model discovery failed; using {source} from {fallback}', file=sys.stderr)
+        print(f'{shape["label"]}: gateway model discovery failed; using {source} from {fallback}', file=sys.stderr)
     print(target if target.is_file() else base)
 
 

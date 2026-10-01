@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 ADAPTER = Path(sys.argv.pop())
-cache_config = runpy.run_path(str(ADAPTER / 'cache-config.py'))['main']
+from gateway_models import main as cache_config
 
 
 class AdapterTests(unittest.TestCase):

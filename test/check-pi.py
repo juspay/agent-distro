@@ -25,9 +25,13 @@ for target in [settings, mcp]:
 with tempfile.TemporaryDirectory() as directory:
     relocated = Path(directory)
     run('--version', overrides={'PI_CODING_AGENT_DIR': directory})
-    assert json.loads((relocated / 'mcp.json').read_text())['mcpServers'] == {
+    servers = json.loads((relocated / 'mcp.json').read_text())['mcpServers'] if (relocated / 'mcp.json').exists() else {}
+    assert servers == {
         name: server for name, server in json.loads(mcp.read_text())['mcpServers'].items()
         if name != 'personal'}
+    if not expected:
+        assert not (relocated / 'mcp.json').exists()
+        assert not (relocated / 'settings.json').exists()
     relocated.chmod(0o500)
     try:
         run('--version', overrides={'PI_CODING_AGENT_DIR': directory})

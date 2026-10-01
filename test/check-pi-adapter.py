@@ -10,7 +10,7 @@ import unittest
 
 ADAPTER = Path(sys.argv.pop())
 write_config = runpy.run_path(str(ADAPTER / 'write-config.py'))['main']
-merge = runpy.run_path(str(ADAPTER / 'merge-mcp.py'))['main']
+merge = runpy.run_path(str(ADAPTER / 'merge-state.py'))['main']
 
 
 class PiAdapterTests(unittest.TestCase):
@@ -57,6 +57,44 @@ class PiAdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'declared by both'):
                 write_config(str(root / 'collision'), '/bin/sh', '/usr/bin/env', str(gateway),
                              str(description), str(description))
+
+    def test_empty_contributions_leave_files_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fragment = root / 'fragment.json'
+            fragment.write_text(json.dumps({'skills': [], 'mcpServers': {}}))
+            agent = root / 'agent'
+            for mode in ['--check', '--merge']:
+                merge(mode, str(agent), str(fragment))
+                self.assertFalse(agent.exists())
+            agent.mkdir()
+            for name, content in [('mcp', '{}'), ('settings', '{"theme": "light"}')]:
+                (agent / f'{name}.json').write_text(content)
+            before = {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+                      for path in agent.iterdir()}
+            for mode in ['--check', '--merge']:
+                merge(mode, str(agent), str(fragment))
+                for path, original in before.items():
+                    self.assertEqual((path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns), original)
+            (agent / 'settings.json').write_text(json.dumps({
+                'skills': ['/personal/skills', '/nix/store/old-pi-config/skills/example']}))
+            merge('--merge', str(agent), str(fragment))
+            self.assertEqual(json.loads((agent / 'settings.json').read_text()), {'skills': ['/personal/skills']})
+            (agent / 'settings.json').write_text('{')
+            with self.assertRaises(ValueError):
+                merge('--merge', str(agent), str(fragment))
+            self.assertEqual((agent / 'settings.json').read_text(), '{')
+
+    def test_only_contributing_files_are_created(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fragment = root / 'fragment.json'
+            for name, contribution in [('settings', {'skills': ['/managed/skills'], 'mcpServers': {}}),
+                                       ('mcp', {'skills': [], 'mcpServers': {'managed': {'command': '/server'}}})]:
+                fragment.write_text(json.dumps(contribution))
+                agent = root / name
+                merge('--merge', str(agent), str(fragment))
+                self.assertEqual([path.name for path in agent.iterdir()], [f'{name}.json'])
 
     def test_atomic_preservation_and_validation(self):
         with tempfile.TemporaryDirectory() as directory:
