@@ -30,7 +30,6 @@ writeShellApplication {
       echo 'warning: agent-distro is replacing OPENCODE_CONFIG.' >&2
     fi
     export OPENCODE_CONFIG="$config"
-    ${lib.optionalString (schema == "v2") (builtins.readFile ./session-defaults.sh)}
     exec ${lib.getExe opencode} "$@"
   '';
 }

@@ -6,15 +6,15 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
   export NIX_STORE_DIR="$TMPDIR/store"
   cp -R ${agent-distro} source
   chmod -R u+w source
-  mkdir -p source/harnesses/discovery-stub/tests
+  mkdir -p source/harnesses/discovery-stub
   cat > source/harnesses/discovery-stub/meta.nix <<'META'
   {
     title = "Discovery Stub";
     order = 999;
     releaseNotes = version: "https://example.invalid/releases/" + version;
     checks = [
-      { name = "discoveryStub"; script = ./tests/check.py; }
-      { name = "discoveryStubGateway"; script = ./tests/check.py; requires = [ "gateway" ]; }
+      { name = "discoveryStub"; script = "assert True"; }
+      { name = "discoveryStubGateway"; script = "assert True"; requires = [ "gateway" ]; }
     ];
   }
   META
@@ -24,7 +24,6 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
   cat > source/harnesses/discovery-stub/default.nix <<'ADAPTER'
   { pkgs, plugins, gateway, package, profileName }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
   ADAPTER
-  echo 'assert True' > source/harnesses/discovery-stub/tests/check.py
   hash=$(nix-hash --type sha256 --base32 source)
   tar -cf source.tar source
   nix-instantiate --extra-experimental-features flakes --eval --strict --json --option pure-eval true --option substituters "" --expr "

@@ -283,7 +283,7 @@ profile-specific registration, such as Codex’s marketplace name.
 
 Checks declare `{ name; script; requires ? []; packages ? []; env ? {}; diskSize ? null; }`.
 Packages can name `updated`, `upstream`, `koluFixture`, or `recordFixture`.
-Gateway VM driver scripts start with `# nixos-test-driver`; other scripts run
-as the unprivileged VM user. Gateway checks receive the shared fake service and
+`script` is VM-driver Python. Use `import ../../test/guest-script.nix ./tests/check.py`
+to run a guest script as the unprivileged VM user. Gateway checks receive the shared fake service and
 launchers configured against it. `mkLaunchers` also accepts a `sources = name: pkgs: …`
 hook for package fixtures.

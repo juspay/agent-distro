@@ -1,11 +1,12 @@
 # Binary recipes also depend on their packaging repo's package set. Retain it
 # while calling package.nix directly, without evaluating the packaging flake.
-{ pkgs, src }:
+{ pkgs, src, args ? { } }:
 let
   lock = builtins.fromJSON (builtins.readFile "${src}/flake.lock");
   pinned = lock.nodes.${lock.nodes.${lock.root}.inputs.nixpkgs}.locked;
+  packagePkgs = import (builtins.fetchTree pinned) {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    config.allowUnfree = true;
+  };
 in
-import (builtins.fetchTree pinned) {
-  inherit (pkgs.stdenv.hostPlatform) system;
-  config.allowUnfree = true;
-}
+packagePkgs.callPackage "${src}/package.nix" args

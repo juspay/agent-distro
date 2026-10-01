@@ -38,17 +38,6 @@ let
     let
       gateway = builtins.elem "gateway" requires;
       selected = if gateway then gatewayLaunchers else launchers;
-      scripts = builtins.path {
-        path = builtins.dirOf script;
-        name = "${harness}-test-scripts";
-        filter = path: type: type == "directory" || lib.hasSuffix ".py" path;
-      };
-      body = builtins.readFile script;
-      driver = lib.hasPrefix "# nixos-test-driver" body;
-      gatewayBody = lib.replaceStrings
-        [ "@keyEnv@" "@models.large@" "@models.small@" ]
-        [ profile.gateway.keyEnv profile.gateway.models.large profile.gateway.models.small ]
-        body;
     in
     pkgs.testers.runNixOSTest {
       inherit name;
@@ -66,10 +55,9 @@ let
           machine.wait_for_unit("fake-gateway.service")
           machine.wait_for_open_port(8080)
         ''}
-        ${if driver then gatewayBody else ''
-          command = "python ${scripts}/${baseNameOf script} " + shlex.quote('${builtins.toJSON expected}') + " " + shlex.quote('${profile.name}-ai') + " " + shlex.quote('${if gateway then gatewayProfile.gateway.url else if (profile.gateway or null) == null then "" else profile.gateway.url}')
-          machine.succeed("su - testuser -c " + shlex.quote(command))
-        ''}
+        gateway = json.loads(${builtins.toJSON (builtins.toJSON (profile.gateway or null))})
+        arguments = ${builtins.toJSON (lib.escapeShellArgs [ (builtins.toJSON expected) "${profile.name}-ai" (if gateway then gatewayProfile.gateway.url else if (profile.gateway or null) == null then "" else profile.gateway.url) ])}
+        ${script}
       '';
     };
   checks = lib.concatMap

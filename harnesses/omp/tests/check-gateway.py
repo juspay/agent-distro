@@ -1,11 +1,10 @@
-# nixos-test-driver
 CONFIG = "/home/testuser/.omp/agent/config.yml"
 # Runtime opt-out uses the same package, needs no gateway key, and must not
 # seed gateway settings before upstream OMP starts.
-machine.succeed("su - testuser -c 'env -u @keyEnv@ AI_GATEWAY=0 omp --version </dev/null'")
+machine.succeed(f"su - testuser -c 'env -u {gateway['keyEnv']} AI_GATEWAY=0 omp --version </dev/null'")
 machine.fail(f"test -e {CONFIG}")
 
-deprecated = machine.succeed("su - testuser -c 'env -u @keyEnv@ JUSPAY=0 omp --version </dev/null 2>&1'")
+deprecated = machine.succeed(f"su - testuser -c 'env -u {gateway['keyEnv']} JUSPAY=0 omp --version </dev/null 2>&1'")
 assert deprecated.count("JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.") == 1, deprecated
 machine.fail(f"test -e {CONFIG}")
 
@@ -14,7 +13,7 @@ version = machine.succeed("su - testuser -c 'omp --version'")
 print(f"omp version: {version}")
 
 # Missing credentials must fail before launching OMP or changing config.
-for key in ["-u @keyEnv@", "@keyEnv@="]:
+for key in [f"-u {gateway['keyEnv']}", f"{gateway['keyEnv']}="]:
     machine.fail(f"su - testuser -c 'env {key} omp --version </dev/null'")
 
 def run_as_user(command):
@@ -31,10 +30,10 @@ def effective_setting(key):
     return json.loads(run_as_user(f"omp config get {key} --json"))["value"]
 
 assert effective_setting("modelRoles") == {
-    "default": "litellm/@models.large@",
-    "smol": "litellm/@models.small@",
-    "task": "litellm/@models.large@",
-    "slow": "litellm/@models.large@",
+    "default": f"litellm/{gateway['models']['large']}",
+    "smol": f"litellm/{gateway['models']['small']}",
+    "task": f"litellm/{gateway['models']['large']}",
+    "slow": f"litellm/{gateway['models']['large']}",
 }
 assert effective_setting("task.showResolvedModelBadge") is True
 machine.fail("test -e /home/testuser/.omp/agent/models.yml")
@@ -45,14 +44,14 @@ old_config = "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthrop
 write_config(CONFIG, old_config)
 run_as_user("omp --version")
 config = machine.succeed(f"cat {CONFIG}")
-for expected in ["# user settings", "setupVersion: 2", "default: 'anthropic/expensive:high' # keep choice", "smol: litellm/@models.small@", "task: litellm/@models.large@", "slow: litellm/@models.large@", "showResolvedModelBadge: true"]:
+for expected in ["# user settings", "setupVersion: 2", "default: 'anthropic/expensive:high' # keep choice", f"smol: litellm/{gateway['models']['small']}", f"task: litellm/{gateway['models']['large']}", f"slow: litellm/{gateway['models']['large']}", "showResolvedModelBadge: true"]:
     assert expected in config, config
 
 # A fully configured file must not even be rewritten — /model choices win,
 # and so does the user turning a defaulted setting off. The badge is the
 # only default that is a *choice* rather than a pointer at our gateway, so
 # `false` is the value a user is most likely to have set themselves.
-custom = config.replace("litellm/@models.small@", "litellm/custom-fast").replace("litellm/@models.large@", "litellm/custom-large").replace("showResolvedModelBadge: true", "showResolvedModelBadge: false")
+custom = config.replace(f"litellm/{gateway['models']['small']}", "litellm/custom-fast").replace(f"litellm/{gateway['models']['large']}", "litellm/custom-large").replace("showResolvedModelBadge: true", "showResolvedModelBadge: false")
 write_config(CONFIG, custom)
 before = machine.succeed(f"stat -c '%i %Y' {CONFIG}")
 run_as_user("omp --version")
@@ -67,7 +66,7 @@ run_as_user("mkdir -p /home/testuser/relocated")
 relocated = "/home/testuser/relocated/config.yml"
 write_config(relocated, old_config)
 run_as_user("PI_CODING_AGENT_DIR=/home/testuser/relocated omp --version")
-assert "task: litellm/@models.large@" in machine.succeed(f"cat {relocated}")
+assert f"task: litellm/{gateway['models']['large']}" in machine.succeed(f"cat {relocated}")
 assert machine.succeed(f"cat {CONFIG}") == custom
 
 for initial in ["# my settings", "setupVersion: 2\n"]:
@@ -75,8 +74,8 @@ for initial in ["# my settings", "setupVersion: 2\n"]:
     run_as_user("PI_CODING_AGENT_DIR=/home/testuser/relocated omp --version")
     repaired = machine.succeed(f"cat {relocated}")
     assert initial in repaired
-    assert "default: litellm/@models.large@" in repaired
-    assert "slow: litellm/@models.large@" in repaired
+    assert f"default: litellm/{gateway['models']['large']}" in repaired
+    assert f"slow: litellm/{gateway['models']['large']}" in repaired
 
 for invalid in ["modelRoles: [", "modelRoles: []\n", "modelRoles: null\n", "task: []\n", "task: null\n"]:
     write_config(relocated, invalid)
@@ -89,7 +88,7 @@ print("✅ existing roles, settings and comments survive migration; invalid conf
 personal = "# personal provider\nmodelRoles:\n  default: openai/my-model\n"
 write_config(relocated, personal)
 roles = json.loads(run_as_user(
-    "env -u @keyEnv@ AI_GATEWAY=0 PI_CODING_AGENT_DIR=/home/testuser/relocated "
+    f"env -u {gateway['keyEnv']} AI_GATEWAY=0 PI_CODING_AGENT_DIR=/home/testuser/relocated "
     "omp config get modelRoles --json"
 ))["value"]
 assert roles == {"default": "openai/my-model"}

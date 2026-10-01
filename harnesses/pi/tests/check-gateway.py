@@ -1,4 +1,3 @@
-# nixos-test-driver
 def pi_user(command):
     return machine.succeed("su - testuser -c " + shlex.quote(command))
 
@@ -10,7 +9,7 @@ def pi_write(name, data):
     pi_user("printf %s " + shlex.quote(json.dumps(data)) + f" > {PI_DIR}/{name}.json")
 
 # Opt-out must not create a provider file or seed gateway defaults.
-pi_user("env -u @keyEnv@ AI_GATEWAY=0 pi --version")
+pi_user(f"env -u {gateway['keyEnv']} AI_GATEWAY=0 pi --version")
 machine.fail(f"test -e {PI_DIR}/models.json")
 assert "defaultProvider" not in pi_read("settings")
 assert "defaultModel" not in pi_read("settings")
@@ -22,14 +21,14 @@ pi_write("models", {"providers": {"personal": personal_provider}})
 pi_user("pi --version")
 models = pi_read("models")
 provider = models["providers"]["litellm"]
-aliases = {"@models.large@", "@models.small@"}
+aliases = {gateway['models']['large'], gateway['models']['small']}
 assert {m["id"] for m in provider["models"]} == aliases | {"served-large", "served-small"}
 assert provider["baseUrl"] == "http://127.0.0.1:8080/v1"
 assert provider["api"] == "openai-completions"
-assert provider["apiKey"] == "$" + "@keyEnv@", provider
+assert provider["apiKey"] == "$" + gateway['keyEnv'], provider
 assert models["providers"]["personal"] == personal_provider
 assert pi_read("settings")["defaultProvider"] == "litellm"
-assert pi_read("settings")["defaultModel"] == "@models.large@"
+assert pi_read("settings")["defaultModel"] == gateway['models']['large']
 listing = pi_user("pi --list-models litellm")
 for model in aliases | {"served-large", "served-small"}:
     assert model in listing, listing
@@ -47,13 +46,13 @@ pi_user("XDG_CACHE_HOME=/home/testuser/pi-empty-cache pi --version")
 assert {m["id"] for m in pi_read("models")["providers"]["litellm"]["models"]} == aliases
 
 before = {name: pi_user(f"cat {PI_DIR}/{name}.json") for name in ["settings", "models", "mcp"]}
-pi_user("env -u @keyEnv@ AI_GATEWAY=0 pi --version")
+pi_user(f"env -u {gateway['keyEnv']} AI_GATEWAY=0 pi --version")
 assert all(pi_user(f"cat {PI_DIR}/{name}.json") == value for name, value in before.items())
-machine.fail("su - testuser -c 'env -u @keyEnv@ pi --version </dev/null'")
+machine.fail(f"su - testuser -c 'env -u {gateway['keyEnv']} pi --version </dev/null'")
 # Bad provider JSON must stop before refreshing MCP or settings.
 pi_user(f"printf '{{' > {PI_DIR}/models.json")
 machine.fail("su - testuser -c 'pi --version'")
 assert pi_user(f"cat {PI_DIR}/models.json") == "{"
 assert all(pi_user(f"cat {PI_DIR}/{name}.json") == before[name] for name in ["settings", "mcp"])
-pi_user("env -u @keyEnv@ AI_GATEWAY=0 pi --version")
+pi_user(f"env -u {gateway['keyEnv']} AI_GATEWAY=0 pi --version")
 assert pi_user(f"cat {PI_DIR}/models.json") == "{"
