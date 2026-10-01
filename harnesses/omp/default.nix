@@ -59,6 +59,7 @@ let
 in
 writeShellApplication {
   name = "omp";
+  derivationArgs.version = omp.version;
   text = ''
     ${initialization}
 

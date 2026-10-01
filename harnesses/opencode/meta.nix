@@ -1,5 +1,6 @@
 {
   title = "OpenCode";
+  tagline = "OpenCode v1 · terminal agent";
   order = 3;
   releaseNotes = version: "https://github.com/anomalyco/opencode/releases/tag/v${builtins.head (builtins.split "\\+" version)}";
   checks = [

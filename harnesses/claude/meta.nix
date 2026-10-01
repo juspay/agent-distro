@@ -1,5 +1,6 @@
 {
   title = "Claude Code";
+  tagline = "Claude Code · Anthropic login";
   order = 2;
   releaseNotes = version: "https://github.com/anthropics/claude-code/releases/tag/v${builtins.head (builtins.split "\\+" version)}";
   checks = [
