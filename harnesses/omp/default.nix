@@ -63,6 +63,6 @@ writeShellApplication {
     ${initialization}
 
     # CLI roots compose with the user's extensions; config arrays replace them.
-    exec ${lib.getExe omp} ${lib.concatMapStringsSep " " (plugin: "-e ${lib.escapeShellArg (toString plugin)}") plugins} "$@"
+    exec ${lib.getExe omp} ${lib.concatMapStringsSep " " (plugin: "-e ${lib.escapeShellArg "${plugin}"}") plugins} "$@"
   '';
 }
