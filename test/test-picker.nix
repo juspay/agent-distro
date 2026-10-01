@@ -23,6 +23,7 @@ in
     status, output = machine.execute("su - testuser -c 'ai --version </dev/null 2>&1'")
     assert status == 1, output
     assert "Set AI_HARNESS to ${builtins.concatStringsSep ", " (builtins.genList (i: builtins.elemAt harnesses i) (builtins.length harnesses - 1))}, or ${builtins.elemAt harnesses (builtins.length harnesses - 1)}" in output, output
+    assert "ai <harness>" in output, output
     assert "github:" not in output, output
 
     for override in ["AI_HARNESS=bad", "AI_HARNESS="]:

@@ -9,10 +9,10 @@ Set Height 300
 Set Padding 30
 Set WaitTimeout 120s
 
-Type "nix run github:juspay/agent-distro -- --version"
+Type "AI_PROFILE=juspay XDG_STATE_HOME=$(mktemp -d) nix run github:juspay/agent-distro -- --version"
 Sleep 500ms
 Enter
-Wait+Screen /juspay   Claude Code/
+Wait+Screen /Claude Code/
 Sleep 1500ms
 Down
 Sleep 400ms

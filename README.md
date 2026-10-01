@@ -29,44 +29,65 @@ AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
 
 To keep the agents installed and updated daily, see [Install](#install).
 
-The list shows every profile's harnesses, the default profile's rows first:
+With several profiles, choose a profile first (the default is highlighted),
+then choose a harness. After selecting `vanilla`, the list looks like this
+(versions reflect the packages pinned at build time):
 
 ```
-❯ vanilla  Oh My Pi
-  vanilla  Codex
-  vanilla  Claude Code
-  vanilla  OpenCode
-  vanilla  OpenCode v2
-  vanilla  Pi
-  juspay   Oh My Pi
-  juspay   Codex
-  juspay   Claude Code
-  juspay   OpenCode
-  juspay   OpenCode v2
-  juspay   Pi
+Upstream harnesses with your own provider
+
+❯ Oh My Pi     Oh My Pi · batteries included                             18.4.4
+  Codex        Codex · OpenAI login                                     0.159.3
+  Claude Code  Claude Code · Anthropic login                           2.1.286
+  OpenCode     OpenCode v1 · terminal agent                    1.18.33+51ef4be
+  OpenCode v2  OpenCode v2 · preview, private server per launch           2.0.20
+  Pi           Pi · OMP's upstream                                      0.99.2
 ```
 
 | Variable | Values | Effect |
 | --- | --- | --- |
-| `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list; required in scripts and non-interactive shells |
+| `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list; also usable in scripts and non-interactive shells |
 | `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 
-Narrowed to one profile, the list needs no profile column and gets the
-profile's description as a header:
+Use `ai <harness>` to launch directly, `ai <profile> <harness>` to select
+both, or `ai <profile>` to narrow the chooser. For example:
+
+```sh
+ai codex --version
+ai juspay claude --version
+ai juspay
+ai --list                      # profile harness title version, one row per line
+```
+
+`AI_HARNESS` and `AI_PROFILE` take precedence over positional selections;
+the profile otherwise defaults to the registry default. Recognized leading
+names are consumed; other arguments and everything after `--` are passed to
+the harness unchanged.
+
+Narrowed to one profile, the chooser opens its harness list directly:
 
 ```
 Juspay skills + Kolu, via Juspay's LiteLLM gateway
 
-❯ Oh My Pi
-  Codex
-  Claude Code
-  OpenCode
-  OpenCode v2
-  Pi
+❯ Oh My Pi     Oh My Pi · batteries included                             18.4.4
+  Codex        Codex · OpenAI login                                     0.159.3
+  Claude Code  Claude Code · Anthropic login                           2.1.286
+  OpenCode     OpenCode v1 · terminal agent                    1.18.33+51ef4be
+  OpenCode v2  OpenCode v2 · preview, private server per launch           2.0.20
+  Pi           Pi · OMP's upstream                                      0.99.2
 ```
 
-Escape or ctrl-c leaves the list.
+Use arrows or `j`/`k` to move and Enter to choose. Left or `h` goes back to
+profiles; Escape goes back or exits, and `q` or Ctrl-C exits. `/` filters by
+title or tagline; Escape clears the filter. Small or unsupported terminals
+get a numbered list instead.
+
+An interactive selection is remembered in
+`${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
+the chooser opens that profile and preselects that harness with a `·` marker.
+Environment-selected harnesses and positional shortcuts never update it;
+an unavailable state directory is silently ignored.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
