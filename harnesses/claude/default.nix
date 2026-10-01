@@ -1,6 +1,6 @@
 # Claude's plugin layout and CLI are local to this adapter. Shared sources stay
 # portable; no provider initialization or persistent plugin install is needed.
-{ pkgs, plugins, gateway, package }:
+{ pkgs, plugins, gateway, package, profileName }:
 let
   inherit (pkgs) lib callPackage writeShellApplication runCommand runtimeShell jq python3 coreutils;
   claude = package;

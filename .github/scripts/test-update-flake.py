@@ -10,6 +10,40 @@ SCRIPTS = Path(__file__).resolve().parent
 
 
 class UpdateFlakeTests(unittest.TestCase):
+    def test_update_sources_discovers_new_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / 'bin'
+            tools.mkdir()
+            nix = tools / 'nix'
+            nix.write_text('#!/bin/sh\n'
+                           '[ "$1" = run ] && [ "$2" = nixpkgs#npins ] && [ "$3" = -- ] || exit 1\n'
+                           'shift 3\nexec npins "$@"\n')
+            npins = tools / 'npins'
+            npins.write_text('#!/bin/sh\n'
+                             '[ "$1" = --directory ] && [ -d "$2" ] && [ "$3" = update ] || exit 1\n'
+                             'printf "%s\\n" "$2" >> pin-calls\n')
+            for tool in [nix, npins]:
+                tool.chmod(0o755)
+            env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}')
+            (root / 'profiles/team/npins').mkdir(parents=True)
+            subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
+            self.assertEqual((root / 'pin-calls').read_text().splitlines(), ['profiles/team/npins'])
+
+            # Adding only a harness directory must enroll its pins and updater.
+            harness = root / 'harnesses/new-agent'
+            (harness / 'npins').mkdir(parents=True)
+            (harness / 'update.py').write_text(
+                'from pathlib import Path\n'
+                'Path(__file__).with_name("custom-pin.txt").write_text("updated\\n")\n')
+            (root / 'lib/npins').mkdir(parents=True)
+            (root / 'lib/helper/npins').mkdir(parents=True)
+            (root / 'pin-calls').unlink()
+            subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
+            self.assertEqual(set((root / 'pin-calls').read_text().splitlines()), {
+                'profiles/team/npins', 'harnesses/new-agent/npins', 'lib/npins', 'lib/helper/npins'})
+            self.assertEqual((harness / 'custom-pin.txt').read_text(), 'updated\n')
+
     def test_versions_are_one_json_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

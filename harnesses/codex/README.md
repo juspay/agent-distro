@@ -7,3 +7,7 @@ Vanilla skips registration entirely. Local sessions default to `--no-daemon`
 to avoid experimental background-server startup failures. The launcher does
 not install, start, or update a shared server. Explicit `--remote` connections
 and daemon-management subcommands remain available.
+
+The npins branch pin tracks `sadjow/codex-cli-nix`. Its standalone binary
+packaging recipe uses the packaging repo’s pinned package set, with the
+`native` runtime, preserving its upstream derivation at the same revision.

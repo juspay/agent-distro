@@ -1,5 +1,5 @@
 # Pi's subcommands require resources in settings, not prepended CLI flags.
-{ pkgs, plugins, gateway, package }:
+{ pkgs, plugins, gateway, package, profileName }:
 let
   inherit (pkgs) lib callPackage writeShellApplication runCommand writeText runtimeShell python3 coreutils curl gum;
   pi = package;

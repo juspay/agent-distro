@@ -29,6 +29,7 @@
         gateway = null;
       };
       readPlugin = pkgs.callPackage "${agent-distro}/lib/read-plugin.nix" { };
+      reserved = [ "default" ] ++ (import "${agent-distro}/lib/discover-harnesses.nix").ordered;
       named = profile: lib.mapAttrs' (check: lib.nameValuePair "${profile}-${check}");
     in
     {
@@ -78,8 +79,20 @@
               !(builtins.tryEval (agent-distro.lib.mkFlake {
                 profile = agent-distro.profiles.vanilla // { inherit name; };
               })).success)
-            ([ "default" ] ++ (import "${agent-distro}/lib/discover-harnesses.nix").ordered);
-            pkgs.runCommand "reserved-profile" { } "touch $out";
+            reserved;
+            pkgs.runCommand "reserved-profile" { nativeBuildInputs = [ pkgs.nix ]; } ''
+              export NIX_STATE_DIR="$TMPDIR/nix-state"
+              ${lib.concatMapStringsSep "\n" (name: ''
+                if nix-instantiate --eval --expr ${lib.escapeShellArg ''
+                  (import ${agent-distro}/lib/validate-profile.nix) { name = ${builtins.toJSON name}; }
+                ''} 2>error; then
+                  echo "Reserved profile was accepted: ${name}" >&2
+                  exit 1
+                fi
+                grep -F ${lib.escapeShellArg ''Profile "${name}" uses a reserved name; reserved names: ${lib.concatStringsSep ", " reserved}.''} error
+              '') reserved}
+              touch "$out"
+            '';
           packages = import ./test-packages.nix {
             inherit pkgs;
             inherit mkLaunchers;

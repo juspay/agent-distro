@@ -1,10 +1,10 @@
 # Codex owns marketplace registration, installation, and its persistent state.
 # Portable plugin contents and provider policy stay outside this adapter.
-{ pkgs, plugins, gateway, package }:
+{ pkgs, plugins, gateway, package, profileName }:
 let
   inherit (pkgs) lib callPackage writeShellApplication runCommand jq;
   codex = package;
-  marketplaceName = "${package.profileName}-ai";
+  marketplaceName = "${profileName}-ai";
 
   # Codex loads the original directory itself; the description only supplies
   # its validated name, so an invalid manifest fails here as it does for Claude.

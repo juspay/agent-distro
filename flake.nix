@@ -17,6 +17,8 @@
       mkLaunchers = import ./lib/mk-launchers.nix;
       mkFlake = import ./lib/mk-flake.nix { inherit nixpkgs; };
       systems = import ./lib/systems.nix;
+      packageSets = lib.genAttrs systems (system: import nixpkgs { inherit system; });
+      pkgsFor = system: packageSets.${system};
 
       # Discovered, not listed: adding a directory is the whole registration
       # step, which is what keeps one distribution's plugins, gateway and name
@@ -36,11 +38,11 @@
         else throw "profiles/registry.nix defaults to \"${registry.default}\", which is not a directory under profiles/.";
 
       bundles = lib.genAttrs systems (system:
-        let pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
+        let pkgs = pkgsFor system;
         in lib.mapAttrs (_: profile: (mkLaunchers { inherit pkgs profile; }).bundle) profiles);
 
       pickers = lib.genAttrs systems (system:
-        let pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
+        let pkgs = pkgsFor system;
         in pkgs.callPackage ./lib/picker.nix {
           inherit default;
           profiles = lib.mapAttrs
@@ -64,7 +66,7 @@
       # version is a property of the lock, not of any profile.
       harnesses = lib.genAttrs systems (system:
         lib.genAttrs discovered.ordered (name:
-          import (./harnesses + "/${name}/source.nix") { pkgs = import nixpkgs { inherit system; config.allowUnfree = true; }; }));
+          import (./harnesses + "/${name}/source.nix") { pkgs = pkgsFor system; }));
       harnessMeta = versions: lib.mapAttrs
         (name: meta: {
           inherit (meta) title order;

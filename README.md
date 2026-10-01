@@ -55,7 +55,16 @@ The list shows every profile's harnesses, the default profile's rows first:
 Narrowed to one profile, the list needs no profile column and gets the
 profile's description as a header:
 
+```
+Juspay skills + Kolu, via Juspay's LiteLLM gateway
 
+❯ Oh My Pi
+  Codex
+  Claude Code
+  OpenCode
+  OpenCode v2
+  Pi
+```
 
 Escape or ctrl-c leaves the list.
 
@@ -227,8 +236,6 @@ profile is still registered when you launch `vanilla`, and so are the model
 roles a gateway filled into OMP's config. Claude Code's plugins last only for
 the session.
 
-
-
 ## Development
 
 ```sh
@@ -240,36 +247,39 @@ just demo              # re-record doc/demo.gif
 python3 .github/scripts/test-update-flake.py
 ```
 
-Daily CI updates every `profiles/*/npins`, `harnesses/*/npins`, and `lib/npins`,
-runs every `harnesses/*/update.py`, then updates the root and test locks. The
-update report reads resolved versions and each harness's release-note metadata.
-OMP uses a release pin; OpenCode v1 uses a release pin bounded below v2.
-Source builds use flake-compat with upstream locks, preserving binary-cache
-paths. Binary packaging recipes use their packaging repo's pinned package set.
+Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
+directories under `profiles/`, `harnesses/`, and `lib/`, and runs each harness's
+`update.py`. CI then updates the root and test locks. The update report reads
+resolved versions and each harness's release-note metadata.
 
 CI pushes realised paths to the OSS cache (`ATTIC_TOKEN` is needed except on
 fork PRs). The daily update PR merges only after the required Linux/macOS builds
-and VM/template checks pass. Consumers run `nix flake update agent-distro`.
+and VM/template checks pass. The update workflow approves runs GitHub holds
+back for automation-created pull requests and squash-merges after the checks
+required by `Require CI on main` pass. Superseded PR runs are cancelled.
+Consumers run `nix flake update agent-distro`.
 
-For manual updates, run `npins --directory <directory>/npins update` for each
-pin directory, every `harnesses/*/update.py`, `nix flake update`, and then
-`bash test/update-lock.sh`.
+For manual updates, run `bash .github/scripts/update-sources.sh`,
+`nix flake update`, and then `bash test/update-lock.sh`.
 
 Consumers can import `test/lib.nix { pkgs; launchers; profile; features; }`.
 Checks are selected by required features (`plugins`, `gateway`, `kolu`, `spec`)
 from each harness's metadata; `picker` is shared. Rebuild and gateway checks
-also accept `mkLaunchers`. The test flake covers vanilla, Juspay, and spec fixtures.
+also accept `mkLaunchers`. Select plugin rebuild checks only for nonempty skill
+plugins. The test flake covers vanilla, Juspay, and spec fixtures, plus `registry`
+(the picker over the whole profile registry) and `reader` (plugin-reader checks
+without a VM).
 
 ## Adding a harness
 
 Create `harnesses/<name>/` with four files: `meta.nix` (title, order,
 `releaseNotes = version: URL`, and checks), `default.nix` (the adapter accepting
-`{ pkgs, plugins, gateway, package }`), `source.nix` (`{ pkgs }` to package), and
-`README.md` (design notes). Put pins in `npins/`, scripts in `tests/`, and an
+`{ pkgs, plugins, gateway, package, profileName }`), `source.nix` (`{ pkgs }` to
+package), and `README.md` (design notes). Put pins in `npins/`, scripts in `tests/`, and an
 optional custom updater in `update.py`. Nothing outside this directory needs
 registration: the picker, bundles, outputs, reserved names, checks, and daily
-report all discover it. The package passed to an adapter carries `profileName`
-for profile-specific registration; the underlying derivation is unchanged.
+report all discover it. The explicit `profileName` argument supports
+profile-specific registration, such as Codex’s marketplace name.
 
 Checks declare `{ name; script; requires ? []; packages ? []; env ? {}; diskSize ? null; }`.
 Packages can name `updated`, `upstream`, `koluFixture`, or `recordFixture`.

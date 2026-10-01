@@ -35,19 +35,8 @@ jobs:
           echo "versions=$versions" >> "$GITHUB_OUTPUT"
           echo "pins=$pins" >> "$GITHUB_OUTPUT"
 
-      - name: Advance directory-local pins
-        run: |
-          for pins in profiles/*/npins harnesses/*/npins lib/npins; do
-            [ -d "$pins" ] || continue
-            nix run nixpkgs#npins -- --directory "$pins" update
-          done
-
-      - name: Run harness updaters
-        run: |
-          for updater in harnesses/*/update.py; do
-            [ -f "$updater" ] || continue
-            python3 "$updater"
-          done
+      - name: Advance directory-local sources
+        run: bash .github/scripts/update-sources.sh
 
       - name: Update the root lock
         id: lock
@@ -83,10 +72,9 @@ jobs:
             flake.nix
             flake.lock
             test/flake.lock
-            profiles/*/npins/sources.json
-            harnesses/*/npins/sources.json
-            harnesses/*/sources.json
-            lib/npins/sources.json
+            harnesses
+            profiles
+            lib/npins
           title: ${{ steps.report.outputs.pr-title }}
           body-path: ${{ steps.report.outputs.pr-body-path }}
           commit-message: "chore(flake): update inputs"

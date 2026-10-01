@@ -1,5 +1,5 @@
 # OMP owns LiteLLM initialization and portable extension loading.
-{ pkgs, plugins, gateway, package }:
+{ pkgs, plugins, gateway, package, profileName }:
 let
   inherit (pkgs) lib writeShellApplication formats python3 gum;
   omp = package;

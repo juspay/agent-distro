@@ -1,5 +1,5 @@
 # A session config composes with the user's global and project settings.
-{ pkgs, plugins, gateway, package }:
+{ pkgs, plugins, gateway, package, profileName }:
 let
   inherit (pkgs) lib callPackage writeShellApplication runCommand writeText runtimeShell python3 coreutils curl gum;
   opencode = package;

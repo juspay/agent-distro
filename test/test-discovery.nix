@@ -22,16 +22,16 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
   { pkgs }: pkgs.writeShellScriptBin "discovery-stub" "echo stub"
   SOURCE
   cat > source/harnesses/discovery-stub/default.nix <<'ADAPTER'
-  { pkgs, plugins, gateway, package }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
+  { pkgs, plugins, gateway, package, profileName }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
   ADAPTER
   echo 'assert True' > source/harnesses/discovery-stub/tests/check.py
   hash=$(nix-hash --type sha256 --base32 source)
   tar -cf source.tar source
-  tar -cf nixpkgs.tar -C ${builtins.dirOf (toString nixpkgs)} ${baseNameOf (toString nixpkgs)}
-  nix-instantiate --eval --strict --json --option pure-eval true --option substituters "" --expr "
+  nix-instantiate --extra-experimental-features flakes --eval --strict --json --option pure-eval true --option substituters "" --expr "
     let
       root = builtins.fetchTarball { url = \"file://$PWD/source.tar\"; sha256 = \"$hash\"; };
-      nixpkgs = builtins.fetchTarball { url = \"file://$PWD/nixpkgs.tar\"; sha256 = \"${nixpkgs.narHash}\"; };
+      # Authorize the fixed-hash store path in the temporary pure evaluator.
+      nixpkgs = builtins.fetchTree { type = \"path\"; path = \"${nixpkgs}\"; narHash = \"${nixpkgs.narHash}\"; };
       pkgs = import nixpkgs { system = \"x86_64-linux\"; };
       nixpkgsInput = {
         inherit (pkgs) lib;

@@ -23,8 +23,8 @@ let
   harnesses = (import ./discover-harnesses.nix).ordered;
   commands = lib.genAttrs harnesses (name: withPackages (import (../harnesses + "/${name}/default.nix") {
     inherit pkgs plugins gateway;
-    # Adapter context only; this does not change the underlying derivation.
-    package = sources name pkgs // { profileName = profile.name; };
+    package = sources name pkgs;
+    profileName = profile.name;
   }));
 
 in

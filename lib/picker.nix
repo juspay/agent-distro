@@ -7,8 +7,9 @@
 let
   names = [ default ] ++ lib.remove default (lib.attrNames profiles);
   others = lib.remove default names;
-  harnesses = (import ./discover-harnesses.nix).ordered;
-  titles = builtins.mapAttrs (_: meta: meta.title) (import ./discover-harnesses.nix).metadata;
+  discovered = import ./discover-harnesses.nix;
+  harnesses = discovered.ordered;
+  titles = builtins.mapAttrs (_: meta: meta.title) discovered.metadata;
 
   widest = strings: lib.foldl' lib.max 0 (map lib.stringLength strings);
   pad = width: text: text + lib.concatStrings (lib.genList (_: " ") (width - lib.stringLength text));
