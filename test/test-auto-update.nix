@@ -90,8 +90,8 @@ in
         return user("XDG_RUNTIME_DIR=/run/user/1000 systemctl --user " + command)
 
     def journal_has(line):
-        journal = "XDG_RUNTIME_DIR=/run/user/1000 journalctl --user -u agent-distro-update --no-pager"
-        machine.wait_until_succeeds(user(journal + " | grep -F " + shlex.quote(line)))
+        journal = "journalctl _UID=1000 _SYSTEMD_USER_UNIT=agent-distro-update.service --no-pager"
+        machine.wait_until_succeeds(journal + " | grep -F " + shlex.quote(line))
 
     source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
