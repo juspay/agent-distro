@@ -40,16 +40,16 @@ let
     record() {
       ${pkgs.coreutils}/bin/printf '%s %s %s\n' "$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" ${lib.escapeShellArg cfg.profile} "$1" >> "$history"
     }
-    declare -A oldVersions=() oldTitles=() newVersions=()
-    oldNames=()
-    hasOld=false
+    declare -A old_versions=() old_titles=() new_versions=()
+    old_names=()
+    has_old=false
     # Capture versions before nix build replaces the current out-link.
     if [ -n "$old" ] && [ -f "$old/share/agent-distro/versions" ]; then
-      hasOld=true
+      has_old=true
       while IFS=$'\t' read -r name title version; do
-        oldNames+=("$name")
-        oldVersions["$name"]=$version
-        oldTitles["$name"]=$title
+        old_names+=("$name")
+        old_versions["$name"]=$version
+        old_titles["$name"]=$title
       done < "$old/share/agent-distro/versions"
     fi
     status=0
@@ -72,21 +72,23 @@ let
       }
       if [ -f "$new/share/agent-distro/versions" ]; then
         while IFS=$'\t' read -r name title version; do
-          newVersions["$name"]=$version
-          if [ "$hasOld" = false ]; then
+          new_versions["$name"]=$version
+          if [ "$has_old" = false ]; then
             add_change "$title $version"
-          elif [ -z "''${oldVersions[$name]+present}" ]; then
+          elif [ -z "''${old_versions[$name]+present}" ]; then
             add_change "$title added $version"
-          elif [ "''${oldVersions[$name]}" != "$version" ]; then
-            add_change "$title ''${oldVersions[$name]} → $version"
+          elif [ "''${old_versions[$name]}" != "$version" ]; then
+            add_change "$title ''${old_versions[$name]} → $version"
           fi
         done < "$new/share/agent-distro/versions"
+        for name in "''${old_names[@]}"; do
+          if [ -z "''${new_versions[$name]+present}" ]; then
+            add_change "''${old_titles[$name]} removed"
+          fi
+        done
+      else
+        changes="versions not recorded by this bundle"
       fi
-      for name in "''${oldNames[@]}"; do
-        if [ -z "''${newVersions[$name]+present}" ]; then
-          add_change "''${oldTitles[$name]} removed"
-        fi
-      done
       record "updated: ''${changes:-no harness version changed}"
       ${pkgs.coreutils}/bin/echo "agent-distro: ${cfg.profile} updated ''${old:-nothing} -> $new"
     fi

@@ -168,7 +168,7 @@ in
     machine.succeed(user("cp ${legacy}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    events.append("updated: Claude Code removed, Codex removed")
+    events.append("updated: versions not recorded by this bundle")
     check_history()
     machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
@@ -207,5 +207,13 @@ in
     machine.succeed(user("printf 'export PATH=/run/current-system/sw/bin:$PATH\\n' > ~/.bash_profile"))
     warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate 2>&1"))
     assert "PATH collision for ${collision}: /run/current-system/sw/bin/${collision}; bare ${collision} runs /run/current-system/sw/bin/${collision}" in warning, warning
+
+    # A manifest-less first install also has unknown versions.
+    machine.succeed("test ! -e " + state)
+    machine.succeed(user("cp ${legacy}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    events.append("updated: versions not recorded by this bundle")
+    check_history()
   '';
 }

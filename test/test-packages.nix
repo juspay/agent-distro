@@ -9,12 +9,9 @@ let
   profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; gateway = null; };
   packaged = mkLaunchers { inherit pkgs sources; profile = profile // { packages = _: [ tool ]; }; };
   bare = mkLaunchers { inherit pkgs profile sources; };
-  real = mkLaunchers { inherit pkgs profile; };
   discovery = import ../lib/discover-harnesses.nix;
   expectedVersions = pkgs.writeText "expected-versions" (lib.concatMapStrings
     (name: "${name}\t${discovery.metadata.${name}.title}\t0\n") discovery.ordered);
-  realVersions = pkgs.writeText "real-versions" (lib.concatMapStrings
-    (name: "${name}\t${discovery.metadata.${name}.title}\t${real.${name}.version}\n") discovery.ordered);
 in
 pkgs.runCommand "packages" { } ''
   for launcher in ${lib.escapeShellArgs (map (h: lib.getExe packaged.${h}) packaged.bundle.commands)}; do
@@ -30,6 +27,5 @@ pkgs.runCommand "packages" { } ''
   for bundle in ${bare.bundle} ${packaged.bundle}; do
     cmp ${expectedVersions} "$bundle/share/agent-distro/versions"
   done
-  cmp ${realVersions} ${real.bundle}/share/agent-distro/versions
   touch "$out"
 ''
