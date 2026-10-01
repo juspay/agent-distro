@@ -12,6 +12,9 @@ second_skills = {name: rpc('pi-updated')[f'skill:{name}']['sourceInfo']['path']
 # The rebuilt plugins land in new store paths, so the skill roots move.
 assert set(second_skills) == set(first_skills), (first_skills, second_skills)
 assert all(second_skills[name] != first_skills[name] for name in first_skills), (first_skills, second_skills)
-# The user's MCP server and settings are untouched by the second build.
+# The user's MCP server and settings are untouched by the second build; the
+# only thing we add is the `skills` array pointing at this build's dirs.
 assert json.loads(user_mcp.read_text())['mcpServers']['user-server'] == {'command': 'true'}
-assert json.loads(user_settings.read_text()) == {'personal': 'keep'}
+settings = json.loads(user_settings.read_text())
+assert settings['personal'] == 'keep'
+assert [entry for entry in settings.get('skills', []) if 'pi-config/skills' in entry]

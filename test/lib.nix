@@ -83,7 +83,6 @@ in
     default = profile.name;
   });
 
-
   gateway = pkgs.testers.runNixOSTest (import ./test-gateway.nix {
     inherit launchers profile;
     opencodeLaunchers = ((if mkLaunchers != null then mkLaunchers else throw "Gateway tests require mkLaunchers") {
@@ -103,7 +102,6 @@ in
   opencode2Plugins = mkCheck { } "opencode2" "opencode2-plugins" "check-opencode2-plugins.py" [ (updatedBin "opencode2") ] { AI_GATEWAY = "0"; OPENCODE_TEST_BINARY = "opencode2"; };
   claudePlugins = mkCheck { } "claude" "claude-plugins" "check-claude-plugins.py" [ (updatedBin "claude") ] { };
   piPlugins = mkCheck { } "pi" "pi-plugins" "check-pi-plugins.py" [ (updatedBin "pi") ] { AI_GATEWAY = "0"; };
-
 
   # Profiles containing Kolu's plugin only; the server is an offline fixture.
   ompKolu = mkCheck { } "omp" "omp-kolu" "check-omp-kolu.py" [ koluFixture ] { AI_GATEWAY = "0"; };

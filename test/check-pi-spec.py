@@ -1,5 +1,3 @@
-import re
-import shutil
 from pi_support import *
 
 # Pi runs each stdio server through the generated launcher: the spec's
@@ -10,19 +8,12 @@ records.mkdir()
 env['FIXTURE_RECORDS'] = str(records)
 
 
-def raw_pi():
-    launcher = Path(shutil.which('pi')).read_text()  # bundle → adapter launcher
-    inner = re.search(r'^exec (\S+) "\$@"', launcher, re.MULTILINE).group(1)
-    adapter = Path(inner).read_text()
-    return re.search(r'^exec (\S+) --skill', adapter, re.MULTILINE).group(1)
-
-
 def record(server):
     return json.loads((records / f'{server}.json').read_text())
 
 
 run('--version')  # the launcher's merge writes our servers into mcp.json
-listing = json.loads(run('mcp', 'list', '--json', launcher=raw_pi()).stdout)
+listing = json.loads(run('mcp', 'list', '--json').stdout)
 servers = {server['name']: server for server in listing['servers']}
 for server in ['placeholders', 'explicit-cwd', 'data-cwd', 'bare']:
     assert servers[server]['state'] == 'connected', servers[server]
@@ -49,3 +40,4 @@ assert record('data-cwd')['cwd'] == data, record('data-cwd')
 bare = record('bare')
 assert bare['argv'] == ['bare', bare['env']['PLUGIN_ROOT']] and bare['cwd'] == bare['env']['PLUGIN_ROOT'], bare
 assert json.loads(Path(bare['cwd'], 'plugin.json').read_text())['name'] == 'mcp-only', bare
+

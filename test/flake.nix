@@ -79,9 +79,9 @@
             })).success) [ "default" "omp" "codex" "claude" "opencode" "opencode2" "pi" ]; pkgs.runCommand "reserved-profile" { nativeBuildInputs = [ pkgs.nix ]; } ''
             export NIX_STATE_DIR="$TMPDIR/nix-state"
             if nix-instantiate --eval --expr '(import ${agent-distro}/lib/validate-profile.nix) { name = "pi"; }' 2>error; then
-            grep -F 'Profile "pi" uses a reserved name; reserved names: default, omp, codex, claude, opencode, opencode2, pi.' error
               exit 1
             fi
+            grep -F 'Profile "pi" uses a reserved name; reserved names: default, omp, codex, claude, opencode, opencode2, pi.' error
             touch "$out"
           '';
           packages = import ./test-packages.nix {

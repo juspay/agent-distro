@@ -8,7 +8,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import tempfile
+
+from write_json import write_json
 
 
 def fetch_ids(curl, base_url, key_env):
@@ -34,14 +35,5 @@ def fetch_ids(curl, base_url, key_env):
 
 
 def write_atomic(target, data):
-    """Replace target with data, atomically; concurrent launches never see a
-    partially written file."""
-    target = Path(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode='w', dir=target.parent, delete=False) as output:
-        temporary = Path(output.name)
-        json.dump(data, output, indent=2)
-    try:
-        temporary.replace(target)
-    finally:
-        temporary.unlink(missing_ok=True)
+    """Replace target with data, atomically and mode-preserving."""
+    write_json(target, data)

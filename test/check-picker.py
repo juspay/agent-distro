@@ -83,7 +83,8 @@ run(DOWN + b'\r', b'codex-cli')
 run(DOWN * 2 + b'\r', b'(Claude Code)')
 for row, harness in enumerate(['opencode', 'opencode2', 'pi'], start=3):
     version = subprocess.check_output(
-        ['ai', '--version'], env={**os.environ, 'AI_HARNESS': harness, 'AI_GATEWAY': '0'}, text=True).strip()
+        ['ai', '--version'], env=dict(os.environ, AI_GATEWAY='0', AI_PROFILE=DEFAULT, AI_HARNESS=harness),
+        text=True, timeout=60).strip()
     run(DOWN * row + b'\r', version)
 assert b'OpenCode v2' in drawn, drawn
 assert b'Pi' in drawn, drawn

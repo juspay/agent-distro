@@ -3,6 +3,16 @@
 **Your team's coding agents, in one command.** Package your skills, MCP servers,
 and model gateway once, and run them in Oh My Pi, Codex, Claude Code, OpenCode v1, OpenCode v2, and Pi.
 
+```sh
+nix run github:juspay/agent-distro
+```
+
+![Picking a harness from the list and landing in it](./doc/demo.gif)
+
+- **Nothing to install.** Nix fetches the agent you pick; arguments after `--`
+  go straight to it.
+- **Always current.** Harnesses are updated daily, and an update lands only
+  after the Linux/macOS builds and the NixOS VM tests pass.
 - **Write once.** One [Agent Plugins](https://agent-plugins.org) directory works
   in all six harnesses; the per-harness translation is done for you.
 - **Composes with your setup.** Your own plugins, settings, credentials, and
@@ -235,16 +245,11 @@ LiteLLM proxy used by OMP, OpenCode, and Pi.
   `model` is selected. For scripted runs use `opencode2 run --standalone`; for
   inspection use `opencode2 api --standalone` because v2's `debug config` and
   `mcp list` commands attach to the shared service.
-- **Pi:** merges its MCP servers into `~/.pi/agent/mcp.json` (or
-  `PI_CODING_AGENT_DIR`), since Pi reads only that file and nothing per-launch
-  can shadow it: our entries are keyed by server name and rewritten on every
-  launch, the user's own servers are never touched, and the write is atomic.
-  Skills are passed as `--skill` roots per plugin. Gateway models extend the
-  profile's two aliases with the launcher's `/v1/models` fetch (cached list,
-  then the aliases alone, as fallback), and absent `defaultProvider`/
-  `defaultModel` settings are filled in. `AI_GATEWAY=0` skips all of it.
-  `pi mcp list --json` and RPC (`--no-session --mode rpc`) inspect MCP servers
-  and skills without a model or credentials.
+- **Pi:** fuses plugin MCP servers, skills (an array in `settings.json`), and
+  gateway models into `~/.pi/agent/` on every launch; the user's own entries
+  win and the writes are atomic. A dead gateway falls back to the cached
+  `/v1/models` list, then the profile's two aliases. `AI_GATEWAY=0` skips the
+  gateway work; `pi mcp list --json` and RPC inspect state without a model.
 
 Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
 An invalid manifest fails the build with a message naming the field; skipped
@@ -275,7 +280,7 @@ python3 .github/scripts/test-update-flake.py
 ```
 
 Daily CI uses `.github/scripts/advance-release-pin.sh <input> <owner/repo>`
-to advance OMP's, OpenCode's, and Pi's release tags, updates the root lock, advances every
+to advance OMP's and OpenCode's release tags, updates the root lock, advances every
 `profiles/*/npins`, then updates `test/flake.lock` against this checkout. It
 opens a dependency pull request naming the harness versions and the profile
 pins that moved, approves the runs GitHub holds back for

@@ -1,17 +1,16 @@
 """Translate validated plugins into Pi's inputs, once, at build time.
 
-Pi reads MCP servers only from `~/.pi/agent/mcp.json` — there is no CLI flag
-or package manifest key — so this writes the launcher scripts and a JSON
-fragment of our `mcpServers` entries. merge-mcp.py (the launcher) fuses the
-fragment into the user's file at launch: Pi has no per-session config, so the
-store paths the fragment names must be refreshed on every launch anyway, and
-writing only our entries keeps the user's own servers intact.
+Pi reads its state statically: MCP servers from `~/.pi/agent/mcp.json`,
+skills and defaults from `settings.json`, models from `models.json`. There is
+no CLI flag or package manifest key for any of them, so this writes the launcher
+scripts and one JSON fragment per user file; pi-state.py (the launcher) fuses
+the fragments into the user's files at launch, keeping their own entries
+intact.
 
 Usage: write-config.py OUT BASH ENV [GATEWAY_JSON] DESCRIPTION...
 """
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -24,12 +23,14 @@ def main(out, bash, env, gateway_path, *descriptions):
     (root / 'bin').mkdir(parents=True)
     owners = {}
     servers = {}
-    skills = []
+    skill_dirs = []
     for path in descriptions:
         description = json.loads(Path(path).read_text())
         plugin = description['manifest']['name']
         if description['skills']:
-            skills.append(materialise(root, description))
+            # The reader-approved files only, under this config's store path:
+            # pi-state.py recognises our skill entries by that path segment.
+            skill_dirs.append(materialise(root, description))
         for index, (name, server) in enumerate(description['mcpServers'].items()):
             if name in owners:
                 raise SystemExit(f'Pi: MCP server {json.dumps(name)} is declared by both '
@@ -48,10 +49,18 @@ def main(out, bash, env, gateway_path, *descriptions):
                       'Pi adapter cannot launch a command containing "="', file=sys.stderr)
                 continue
             script = root / 'bin' / f'{plugin}-{index}-{re.sub(r"[^A-Za-z0-9._-]", "_", name)}'
-            script.write_text(launcher(description, name, server, bash, env, 'PI_MCP_DATA'))
+            script.write_text(launcher(description, name, server, bash, env))
             script.chmod(0o700)
             servers[name] = {'command': str(script)}
     (root / 'mcp.json').write_text(json.dumps({'mcpServers': servers}, indent=2))
+    # Skills are not gateway-dependent: Pi loads the `skills` array from user
+    # settings on every launch, so the entries (this config's materialised
+    # dirs) are fused in unconditionally rather than from a --skill flag that
+    # broke Pi's other subcommands.
+    (root / 'settings.json').write_text(json.dumps({
+        'skills': [str(root / 'skills' / Path(path).name) for path in skill_dirs],
+        'defaults': gateway_defaults(gateway_path),
+    }, indent=2))
     gateway = json.loads(Path(gateway_path).read_text())
     if gateway is not None:
         (root / 'models.json').write_text(json.dumps({
@@ -66,10 +75,13 @@ def main(out, bash, env, gateway_path, *descriptions):
                 },
             },
         }, indent=2))
-        (root / 'settings.json').write_text(json.dumps({
-            'defaultProvider': 'litellm',
-            'defaultModel': gateway['models']['large'],
-        }, indent=2))
+
+
+def gateway_defaults(gateway_path):
+    gateway = json.loads(Path(gateway_path).read_text())
+    if gateway is None:
+        return {}
+    return {'defaultProvider': 'litellm', 'defaultModel': gateway['models']['large']}
 
 
 if __name__ == '__main__':

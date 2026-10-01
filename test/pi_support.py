@@ -1,11 +1,10 @@
 """Read Pi discovery without authentication or model calls.
 
-Pi's subcommands are unreachable once a global option precedes them (a
-known CLI quirk: `pi --skill X mcp list --json` parses `--json` as a main
-option), so MCP inspection runs without the launcher's `--skill` flags — MCP
-servers come from the merged `~/.pi/agent/mcp.json`, not from `--skill`.
-Skills, which only `--skill` provides, are read over RPC (`get_commands`),
-which lists them without starting a model session.
+MCP servers come from the merged `~/.pi/agent/mcp.json`, skills from the
+`skills` array in `~/.pi/agent/settings.json` (both fused by the launcher's
+pi-state step, which never passes --skill flags that would break Pi's other
+subcommands). MCP inspection runs the launcher directly; skills are read over
+RPC (`get_commands`), which lists them without starting a model session.
 """
 import json
 import os
@@ -64,6 +63,9 @@ def assert_skills(launcher='pi'):
 
 
 def assert_preserved():
-    # The adapter never rewrites the user's own entries or settings.
+    # The adapter never rewrites the user's own entries or settings; it only
+    # adds a `skills` array for our materialised skill dirs.
+    settings = json.loads(user_settings.read_text())
     assert 'user-server' in json.loads(user_mcp.read_text())['mcpServers']
-    assert json.loads(user_settings.read_text())['personal'] == 'keep'
+    assert settings['personal'] == 'keep'
+    assert 'skills' in settings

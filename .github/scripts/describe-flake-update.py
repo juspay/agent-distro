@@ -72,7 +72,6 @@ def main():
         json.loads(env["PINS_BEFORE"]), json.loads(env["PINS_AFTER"]),
     )
     changes = omp_changes + codex_changes + claude_changes + opencode_changes + opencode2_changes + pi_changes + pin_changes
-
     title = "chore(flake): update inputs"
     if changes:
         title += " (" + "; ".join(changes) + ")"

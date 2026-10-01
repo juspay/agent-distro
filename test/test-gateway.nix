@@ -183,20 +183,24 @@ in {
     machine.wait_for_open_port(8080)
     run_as_user("AI_GATEWAY=1 pi --version")
     settings = json.loads(run_as_user(f"cat {PI}/settings.json"))
-    assert settings == {"defaultModel": "personal/model", "defaultProvider": "personal", "user": 1}, settings
+    assert settings["defaultModel"] == "personal/model" and settings["defaultProvider"] == "personal" and settings["user"] == 1, settings
+    assert "skills" in settings, settings  # skills are fused unconditionally.
     merged_models = json.loads(run_as_user(f"cat {PI}/models.json"))
     assert merged_models["top"] == 1 and merged_models["providers"]["personal"]["baseUrl"] == "x", merged_models
     assert {model["id"] for model in merged_models["providers"]["litellm"]["models"]} == {
         "served-large", "served-small", "${profile.gateway.models.large}", "${profile.gateway.models.small}"}, merged_models
     machine.succeed("systemctl stop fake-gateway.service")
 
-    # AI_GATEWAY=0 leaves all three files alone.
-    before = run_as_user(f"cat {PI}/models.json {PI}/settings.json")
+    # AI_GATEWAY=0 skips only the gateway work: no models.json write and no
+    # gateway defaults, but the skills array still lands in settings.json.
+    before = run_as_user(f"cat {PI}/models.json")
     run_as_user("env -u ${profile.gateway.keyEnv} AI_GATEWAY=0 pi --version")
-    assert run_as_user(f"cat {PI}/models.json {PI}/settings.json") == before
+    assert run_as_user(f"cat {PI}/models.json") == before
+    settings = json.loads(run_as_user(f"cat {PI}/settings.json"))
+    assert "defaultProvider" not in settings and "defaultModel" not in settings and "skills" in settings, settings
     # Missing credentials fail before launching Pi or changing config.
     machine.fail("su - testuser -c 'env -u ${profile.gateway.keyEnv} AI_GATEWAY=1 pi --version </dev/null'")
-    assert run_as_user(f"cat {PI}/models.json {PI}/settings.json") == before
+    assert run_as_user(f"cat {PI}/models.json") == before
 
     # Invalid mcp.json aborts the launch without writing.
     run_as_user(f"printf '%s' '{{ bad' > {PI}/mcp.json")
