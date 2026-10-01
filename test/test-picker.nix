@@ -43,7 +43,7 @@ in
 
     machine.succeed(
         "su - testuser -c " + shlex.quote(
-            "python ${./check-picker.py} " + shlex.quote('${builtins.toJSON menuShape}')
+            "python ${./check-picker.py} " + shlex.quote(${builtins.toJSON (builtins.toJSON menuShape)})
         )
     )
   '';
