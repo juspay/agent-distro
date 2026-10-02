@@ -52,9 +52,17 @@ let
       ${pkgs.coreutils}/bin/chmod +x "$out/bin/$name"
     done
   '';
-  fixture = fixtureFlake "updated-agents" agentsScript;
-  # A renamed derivation is a distinct store path, enough to exercise old -> new.
-  fixtureV2 = fixtureFlake "updated-agents-v2" agentsScript;
+  manifestScript = version: agentsScript + ''
+    ${pkgs.coreutils}/bin/mkdir -p "$out/share/agent-distro"
+    printf 'claude\tClaude Code\t2.0\ncodex\tCodex\t%s\n' ${pkgs.lib.escapeShellArg version} > "$out/share/agent-distro/versions"
+  '';
+  fixture = fixtureFlake "updated-agents" (manifestScript "1.0+abc123");
+  fixtureV2 = fixtureFlake "updated-agents-v2" (manifestScript "1.1+def456");
+  fixtureSame = fixtureFlake "updated-agents-same" (manifestScript "1.1+def456");
+  fixtureAdded = fixtureFlake "updated-agents-added" (manifestScript "1.1+def456" + ''
+    printf 'pi\tPi\t1.0.0\n' >> "$out/share/agent-distro/versions"
+  '');
+  legacy = fixtureFlake "legacy-agents" agentsScript;
   broken = fixtureFlake "broken-agents" "exit 1";
 in
 {
@@ -68,13 +76,14 @@ in
       substituters = pkgs.lib.mkForce [ ];
     };
     # Alternate generations must be registered in the VM store for activation's GC roots.
-    virtualisation.additionalPaths = [ fixture fixtureV2 broken pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
+    virtualisation.additionalPaths = [ fixture fixtureV2 fixtureSame fixtureAdded legacy broken pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
     environment.loginShellInit = ''
       echo "Welcome: this greeting is not a PATH"
     '';
     home-manager.users.testuser = homeConfig;
   };
   testScript = ''
+    import re
     import shlex
     machine.start()
     machine.wait_for_unit("multi-user.target")
@@ -97,6 +106,15 @@ in
 
     source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
+    history = "/home/testuser/custom-state/agent-distro/history.log"
+    events = []
+
+    def check_history():
+        lines = machine.succeed("cat " + history).splitlines()
+        assert len(lines) == len(events), lines
+        for line, event in zip(lines, events):
+            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z vanilla " + re.escape(event), line), line
+
     machine.succeed("test ! -e " + state)
     for name in ${builtins.toJSON commands}:
         output = machine.succeed(user(name + " --version"))
@@ -107,11 +125,14 @@ in
     service = machine.succeed(systemctl("cat agent-distro-update.service"))
     assert "StartLimitBurst=3" in service and "Restart=on-failure" in service, service
     machine.succeed(user("cp -r ${fixture} ~/update-flake; chmod -R u+w ~/update-flake"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
     first = machine.succeed("readlink -f " + state).strip()
     assert first.startswith("/nix/store/"), first
     stamp = state.rsplit("/", 1)[0] + "/last-success"
     journal_has("agent-distro: vanilla updated nothing -> " + first)
+    events.append("updated: Claude Code 2.0, Codex 1.0+abc123")
+    check_history()
     for name in ${builtins.toJSON commands}:
         output = machine.succeed(user("unset XDG_STATE_HOME; " + name + " --version 'two words'"))
         assert output.strip().endswith("updated-" + name + " --version two words"), output
@@ -121,8 +142,39 @@ in
     second = machine.succeed("readlink -f " + state).strip()
     assert second.startswith("/nix/store/") and second != first, second
     journal_has("agent-distro: vanilla updated " + first + " -> " + second)
+    events.append("updated: Codex 1.0+abc123 → 1.1+def456")
+    check_history()
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
     journal_has("agent-distro: vanilla unchanged (" + second + ")")
+    check_history()
+    # A changed bundle can retain every harness version.
+    machine.succeed(user("cp ${fixtureSame}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    events.append("updated: no harness version changed")
+    check_history()
+    machine.succeed(user("cp ${fixtureAdded}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    events.append("updated: Pi added 1.0.0")
+    check_history()
+    machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    events.append("updated: Pi removed")
+    check_history()
+    # Upgrading a pre-manifest bundle has no previous versions to report.
+    machine.succeed(user("cp ${legacy}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    events.append("updated: versions not recorded by this bundle")
+    check_history()
+    machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    events.append("updated: Claude Code 2.0, Codex 1.1+def456")
+    check_history()
     successful_update = machine.succeed("cat " + stamp).strip()
     assert successful_update.isdigit(), successful_update
     machine.succeed(user("cp ${broken}/flake.nix ~/update-flake/flake.nix"))
@@ -132,6 +184,8 @@ in
     retries = machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value"))
     assert retries.strip().endswith("3"), retries
     journal_has("agent-distro: vanilla update failed")
+    events.extend(["failed: nix build exit 1"] * 3)
+    check_history()
     assert machine.succeed("cat " + stamp).strip() == successful_update
     assert machine.succeed("readlink -f " + state).strip() == second
     for name in ${builtins.toJSON commands}:
@@ -139,6 +193,7 @@ in
     # Reactivating the same source preserves its working update and GC root.
     machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate"))
     assert machine.succeed("readlink -f " + state).strip() == second
+    check_history()
     # Neither a changed profile nor a changed flake may reuse or keep rooting this update.
     for activation in ["${switchedProfile}", "${switchedFlake}"]:
         machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 " + activation + "/activate"))
@@ -146,10 +201,19 @@ in
             output = machine.succeed(user("unset XDG_STATE_HOME; AI_GATEWAY=0 " + name + " --version"))
             assert "updated-" not in output, output
         machine.succeed("test ! -e " + shlex.quote(state.rsplit("/", 1)[0]))
+        check_history()
 
     # A greeting and a native binary before the shim must still give a precise warning.
     machine.succeed(user("printf 'export PATH=/run/current-system/sw/bin:$PATH\\n' > ~/.bash_profile"))
     warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate 2>&1"))
     assert "PATH collision for ${collision}: /run/current-system/sw/bin/${collision}; bare ${collision} runs /run/current-system/sw/bin/${collision}" in warning, warning
+
+    # A manifest-less first install also has unknown versions.
+    machine.succeed("test ! -e " + state)
+    machine.succeed(user("cp ${legacy}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    events.append("updated: versions not recorded by this bundle")
+    check_history()
   '';
 }

@@ -9,6 +9,9 @@ let
   profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; gateway = null; };
   packaged = mkLaunchers { inherit pkgs sources; profile = profile // { packages = _: [ tool ]; }; };
   bare = mkLaunchers { inherit pkgs profile sources; };
+  discovery = import ../lib/discover-harnesses.nix;
+  expectedVersions = pkgs.writeText "expected-versions" (lib.concatMapStrings
+    (name: "${name}\t${discovery.metadata.${name}.title}\t0\n") discovery.ordered);
 in
 pkgs.runCommand "packages" { } ''
   for launcher in ${lib.escapeShellArgs (map (h: lib.getExe packaged.${h}) packaged.bundle.commands)}; do
@@ -20,6 +23,9 @@ pkgs.runCommand "packages" { } ''
   for launcher in ${lib.escapeShellArgs (map (h: lib.getExe bare.${h}) bare.bundle.commands)}; do
     found=$(PATH=${decoy}/bin "$launcher")
     [ "$found" = ${decoy}/bin/profile-tool ] || { echo "$launcher found $found" >&2; exit 1; }
+  done
+  for bundle in ${bare.bundle} ${packaged.bundle}; do
+    cmp ${expectedVersions} "$bundle/share/agent-distro/versions"
   done
   touch "$out"
 ''

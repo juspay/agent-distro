@@ -20,7 +20,8 @@ let
         '';
       };
 
-  harnesses = (import ./discover-harnesses.nix).ordered;
+  discovery = import ./discover-harnesses.nix;
+  harnesses = discovery.ordered;
   commands = lib.genAttrs harnesses (name: withPackages (import (../harnesses + "/${name}/default.nix") {
     inherit pkgs plugins gateway;
     package = sources name pkgs;
@@ -32,6 +33,12 @@ commands // {
   bundle = pkgs.symlinkJoin {
     name = "agent-distro-${profile.name}";
     paths = map (name: commands.${name}) harnesses;
+    postBuild = ''
+      mkdir -p "$out/share/agent-distro"
+      cp ${pkgs.writeText "agent-distro-versions" (lib.concatMapStrings
+        (name: "${name}\t${discovery.metadata.${name}.title}\t${commands.${name}.version}\n")
+        harnesses)} "$out/share/agent-distro/versions"
+    '';
     passthru.commands = harnesses;
   };
   picker = pkgs.callPackage ./picker.nix {
