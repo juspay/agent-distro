@@ -21,9 +21,9 @@ jobs:
     outputs:
       pr: ${{ steps.update.outputs.pull-request-number }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           github_access_token: ${{ github.token }}
 
@@ -63,7 +63,7 @@ jobs:
           PINS_AFTER: ${{ steps.lock.outputs.pins }}
         run: python3 .github/scripts/describe-flake-update.py
 
-      - uses: peter-evans/create-pull-request@v8
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         id: update
         with:
           branch: flake-update
