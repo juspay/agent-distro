@@ -7,14 +7,14 @@
         "owner": "can1357",
         "repo": "oh-my-pi"
       },
-      "submodules": false,
-      "revision": "8ac1309bd8adaddc891eeb389c545345073875be",
-      "url": "https://github.com/can1357/oh-my-pi/archive/8ac1309bd8adaddc891eeb389c545345073875be.tar.gz",
-      "hash": "sha256-S8Oz/xYEJCIc36S9u2UWXqYYQhjFxKMMzgFiB9PRVcY=",
       "pre_releases": false,
       "version_upper_bound": null,
       "release_prefix": null,
-      "version": "v18.4.4"
+      "submodules": false,
+      "version": "v18.4.10",
+      "revision": "cb0d5295e5edd48d000c1979e195186ec92aac79",
+      "url": "https://api.github.com/repos/can1357/oh-my-pi/tarball/refs/tags/v18.4.10",
+      "hash": "sha256-w61FLXu8E0d2fVT/HcSSJk1f2VJ0ruZDK0MtKKdqQeg="
     }
   },
   "version": 8
