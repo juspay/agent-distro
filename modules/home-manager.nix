@@ -33,20 +33,32 @@ let
   # trust our own --option to take effect. Prints "usable|unusable<TAB>url<TAB>key".
   cacheCheck = pkgs.writeShellScript "agent-distro-cache-check" ''
     set -eu
+    source ${../lib/cache-usable.sh}
     # Nix 2.34 reports a boolean; older releases 1. A local (single-user) store
     # has no daemon to distrust us and may omit the field.
     trusted=$(${nix} store info --json 2>/dev/null | ${pkgs.jq}/bin/jq -r 'if .trusted == true or .trusted == 1 or (.trusted == null and .url != "daemon") then 1 else 0 end') || trusted=0
-    # Configured URLs may carry a trailing slash; compare without it.
-    normalize() { ${pkgs.gnused}/bin/sed -E 's#/+( |$)#\1#g'; }
-    known=" $({ ${nix} config show substituters; ${nix} config show trusted-substituters; } 2>/dev/null | ${pkgs.coreutils}/bin/tr '\n' ' ' | normalize) "
-    keys=" $(${nix} config show trusted-public-keys 2>/dev/null | ${pkgs.coreutils}/bin/tr '\n' ' ') "
-    ${lib.concatStrings (lib.mapAttrsToList (url: key: ''
-      if [ "$trusted" = 1 ] || { [[ $known == *" "${lib.escapeShellArg (lib.removeSuffix "/" url)}" "* ]] && [[ $keys == *" "${lib.escapeShellArg key}" "* ]]; }; then
-        printf 'usable\t%s\t%s\n' ${lib.escapeShellArg url} ${lib.escapeShellArg key}
-      else
-        printf 'unusable\t%s\t%s\n' ${lib.escapeShellArg url} ${lib.escapeShellArg key}
-      fi
-    '') cfg.substituters)}
+    known=$({ ${nix} config show substituters; ${nix} config show trusted-substituters; } 2>/dev/null | ${pkgs.coreutils}/bin/tr '\n' ' ')
+    keys=$(${nix} config show trusted-public-keys 2>/dev/null | ${pkgs.coreutils}/bin/tr '\n' ' ')
+    report() {
+      if cache_usable "$trusted" "$known" "$keys" "$1" "$2"; then verdict=usable; else verdict=unusable; fi
+      printf '%s\t%s\t%s\n' "$verdict" "$1" "$2"
+    }
+    ${lib.concatStrings (lib.mapAttrsToList (url: key: "report ${lib.escapeShellArg url} ${lib.escapeShellArg key}\n") cfg.substituters)}
+  '';
+  # Names of the derivations a build of "$1" (options after it) would compile
+  # rather than fetch, at most three. Derivations with allowSubstitutes = false
+  # (trivial builders such as symlinkJoin and shell wrappers) are always built
+  # locally, so only the substitutable ones count as misses.
+  wouldCompile = pkgs.writeShellScript "agent-distro-would-compile" ''
+    set -eu
+    target=$1
+    shift
+    # A failing dry run is deliberately swallowed: the real build then
+    # reports the actual eval or network error.
+    drvs=$(${nix} build "$target" "$@" --dry-run 2>&1 | ${pkgs.gnugrep}/bin/grep -E '^ +/nix/store/.*\.drv$' || true)
+    [ -n "$drvs" ] || exit 0
+    # shellcheck disable=SC2086
+    ${nix} derivation show $drvs | ${pkgs.jq}/bin/jq -r '(.derivations // .) | to_entries[] | select(.value.env.allowSubstitutes? != "") | .value.name' | ${pkgs.coreutils}/bin/head -n 3 | ${pkgs.coreutils}/bin/paste -sd, -
   '';
   updater = pkgs.writeShellScript "agent-distro-update" ''
     set -eu
@@ -100,15 +112,9 @@ let
     # Never compile on a cache miss. Derivations with allowSubstitutes = false
     # (trivial builders such as symlinkJoin and shell wrappers) are always
     # built locally, so only the substitutable ones count as misses.
-    # A failing dry run is deliberately swallowed: the real build below then
-    # reports the actual eval or network error.
-    drvs=$(${nix} build "$target" "''${options[@]}" --dry-run 2>&1 | ${pkgs.gnugrep}/bin/grep -E '^ +/nix/store/.*\.drv$' || true)
-    if [ -n "$drvs" ]; then
-      # shellcheck disable=SC2086
-      missing=$(${nix} derivation show $drvs | ${pkgs.jq}/bin/jq -r '(.derivations // .) | to_entries[] | select(.value.env.allowSubstitutes? != "") | .value.name' | ${pkgs.coreutils}/bin/head -n 3 | ${pkgs.coreutils}/bin/paste -sd, -)
-      if [ -n "$missing" ]; then
-        skip "bundle not fully cached yet (would build $missing)"
-      fi
+    missing=$(${wouldCompile} "$target" "''${options[@]}")
+    if [ -n "$missing" ]; then
+      skip "bundle not fully cached yet (would build $missing)"
     fi
     declare -A old_versions=() old_titles=() new_versions=()
     old_names=()
