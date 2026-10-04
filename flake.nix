@@ -57,6 +57,7 @@
         inherit bundles;
         defaultProfile = default;
         defaultFlake = "github:juspay/agent-distro";
+        cache = import ./lib/cache.nix;
       };
       apps = lib.mapAttrs
         (_: picker: { default = { type = "app"; program = lib.getExe picker; }; })

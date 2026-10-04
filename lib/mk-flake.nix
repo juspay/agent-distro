@@ -2,7 +2,7 @@
 let
   mkLaunchers = import ./mk-launchers.nix;
 in
-{ profile, systems ? import ./systems.nix }:
+{ profile, systems ? import ./systems.nix, cache ? import ./cache.nix }:
 let
   checked = import ./validate-profile.nix profile;
   launchers = nixpkgs.lib.genAttrs systems (system:
@@ -20,6 +20,7 @@ builtins.seq checked {
   homeManagerModules.default = import ../modules/home-manager.nix {
     bundles = nixpkgs.lib.mapAttrs (_: ps: { ${checked.name} = ps.${checked.name}; }) packages;
     defaultProfile = checked.name;
+    inherit cache;
   };
   apps = nixpkgs.lib.mapAttrs
     (_: nixpkgs.lib.mapAttrs

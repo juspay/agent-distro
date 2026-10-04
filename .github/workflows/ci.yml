@@ -22,8 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         # macos-latest is arm64 (aarch64-darwin), matching the flake's supported
-        # systems; ubuntu-latest covers x86_64-linux.
-        os: [ubuntu-latest, macos-latest]
+        # systems; ubuntu-latest covers x86_64-linux and ubuntu-24.04-arm
+        # aarch64-linux, so every supported system reaches the cache.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
       ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
@@ -49,6 +50,9 @@ jobs:
           extra_nix_config: |
             extra-substituters = https://cache.nixos.asia/oss
             extra-trusted-public-keys = oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=
+
+      - name: Check the cache config matches lib/cache.nix
+        run: python3 .github/scripts/check-cache-config.py
 
       - name: Require cache token
         if: env.PUSH_CACHE == 'true'
@@ -78,9 +82,10 @@ jobs:
           nix build --print-build-logs .#default
 
       - name: Wrapper package tests
-        # The wrapper tests boot NixOS VMs, so they only run where a Linux
-        # builder exists. `nix flake check` builds the whole checks set.
-        if: runner.os == 'Linux'
+        # The wrapper tests boot NixOS VMs (x86_64-linux only: the test flake
+        # fixes its system, and ARM runners have no KVM). `nix flake check`
+        # builds the whole checks set.
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         run: |
           cd test && nix flake check -L
 
