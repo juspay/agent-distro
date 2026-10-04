@@ -22,5 +22,6 @@ assert builtins.all (interval: interval.Hour == null) calendar;
 assert !(builtins.tryEval (configuration "aarch64-darwin" { frequency = "daily"; }).home.activationPackage.drvPath).success;
 pkgs.runCommand "update-schedule" { } ''
   ${pkgs.bash}/bin/bash -eu ${./check-update-due.sh} ${agent-distro}/lib/update-due.sh
+  ${pkgs.bash}/bin/bash -eu ${./check-cache-usable.sh} ${agent-distro}/lib/cache-usable.sh
   touch "$out"
 ''

@@ -1,6 +1,12 @@
 { pkgs, agent-distro, home-manager }:
 let
   collision = builtins.head commands;
+  # An empty local binary cache stands in for the project's: the updater must
+  # hand it to nix and skip rather than build when it is unusable or incomplete.
+  cacheDir = pkgs.writeTextDir "nix-cache-info" "StoreDir: /nix/store\n";
+  # additionalPaths below keeps the directory in the guest store.
+  cacheUrl = builtins.unsafeDiscardStringContext "file://${cacheDir}";
+  cacheKey = "test-cache-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   commands = agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla.commands;
   homeConfig = {
     imports = [ agent-distro.homeManagerModules.default ];
@@ -17,6 +23,7 @@ let
       flake = "path:/home/testuser/update-flake";
       # Avoid a timer firing before the fallback assertions.
       frequency = "2099-01-01";
+      substituters.${cacheUrl} = cacheKey;
     };
     systemd.user.services.agent-distro-update.Service.RestartSec = pkgs.lib.mkForce "1s";
   };
@@ -27,13 +34,18 @@ let
   switchedProfile = switched { profile = "juspay"; };
   switchedFlake = switched { flake = "path:/home/testuser/other-flake"; };
   original = switched { };
+  # A cache the system config does not list: the daemon would ignore it.
+  unusableCache = switched { substituters = { "file:///not-configured" = cacheKey; }; };
   # Offline flake mechanics stay independent of the build outcome under test.
-  fixtureFlake = name: script: pkgs.writeTextDir "flake.nix" ''
+  # Like the real bundle's trivial builders, fixtures are not substitutable
+  # unless a test says otherwise.
+  fixtureFlake' = substitutable: name: script: pkgs.writeTextDir "flake.nix" ''
     {
       outputs = { self }: {
         packages.x86_64-linux.vanilla = derivation {
           name = "${name}";
           system = "x86_64-linux";
+          allowSubstitutes = ${if substitutable then "true" else "false"};
           # Restore dependency context lost when the flake was written as text.
           dependencies = builtins.appendContext "" {
             "${pkgs.bash}" = { path = true; };
@@ -45,6 +57,7 @@ let
       };
     }
   '';
+  fixtureFlake = fixtureFlake' false;
   agentsScript = ''
     ${pkgs.coreutils}/bin/mkdir -p "$out/bin"
     for name in ${pkgs.lib.escapeShellArgs commands}; do
@@ -64,24 +77,30 @@ let
   '');
   legacy = fixtureFlake "legacy-agents" agentsScript;
   broken = fixtureFlake "broken-agents" "exit 1";
-in
-{
-  name = "auto-update";
-  nodes.machine = { ... }: {
+  # Substitutable and absent from the empty cache: building it means compiling.
+  uncached = fixtureFlake' true "uncached-agents" (manifestScript "9.9+uncached");
+  node = trusted: { ... }: {
     imports = [ (import ./common.nix).baseNode home-manager.nixosModules.home-manager ];
     users.users.testuser.linger = true;
     environment.systemPackages = [ (pkgs.writeShellScriptBin collision "exit 99") ];
     nix.settings = {
       experimental-features = [ "nix-command" "flakes" ];
-      substituters = pkgs.lib.mkForce [ ];
+      substituters = pkgs.lib.mkForce (pkgs.lib.optional (!trusted) cacheUrl);
+      trusted-public-keys = pkgs.lib.optional (!trusted) cacheKey;
+      trusted-users = pkgs.lib.optional trusted "testuser";
     };
     # Alternate generations must be registered in the VM store for activation's GC roots.
-    virtualisation.additionalPaths = [ fixture fixtureV2 fixtureSame fixtureAdded legacy broken pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
+    virtualisation.additionalPaths = [ fixture fixtureV2 fixtureSame fixtureAdded legacy broken uncached cacheDir unusableCache pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
     environment.loginShellInit = ''
       echo "Welcome: this greeting is not a PATH"
     '';
     home-manager.users.testuser = homeConfig;
   };
+in
+{
+  name = "auto-update";
+  nodes.machine = node false;
+  nodes.trusted = node true;
   testScript = ''
     import re
     import shlex
@@ -215,5 +234,42 @@ in
     machine.succeed(systemctl("start agent-distro-update.service"))
     events.append("updated: versions not recorded by this bundle")
     check_history()
+
+    # Never compile on a cache miss: the substitutable derivation is skipped,
+    # the current bundle stays, and the run is neither a failure nor a retry.
+    before = machine.succeed("readlink -f " + state).strip()
+    restarts = lambda: machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value")).strip()
+    restarted = restarts()
+    machine.succeed(user("cp ${uncached}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    journal_has("agent-distro: vanilla update skipped: bundle not fully cached yet (would build uncached-agents)")
+    events.append("skipped: bundle not fully cached yet (would build uncached-agents)")
+    check_history()
+    assert machine.succeed("readlink -f " + state).strip() == before
+    assert restarts() == restarted, restarts()
+    # A repeat of the same reason is not logged again.
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    check_history()
+    # A cache the daemon would ignore skips before any build, and activation warns once.
+    warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${unusableCache}/activate 2>&1"))
+    assert warning.count("agent-distro cannot use cache file:///not-configured") == 1, warning
+    machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
+    machine.succeed(systemctl("reset-failed agent-distro-update.service"))
+    machine.succeed(systemctl("start agent-distro-update.service"))
+    journal_has("agent-distro: vanilla update skipped: cache file:///not-configured not usable")
+    events.append("skipped: cache file:///not-configured not usable; add it to nix.settings substituters/trusted-public-keys")
+    check_history()
+    assert machine.succeed("readlink -f " + state).strip() == before
+
+    # A trusted user needs no system cache config: the daemon honours the
+    # updater's own --option, so the update proceeds instead of skipping.
+    trusted.start()
+    trusted.wait_for_unit("multi-user.target")
+    trusted.wait_for_unit("user@1000.service")
+    trusted.succeed(user("cp -r ${fixture} ~/update-flake; chmod -R u+w ~/update-flake"))
+    trusted.succeed(systemctl("start agent-distro-update.service"))
+    lines = trusted.succeed("cat " + history).splitlines()
+    assert len(lines) == 1 and lines[0].endswith(" vanilla updated: Claude Code 2.0, Codex 1.0+abc123"), lines
   '';
 }

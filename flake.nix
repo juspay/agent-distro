@@ -57,6 +57,7 @@
         inherit bundles;
         defaultProfile = default;
         defaultFlake = "github:juspay/agent-distro";
+        cache = import ./lib/cache.nix;
       };
       apps = lib.mapAttrs
         (_: picker: { default = { type = "app"; program = lib.getExe picker; }; })
@@ -74,7 +75,7 @@
         })
         discovered.metadata;
 
-      lib = { inherit mkLaunchers mkFlake; };
+      lib = { inherit mkLaunchers mkFlake; cache = import ./lib/cache.nix; };
       # Resolved profile data, for the tests and for third parties.
       inherit profiles;
       templates.default = {

@@ -100,7 +100,8 @@ An unavailable state directory is silently ignored.
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
 This flake names a binary cache in its `nixConfig`. Pass `--accept-flake-config`
-to use it; without it, Oh My Pi is built from source.
+to use it; without it, Oh My Pi is built from source. The Home Manager
+updater below handles the cache itself.
 
 ## Install
 
@@ -124,13 +125,23 @@ nix profile install github:juspay/agent-distro#juspay
 nix profile upgrade juspay
 ```
 
-Add the binary cache to your NixOS or nix-darwin configuration; without it,
-every update builds Oh My Pi from source:
+The updater never compiles harnesses from source. It passes the project cache
+(`cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`)
+to every update, and needs nothing more when you are a trusted Nix user or run
+a single-user install. On a multi-user install where you are not trusted, the
+daemon ignores that request unless your system config already lists the cache,
+so add it to your NixOS or nix-darwin configuration:
 
 ```nix
 nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
+
+Without it, or when the cache does not yet hold the whole bundle, the update is
+skipped, your current version keeps working, and `history.log` records a line
+such as `skipped: cache https://cache.nixos.asia/oss not usable; add it to nix.settings substituters/trusted-public-keys`.
+The same line is not repeated, and a skip is not retried until the next
+scheduled run. Activation warns while the cache is unusable.
 
 Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`. Update and failure events go to `~/.local/state/agent-distro/history.log`, e.g. `2026-10-01T23:03:17Z juspay updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. Full run output is in `journalctl --user -u agent-distro-update` on Linux and `~/.local/state/agent-distro/<source>/update.log` on macOS.
 
@@ -174,6 +185,11 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 A single-profile distribution draws the narrowed list above — one profile's
 rows under its description; `mkFlake` gives you the individual launchers and a
 bundle named after the profile, with the picker as its `default`.
+
+`mkFlake` takes an optional `cache = { url; publicKey; }` (default: agent-distro's
+cache). The Home Manager updater only installs what that cache holds and never
+compiles, so push your own builds to a cache and pass it, or your users' updates
+are skipped.
 
 `mkFlake` returns `packages`, `apps`, and `homeManagerModules`; add other
 outputs with `//`.
