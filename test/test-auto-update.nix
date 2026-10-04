@@ -238,6 +238,8 @@ in
     # Never compile on a cache miss: the substitutable derivation is skipped,
     # the current bundle stays, and the run is neither a failure nor a retry.
     before = machine.succeed("readlink -f " + state).strip()
+    restarts = lambda: machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value")).strip()
+    restarted = restarts()
     machine.succeed(user("cp ${uncached}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
@@ -245,7 +247,7 @@ in
     events.append("skipped: bundle not fully cached yet (would build uncached-agents)")
     check_history()
     assert machine.succeed("readlink -f " + state).strip() == before
-    assert machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value")).strip() == "0"
+    assert restarts() == restarted, restarts()
     # A repeat of the same reason is not logged again.
     machine.succeed(systemctl("start agent-distro-update.service"))
     check_history()
