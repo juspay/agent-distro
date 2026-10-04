@@ -33,11 +33,15 @@ let
   # trust our own --option to take effect. Prints "usable|unusable<TAB>url<TAB>key".
   cacheCheck = pkgs.writeShellScript "agent-distro-cache-check" ''
     set -eu
-    trusted=$(${nix} store info --json 2>/dev/null | ${pkgs.jq}/bin/jq -r '.trusted // 0') || trusted=0
-    known=" $(${nix} config show substituters || true) $(${nix} config show trusted-substituters || true) "
-    keys=" $(${nix} config show trusted-public-keys || true) "
+    # Nix 2.34 reports a boolean; older releases 1. A local (single-user) store
+    # has no daemon to distrust us and may omit the field.
+    trusted=$(${nix} store info --json 2>/dev/null | ${pkgs.jq}/bin/jq -r 'if .trusted == true or .trusted == 1 or (.trusted == null and .url != "daemon") then 1 else 0 end') || trusted=0
+    # Configured URLs may carry a trailing slash; compare without it.
+    normalize() { ${pkgs.gnused}/bin/sed -E 's#/+( |$)#\1#g'; }
+    known=" $({ ${nix} config show substituters; ${nix} config show trusted-substituters; } 2>/dev/null | ${pkgs.coreutils}/bin/tr '\n' ' ' | normalize) "
+    keys=" $(${nix} config show trusted-public-keys 2>/dev/null | ${pkgs.coreutils}/bin/tr '\n' ' ') "
     ${lib.concatStrings (lib.mapAttrsToList (url: key: ''
-      if [ "$trusted" = 1 ] || { [[ $known == *" "${lib.escapeShellArg url}" "* ]] && [[ $keys == *" "${lib.escapeShellArg key}" "* ]]; }; then
+      if [ "$trusted" = 1 ] || { [[ $known == *" "${lib.escapeShellArg (lib.removeSuffix "/" url)}" "* ]] && [[ $keys == *" "${lib.escapeShellArg key}" "* ]]; }; then
         printf 'usable\t%s\t%s\n' ${lib.escapeShellArg url} ${lib.escapeShellArg key}
       else
         printf 'unusable\t%s\t%s\n' ${lib.escapeShellArg url} ${lib.escapeShellArg key}
@@ -96,6 +100,8 @@ let
     # Never compile on a cache miss. Derivations with allowSubstitutes = false
     # (trivial builders such as symlinkJoin and shell wrappers) are always
     # built locally, so only the substitutable ones count as misses.
+    # A failing dry run is deliberately swallowed: the real build below then
+    # reports the actual eval or network error.
     drvs=$(${nix} build "$target" "''${options[@]}" --dry-run 2>&1 | ${pkgs.gnugrep}/bin/grep -E '^ +/nix/store/.*\.drv$' || true)
     if [ -n "$drvs" ]; then
       # shellcheck disable=SC2086
@@ -189,7 +195,9 @@ in
       description = ''
         Binary caches (URL to public key) the updater passes to nix. Only
         effective where the user is trusted or the system config already lists
-        them; otherwise the update is skipped, never compiled. {} adds none.
+        them; otherwise the update is skipped, never compiled. {} adds none,
+        and updates still never compile, so only a bundle fully available from
+        the caches your system already uses will install.
       '';
     };
     frequency = lib.mkOption {

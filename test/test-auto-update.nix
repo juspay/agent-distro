@@ -79,17 +79,15 @@ let
   broken = fixtureFlake "broken-agents" "exit 1";
   # Substitutable and absent from the empty cache: building it means compiling.
   uncached = fixtureFlake' true "uncached-agents" (manifestScript "9.9+uncached");
-in
-{
-  name = "auto-update";
-  nodes.machine = { ... }: {
+  node = trusted: { ... }: {
     imports = [ (import ./common.nix).baseNode home-manager.nixosModules.home-manager ];
     users.users.testuser.linger = true;
     environment.systemPackages = [ (pkgs.writeShellScriptBin collision "exit 99") ];
     nix.settings = {
       experimental-features = [ "nix-command" "flakes" ];
-      substituters = pkgs.lib.mkForce [ cacheUrl ];
-      trusted-public-keys = [ cacheKey ];
+      substituters = pkgs.lib.mkForce (pkgs.lib.optional (!trusted) cacheUrl);
+      trusted-public-keys = pkgs.lib.optional (!trusted) cacheKey;
+      trusted-users = pkgs.lib.optional trusted "testuser";
     };
     # Alternate generations must be registered in the VM store for activation's GC roots.
     virtualisation.additionalPaths = [ fixture fixtureV2 fixtureSame fixtureAdded legacy broken uncached cacheDir unusableCache pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
@@ -98,6 +96,11 @@ in
     '';
     home-manager.users.testuser = homeConfig;
   };
+in
+{
+  name = "auto-update";
+  nodes.machine = node false;
+  nodes.trusted = node true;
   testScript = ''
     import re
     import shlex
@@ -256,5 +259,15 @@ in
     events.append("skipped: cache file:///not-configured not usable; add it to nix.settings substituters/trusted-public-keys")
     check_history()
     assert machine.succeed("readlink -f " + state).strip() == before
+
+    # A trusted user needs no system cache config: the daemon honours the
+    # updater's own --option, so the update proceeds instead of skipping.
+    trusted.start()
+    trusted.wait_for_unit("multi-user.target")
+    trusted.wait_for_unit("user@1000.service")
+    trusted.succeed(user("cp -r ${fixture} ~/update-flake; chmod -R u+w ~/update-flake"))
+    trusted.succeed(systemctl("start agent-distro-update.service"))
+    lines = trusted.succeed("cat " + history).splitlines()
+    assert len(lines) == 1 and lines[0].endswith(" vanilla updated: Claude Code 2.0, Codex 1.0+abc123"), lines
   '';
 }
