@@ -1,0 +1,1 @@
+- DO NOT run vm tests locally. Use remote CI machines (e.g.: kolu-ci-*)
