@@ -32,13 +32,19 @@ class PiAdapterTests(unittest.TestCase):
                     'equals': {'type': 'stdio', 'command': 'bad=command', 'args': [], 'env': {}},
                 },
             }))
-            gateway = root / 'gateway.json'
-            gateway.write_text(json.dumps({'url': 'https://gateway.test/', 'keyEnv': 'TEST_KEY',
-                                           'models': {'large': 'large', 'small': 'small'}}))
+            gateway = {'url': 'https://gateway.test/', 'keyEnv': 'TEST_KEY',
+                       'models': {'large': 'large', 'small': 'small'}}
+
+            def args(name, *descriptions):
+                path = root / f'{name}.json'
+                path.write_text(json.dumps({'bash': '/bin/sh', 'env': '/usr/bin/env', 'gateway': gateway,
+                                            'descriptions': [str(d) for d in descriptions]}))
+                return str(path)
+
             out = root / 'out-pi-config'
             diagnostics = io.StringIO()
             with redirect_stderr(diagnostics):
-                write_config(str(out), '/bin/sh', '/usr/bin/env', str(gateway), str(description))
+                write_config(str(out), args('single', description))
             config = json.loads((out / 'config.json').read_text())
             self.assertEqual(set(config['mcpServers']), {'local', 'http'})
             self.assertIn('Pi does not support SSE', diagnostics.getvalue())
@@ -55,8 +61,7 @@ class PiAdapterTests(unittest.TestCase):
             self.assertEqual(provider['baseUrl'], 'https://gateway.test/v1')
             self.assertEqual(provider['models'], [{'id': 'large'}, {'id': 'small'}])
             with self.assertRaisesRegex(SystemExit, 'declared by both'):
-                write_config(str(root / 'collision'), '/bin/sh', '/usr/bin/env', str(gateway),
-                             str(description), str(description))
+                write_config(str(root / 'collision'), args('double', description, description))
 
     def test_empty_contributions_keep_settings_default(self):
         with tempfile.TemporaryDirectory() as directory:

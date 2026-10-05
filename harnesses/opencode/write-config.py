@@ -6,7 +6,9 @@ import sys
 from plugin_resources import copy_skills, write_launcher
 
 
-def main(schema, out, bash, env, gateway_path, *descriptions):
+def main(out, args_path):
+    args = json.loads(Path(args_path).read_text())
+    schema, bash, env, gateway = args['schema'], args['bash'], args['env'], args['gateway']
     if schema not in ('v1', 'v2'):
         raise ValueError(f'Unknown OpenCode schema: {schema}')
     owners = {}
@@ -16,10 +18,10 @@ def main(schema, out, bash, env, gateway_path, *descriptions):
     config = {'$schema': 'https://opencode.ai/config.json',
               'skills': skills_paths if schema == 'v2' else {'paths': skills_paths},
               'mcp': {'servers': servers} if schema == 'v2' else servers}
-    for path in descriptions:
+    for path in args['descriptions']:
         description = json.loads(Path(path).read_text())
         plugin = description['manifest']['name']
-        skills = copy_skills(description, root)
+        skills = copy_skills(description, root / 'skills' / plugin)
         if skills:
             skills_paths.append(skills)
         for index, (name, server) in enumerate(description['mcpServers'].items()):
@@ -38,7 +40,6 @@ def main(schema, out, bash, env, gateway_path, *descriptions):
             script = write_launcher(description, name, server, root, index, bash, env)
             servers[name] = {'type': 'local', 'command': [str(script)]}
     (root / 'opencode.json').write_text(json.dumps(config, indent=2))
-    gateway = json.loads(Path(gateway_path).read_text())
     if gateway is not None:
         provider = {
             'name': 'LiteLLM',

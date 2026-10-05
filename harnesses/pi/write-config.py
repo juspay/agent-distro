@@ -6,14 +6,16 @@ import sys
 from plugin_resources import copy_skills, write_launcher
 
 
-def main(out, bash, env, gateway_path, *descriptions):
+def main(out, args_path):
+    args = json.loads(Path(args_path).read_text())
+    bash, env, gateway = args['bash'], args['env'], args['gateway']
     root = Path(out)
     root.mkdir(parents=True)
     skills, servers, owners = [], {}, {}
-    for path in descriptions:
+    for path in args['descriptions']:
         description = json.loads(Path(path).read_text())
         plugin = description['manifest']['name']
-        skill_path = copy_skills(description, root)
+        skill_path = copy_skills(description, root / 'skills' / plugin)
         if skill_path:
             skills.append(skill_path)
         for index, (name, server) in enumerate(description['mcpServers'].items()):
@@ -36,7 +38,6 @@ def main(out, bash, env, gateway_path, *descriptions):
                 print(f'{description["root"]}: mcp.json: server {json.dumps(name)} skipped, '
                       f'{reason}', file=sys.stderr)
     (root / 'config.json').write_text(json.dumps({'skills': skills, 'mcpServers': servers}, indent=2))
-    gateway = json.loads(Path(gateway_path).read_text())
     if gateway is not None:
         config = {'providers': {'litellm': {
             'baseUrl': gateway['url'].rstrip('/') + '/v1',
