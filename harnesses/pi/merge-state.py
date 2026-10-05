@@ -42,6 +42,10 @@ def prepare(directory, fragment, gateway):
         providers['litellm'] = gateway['providers']['litellm']
         for key in ['defaultProvider', 'defaultModel']:
             data['settings'].setdefault(key, gateway[key])
+        # Start with thinking off. Pi defaults to `medium`, which bills reasoning
+        # tokens for every turn; the agent still turns it on per session with
+        # `/thinking`, or by setting `defaultThinkingLevel` itself.
+        data['settings'].setdefault('defaultThinkingLevel', 'off')
     return {paths[name]: value for name, value in data.items() if value != original[name]}
 
 

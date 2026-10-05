@@ -13,6 +13,7 @@ pi_user(f"env -u {gateway['keyEnv']} AI_GATEWAY=0 pi --version")
 machine.fail(f"test -e {PI_DIR}/models.json")
 assert "defaultProvider" not in pi_read("settings")
 assert "defaultModel" not in pi_read("settings")
+assert "defaultThinkingLevel" not in pi_read("settings")
 machine.succeed("systemctl start fake-gateway.service")
 machine.wait_for_open_port(8080)
 personal_provider = {"baseUrl": "https://personal.invalid/v1", "api": "openai-completions",
@@ -29,13 +30,14 @@ assert provider["apiKey"] == "$" + gateway['keyEnv'], provider
 assert models["providers"]["personal"] == personal_provider
 assert pi_read("settings")["defaultProvider"] == "litellm"
 assert pi_read("settings")["defaultModel"] == gateway['models']['large']
+assert pi_read("settings")["defaultThinkingLevel"] == "off"
 listing = pi_user("pi --list-models litellm")
 for model in aliases | {"served-large", "served-small"}:
     assert model in listing, listing
 cache = pi_user("cat /home/testuser/.cache/agent-distro/pi/*/models.json")
 assert "test-api-key" not in cache
 
-custom = pi_read("settings") | {"defaultProvider": "personal", "defaultModel": "keep-me"}
+custom = pi_read("settings") | {"defaultProvider": "personal", "defaultModel": "keep-me", "defaultThinkingLevel": "high"}
 pi_write("settings", custom)
 pi_user("pi --version")
 assert pi_read("settings") == custom

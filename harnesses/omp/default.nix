@@ -14,11 +14,19 @@ let
       configDefaults = (formats.yaml { }).generate "omp-config.yml" {
         # Without this OMP starts on its own first-available model; the roles are how
         # our recommendation reaches the agent.
+        #
+        # Each role carries the `:off` thinking suffix, so a session starts with
+        # reasoning disabled. OMP's `defaultThinkingLevel` setting cannot express
+        # this: its enum is the effort ladder plus `auto`, with no `off` (an `off`
+        # there is rejected and silently falls back to `high`), while a role
+        # selector's `:level` suffix is the supported way to name an off level.
+        # The suffix rides on defaulted roles only, so a user's own role values
+        # and their `/model` and `/effort` choices still win.
         modelRoles = {
-          default = "litellm/${gateway.models.large}";
-          smol = "litellm/${gateway.models.small}";
-          task = "litellm/${gateway.models.large}";
-          slow = "litellm/${gateway.models.large}";
+          default = "litellm/${gateway.models.large}:off";
+          smol = "litellm/${gateway.models.small}:off";
+          task = "litellm/${gateway.models.large}:off";
+          slow = "litellm/${gateway.models.large}:off";
         };
         # OMP ships this off, so a subagent's row names the agent and nothing else:
         # which model a worker or reviewer actually resolved to is invisible. Our

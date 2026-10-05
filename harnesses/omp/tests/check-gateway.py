@@ -30,10 +30,10 @@ def effective_setting(key):
     return json.loads(run_as_user(f"omp config get {key} --json"))["value"]
 
 assert effective_setting("modelRoles") == {
-    "default": f"litellm/{gateway['models']['large']}",
-    "smol": f"litellm/{gateway['models']['small']}",
-    "task": f"litellm/{gateway['models']['large']}",
-    "slow": f"litellm/{gateway['models']['large']}",
+    "default": f"litellm/{gateway['models']['large']}:off",
+    "smol": f"litellm/{gateway['models']['small']}:off",
+    "task": f"litellm/{gateway['models']['large']}:off",
+    "slow": f"litellm/{gateway['models']['large']}:off",
 }
 assert effective_setting("task.showResolvedModelBadge") is True
 machine.fail("test -e /home/testuser/.omp/agent/models.yml")
@@ -44,7 +44,7 @@ old_config = "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthrop
 write_config(CONFIG, old_config)
 run_as_user("omp --version")
 config = machine.succeed(f"cat {CONFIG}")
-for expected in ["# user settings", "setupVersion: 2", "default: 'anthropic/expensive:high' # keep choice", f"smol: litellm/{gateway['models']['small']}", f"task: litellm/{gateway['models']['large']}", f"slow: litellm/{gateway['models']['large']}", "showResolvedModelBadge: true"]:
+for expected in ["# user settings", "setupVersion: 2", "default: 'anthropic/expensive:high' # keep choice", f"smol: litellm/{gateway['models']['small']}:off", f"task: litellm/{gateway['models']['large']}:off", f"slow: litellm/{gateway['models']['large']}:off", "showResolvedModelBadge: true"]:
     assert expected in config, config
 
 # A fully configured file must not even be rewritten — /model choices win,
@@ -66,7 +66,7 @@ run_as_user("mkdir -p /home/testuser/relocated")
 relocated = "/home/testuser/relocated/config.yml"
 write_config(relocated, old_config)
 run_as_user("PI_CODING_AGENT_DIR=/home/testuser/relocated omp --version")
-assert f"task: litellm/{gateway['models']['large']}" in machine.succeed(f"cat {relocated}")
+assert f"task: litellm/{gateway['models']['large']}:off" in machine.succeed(f"cat {relocated}")
 assert machine.succeed(f"cat {CONFIG}") == custom
 
 for initial in ["# my settings", "setupVersion: 2\n"]:
@@ -74,8 +74,8 @@ for initial in ["# my settings", "setupVersion: 2\n"]:
     run_as_user("PI_CODING_AGENT_DIR=/home/testuser/relocated omp --version")
     repaired = machine.succeed(f"cat {relocated}")
     assert initial in repaired
-    assert f"default: litellm/{gateway['models']['large']}" in repaired
-    assert f"slow: litellm/{gateway['models']['large']}" in repaired
+    assert f"default: litellm/{gateway['models']['large']}:off" in repaired
+    assert f"slow: litellm/{gateway['models']['large']}:off" in repaired
 
 for invalid in ["modelRoles: [", "modelRoles: []\n", "modelRoles: null\n", "task: []\n", "task: null\n"]:
     write_config(relocated, invalid)
