@@ -6,7 +6,12 @@ let
 
   readPlugin = callPackage ../../lib/read-plugin.nix { };
   config = runCommand "pi-config" { } ''
-    PYTHONPATH=${../../lib} ${python3.interpreter} ${./write-config.py} "$out" ${runtimeShell} ${coreutils}/bin/env ${writeText "gateway.json" (builtins.toJSON gateway)} ${lib.escapeShellArgs (map (plugin: toString (readPlugin plugin)) plugins)}
+    PYTHONPATH=${../../lib} ${python3.interpreter} ${./write-config.py} "$out" ${writeText "pi-args.json" (builtins.toJSON {
+      inherit gateway;
+      bash = runtimeShell;
+      env = "${coreutils}/bin/env";
+      descriptions = map (plugin: "${readPlugin plugin}") plugins;
+    })}
   '';
 in
 writeShellApplication {
