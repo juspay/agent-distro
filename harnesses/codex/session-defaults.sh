@@ -26,12 +26,6 @@ terminal_session() {
   done
 }
 
-# Reasoning blocks are hidden unless the user chose otherwise, in config.toml
-# (top level or the active profile) or with their own -c/--config. The launcher
-# defines `codex_reasoning_default` from the helper before sourcing this file.
 if terminal_session "$@"; then
   set -- --no-daemon "$@"
-  if reasoning=$(codex_reasoning_default "$@") && [ -n "$reasoning" ]; then
-    set -- -c "$reasoning" "$@"
-  fi
 fi

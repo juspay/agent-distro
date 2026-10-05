@@ -2,7 +2,7 @@
 # Portable plugin contents and provider policy stay outside this adapter.
 { pkgs, plugins, gateway, package, profileName }:
 let
-  inherit (pkgs) lib callPackage writeShellApplication runCommand jq python3;
+  inherit (pkgs) lib callPackage writeShellApplication runCommand jq;
   codex = package;
   marketplaceName = "${profileName}-ai";
 
@@ -31,14 +31,7 @@ writeShellApplication {
   name = "codex";
   runtimeInputs = [ jq ];
   derivationArgs.version = codex.version;
-  # The prelude hides reasoning blocks through this helper. The interpreter is
-  # called by store path, not put on PATH, so the agent's own python is never
-  # shadowed and no launcher-only variable leaks into Codex's environment.
-  text = ''
-    codex_reasoning_default() {
-      ${python3.interpreter} ${./reasoning-defaults.py} "$@"
-    }
-  '' + builtins.readFile ./session-defaults.sh + lib.optionalString (plugins != [ ]) ''
+  text = builtins.readFile ./session-defaults.sh + lib.optionalString (plugins != [ ]) ''
     # The name stays fixed, but its store path changes between builds. Use the
     # native installer only when that path changes, preserving disabled plugins
     # on steady-state launches as well as unrelated config and auth.
