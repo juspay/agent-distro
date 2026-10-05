@@ -71,7 +71,7 @@ let
     fi
     history=${lib.escapeShellArg "${config.xdg.stateHome}/agent-distro/history.log"}
     record() {
-      ${pkgs.coreutils}/bin/printf '%s %s %s\n' "$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" ${lib.escapeShellArg cfg.profile} "$1" >> "$history"
+      ${pkgs.coreutils}/bin/printf '%s %s %s\n' "$(${pkgs.coreutils}/bin/date +%Y-%m-%dT%H:%M:%S%:z)" ${lib.escapeShellArg cfg.profile} "$1" >> "$history"
     }
     # A skipped update is not a failure: exiting 0 avoids the pointless
     # restart loop, and last-success stays untouched so launchd tries again

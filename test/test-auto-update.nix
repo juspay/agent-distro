@@ -132,7 +132,7 @@ in
         lines = machine.succeed("cat " + history).splitlines()
         assert len(lines) == len(events), lines
         for line, event in zip(lines, events):
-            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z vanilla " + re.escape(event), line), line
+            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} vanilla " + re.escape(event), line), line
 
     machine.succeed("test ! -e " + state)
     for name in ${builtins.toJSON commands}:
