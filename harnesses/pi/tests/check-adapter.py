@@ -58,18 +58,20 @@ class PiAdapterTests(unittest.TestCase):
                 write_config(str(root / 'collision'), '/bin/sh', '/usr/bin/env', str(gateway),
                              str(description), str(description))
 
-    def test_empty_contributions_leave_files_alone(self):
+    def test_empty_contributions_keep_settings_default(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fragment = root / 'fragment.json'
             fragment.write_text(json.dumps({'skills': [], 'mcpServers': {}}))
             agent = root / 'agent'
-            for mode in ['--check', '--merge']:
-                merge(mode, str(agent), str(fragment))
-                self.assertFalse(agent.exists())
-            agent.mkdir()
-            for name, content in [('mcp', '{}'), ('settings', '{"theme": "light"}')]:
-                (agent / f'{name}.json').write_text(content)
+            merge('--check', str(agent), str(fragment))
+            self.assertFalse((agent / 'settings.json').exists())
+            # The thinking-block default is always written, even for an empty
+            # contribution set, so a fresh merge creates settings.json only.
+            merge('--merge', str(agent), str(fragment))
+            self.assertEqual(json.loads((agent / 'settings.json').read_text()),
+                             {'hideThinkingBlock': True})
+            (agent / 'mcp.json').write_text('{}')
             before = {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
                       for path in agent.iterdir()}
             for mode in ['--check', '--merge']:
@@ -79,7 +81,8 @@ class PiAdapterTests(unittest.TestCase):
             (agent / 'settings.json').write_text(json.dumps({
                 'skills': ['/personal/skills', '/nix/store/old-pi-config/skills/example']}))
             merge('--merge', str(agent), str(fragment))
-            self.assertEqual(json.loads((agent / 'settings.json').read_text()), {'skills': ['/personal/skills']})
+            self.assertEqual(json.loads((agent / 'settings.json').read_text()),
+                             {'skills': ['/personal/skills'], 'hideThinkingBlock': True})
             (agent / 'settings.json').write_text('{')
             with self.assertRaises(ValueError):
                 merge('--merge', str(agent), str(fragment))
@@ -89,12 +92,15 @@ class PiAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fragment = root / 'fragment.json'
+            # The thinking-block default lives in settings.json, so that file
+            # exists whenever anything (or nothing else) is merged.
             for name, contribution in [('settings', {'skills': ['/managed/skills'], 'mcpServers': {}}),
                                        ('mcp', {'skills': [], 'mcpServers': {'managed': {'command': '/server'}}})]:
                 fragment.write_text(json.dumps(contribution))
                 agent = root / name
                 merge('--merge', str(agent), str(fragment))
-                self.assertEqual([path.name for path in agent.iterdir()], [f'{name}.json'])
+                expected = ['settings.json'] if name == 'settings' else ['mcp.json', 'settings.json']
+                self.assertEqual(sorted(path.name for path in agent.iterdir()), expected)
 
     def test_atomic_preservation_and_validation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -116,7 +122,8 @@ class PiAdapterTests(unittest.TestCase):
             self.assertEqual(json.loads(mcp.read_text())['mcpServers'], {
                 'personal': {'command': '/personal'}, 'managed': {'command': '/new/server'}})
             self.assertEqual(json.loads(settings.read_text()), {
-                'skills': ['/personal/skills', '/nix/store/new-pi-config/skills/example'], 'theme': 'light'})
+                'skills': ['/personal/skills', '/nix/store/new-pi-config/skills/example'], 'theme': 'light',
+                'hideThinkingBlock': True})
             inode = mcp.stat().st_ino
             merge('--merge', directory, str(fragment))
             self.assertEqual(mcp.stat().st_ino, inode)

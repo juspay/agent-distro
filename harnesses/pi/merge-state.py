@@ -35,6 +35,9 @@ def prepare(directory, fragment, gateway):
     refreshed = [s for s in skills if '-pi-config/skills/' not in s] + fragment['skills']
     if refreshed != skills:
         data['settings']['skills'] = refreshed
+    # Thinking blocks are transcript content, not the thinking-level indicator.
+    # Absent by default; a user's explicit value, including `false`, survives.
+    data['settings'].setdefault('hideThinkingBlock', True)
     if gateway:
         providers = data['models'].setdefault('providers', {})
         if not isinstance(providers, dict):
