@@ -6,8 +6,8 @@ import subprocess
 from mcp_launcher import launcher
 
 
-def copy_skills(description, root):
-    skills = Path(root) / 'skills' / description['manifest']['name']
+def copy_skills(description, skills):
+    skills = Path(skills)
     for name, files in description['skills'].items():
         for file in files:
             target = skills / name / file

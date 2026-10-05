@@ -21,13 +21,18 @@ class AdapterTests(unittest.TestCase):
     provider_key = "provider"
     settings_key = "options"
 
+    def write_config(self, out, gateway, descriptions, **kwargs):
+        args = Path(out).with_suffix('.args.json')
+        args.write_text(json.dumps({'schema': self.schema, 'bash': '/bin/sh', 'env': '/usr/bin/env',
+                                    'gateway': gateway, 'descriptions': list(descriptions)}))
+        return subprocess.run([sys.executable, str(ADAPTER / 'write-config.py'), str(out), str(args)],
+                              **kwargs)
+
     def test_server_names_and_collisions(self):
         local = {'type': 'stdio', 'command': 'echo', 'args': [], 'env': {}}
         remote = {'type': 'streamable-http', 'url': 'https://example.com/mcp', 'headers': {}}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            gateway = root / 'gateway.json'
-            gateway.write_text('null')
 
             def description(plugin, server):
                 path = root / f'{plugin}.json'
@@ -38,10 +43,7 @@ class AdapterTests(unittest.TestCase):
                 return str(path)
 
             def generate(out, *descriptions):
-                return subprocess.run(
-                    [sys.executable, str(ADAPTER / 'write-config.py'), self.schema, str(out),
-                     '/bin/sh', '/usr/bin/env', str(gateway), *descriptions],
-                    capture_output=True, text=True)
+                return self.write_config(out, None, descriptions, capture_output=True, text=True)
 
             first = description('first-plugin', local)
             out = root / 'valid'
@@ -117,9 +119,8 @@ class AdapterTests(unittest.TestCase):
             source = root / 'skills/guide'
             source.mkdir(parents=True)
             (source / 'SKILL.md').write_text('---\nname: guide\ndescription: Guide\n---\nRead me.\n')
-            gateway = root / 'gateway.json'
-            gateway.write_text(json.dumps({'url': 'https://gateway.example/', 'keyEnv': 'TEST_KEY',
-                                           'models': {'large': 'large', 'small': 'small'}}))
+            gateway = {'url': 'https://gateway.example/', 'keyEnv': 'TEST_KEY',
+                       'models': {'large': 'large', 'small': 'small'}}
             description = root / 'plugin.json'
             description.write_text(json.dumps({
                 'root': str(root), 'manifest': {'name': 'example'},
@@ -128,8 +129,7 @@ class AdapterTests(unittest.TestCase):
                                           'headers': {'Authorization': 'Bearer {env:TOKEN}'}}},
             }))
             out = root / 'out'
-            subprocess.run([sys.executable, str(ADAPTER / 'write-config.py'), self.schema,
-                            str(out), '/bin/sh', '/usr/bin/env', str(gateway), str(description)], check=True)
+            self.write_config(out, gateway, [str(description)], check=True)
             plain = json.loads((out / 'opencode.json').read_text())
             self.assertNotIn(self.provider_key, plain)
             paths = plain['skills'] if self.schema == 'v2' else plain['skills']['paths']
