@@ -35,6 +35,16 @@ def fill_absent(target, defaults, path=""):
     return added
 
 
+def merge_defaults(target, source):
+    """Fold one defaults file into another, later files winning per key."""
+    for key, value in source.items():
+        if isinstance(value, MutableMapping) and isinstance(target.get(key), MutableMapping):
+            merge_defaults(target[key], value)
+        else:
+            target[key] = value
+    return target
+
+
 def fill_defaults(config, defaults):
     # Follow a user's config symlink rather than replacing it.
     config = config.resolve()
@@ -72,7 +82,14 @@ def fill_defaults(config, defaults):
 
 if __name__ == "__main__":
     try:
-        defaults = YAML(typ="safe").load(Path(sys.argv[2]))
+        parser = YAML(typ="safe")
+        defaults = CommentedMap()
+        # Several files layer the unconditional defaults under the
+        # gateway-only ones, so each key has a single home.
+        for source in sys.argv[2:]:
+            loaded = parser.load(Path(source))
+            if loaded:
+                merge_defaults(defaults, loaded)
         fill_defaults(Path(sys.argv[1]), defaults)
     except Exception as error:
         sys.exit(f"omp: cannot fill config defaults in {sys.argv[1]}: {error}")

@@ -29,12 +29,15 @@ let
 in
 writeShellApplication {
   name = "codex";
-  runtimeInputs = [ jq python3 ];
+  runtimeInputs = [ jq ];
   derivationArgs.version = codex.version;
+  # The prelude hides reasoning blocks through this helper. The interpreter is
+  # called by store path, not put on PATH, so the agent's own python is never
+  # shadowed and no launcher-only variable leaks into Codex's environment.
   text = ''
-    # The prelude hides reasoning blocks through this helper; see it for when
-    # the default is skipped.
-    export CODEX_REASONING_SCRIPT=${./reasoning-defaults.py}
+    codex_reasoning_default() {
+      ${python3.interpreter} ${./reasoning-defaults.py} "$@"
+    }
   '' + builtins.readFile ./session-defaults.sh + lib.optionalString (plugins != [ ]) ''
     # The name stays fixed, but its store path changes between builds. Use the
     # native installer only when that path changes, preserving disabled plugins

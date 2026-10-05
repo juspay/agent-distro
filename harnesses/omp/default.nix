@@ -11,11 +11,10 @@ let
   # Thinking blocks are transcript content, not the thinking-level indicator;
   # hide them for every profile, gateway or not. A user-set value, including
   # `false`, is never replaced.
-  defaults = {
+  configDefaults = (formats.yaml { }).generate "omp-config.yml" {
     hideThinkingBlock = true;
   };
-  configDefaults = (formats.yaml { }).generate "omp-config.yml" defaults;
-  gatewayDefaults = (formats.yaml { }).generate "omp-config-gateway.yml" (defaults // {
+  gatewayDefaults = (formats.yaml { }).generate "omp-config-gateway.yml" {
     # Without this OMP starts on its own first-available model; the roles are how
     # our recommendation reaches the agent.
     modelRoles = {
@@ -29,17 +28,17 @@ let
     # roles point at gateway aliases (`open-large`), and an agent can carry its
     # own model override, so the badge is the only place that answer surfaces.
     task.showResolvedModelBadge = true;
-  });
+  };
 
   initialization = ''
     agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.omp/agent}"
-    defaults=${configDefaults}
+    default_files=("${configDefaults}")
     ${lib.optionalString (gateway != null) ''
       if [ "''${JUSPAY:-1}" = "0" ]; then
         echo 'JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.' >&2
       fi
       if [ "''${AI_GATEWAY:-1}" != "0" ] && [ "''${JUSPAY:-1}" != "0" ]; then
-        defaults=${gatewayDefaults}
+        default_files+=("${gatewayDefaults}")
         ${ensureApiKey}
 
         # These two are how OMP finds the gateway and asks it what it serves, so the
@@ -59,7 +58,7 @@ let
     # /settings choices survive relaunch. Invalid YAML stops launch without a
     # write. Honour OMP's relocated agent directory and its default otherwise.
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
-      ${configPython}/bin/python ${./fill-config-defaults.py} "$agent_dir/config.yml" "$defaults"
+      ${configPython}/bin/python ${./fill-config-defaults.py} "$agent_dir/config.yml" "''${default_files[@]}"
     fi
   '';
 in
