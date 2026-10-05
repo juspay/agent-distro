@@ -32,10 +32,11 @@ if not target.exists() or target.read_text() != content:
     with tempfile.NamedTemporaryFile(mode='w', dir=here, delete=False) as output:
         temporary = Path(output.name)
         try:
+            if target.exists():
+                os.fchmod(output.fileno(), target.stat().st_mode & 0o777)
             output.write(content)
             output.flush()
             os.fsync(output.fileno())
-            os.chmod(temporary, 0o644)
             temporary.replace(target)
         finally:
             temporary.unlink(missing_ok=True)
