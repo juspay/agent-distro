@@ -3,8 +3,8 @@
 Reasoning blocks are hidden by default, but the setting is only passed when the
 user has not chosen a value themselves. `-c` beats the config, and beats a
 profile value too, so an unconditional override would silently undo an explicit
-`false` left at the top level, in the active profile, or in that profile's
-own `<name>.config.toml`.
+`false` left at the top level, in the active profile, or in that profile's own
+`<name>.config.toml`.
 """
 import os
 import sys
@@ -14,85 +14,87 @@ from pathlib import Path
 KEY = "hide_agent_reasoning"
 
 
-def value_flags(arguments):
-    """Yield (flag, value) for the flags that take a value and matter here."""
+def parse(text):
+    """Parse a TOML snippet, or None when it is not valid TOML."""
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return None
+
+
+def read_toml(path):
+    """Parse a TOML file, or None when it is absent or unreadable."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    return parse(text)
+
+
+def from_cli(arguments):
+    """What the command line says about the two config sources that matter.
+
+    Returns the `-c/--config` TOML snippets and the `-p/--profile` name, both
+    found in one pass so Codex's value-flag grammar lives in one place.
+    """
+    overrides, profile = [], None
     index = 0
     while index < len(arguments):
         argument = arguments[index]
+        flag, value = None, None
         if argument in ("-c", "--config", "-p", "--profile"):
+            flag = argument
             if index + 1 < len(arguments):
                 index += 1
-                yield argument, arguments[index]
-            else:
-                yield argument, None
-        elif argument.startswith("--config="):
-            yield "--config", argument[len("--config="):]
-        elif argument.startswith("--profile="):
-            yield "--profile", argument[len("--profile="):]
-        elif argument.startswith("-c") and len(argument) > 2:
-            yield "-c", argument[2:]
-        elif argument.startswith("-p") and len(argument) > 2:
-            yield "-p", argument[2:]
+                value = arguments[index]
+        elif argument.startswith(("--config=", "--profile=")):
+            flag, value = argument.split("=", 1)
+        elif argument[:2] in ("-c", "-p") and len(argument) > 2:
+            flag, value = argument[:2], argument[2:]
+        if value is not None:
+            if flag in ("-c", "--config"):
+                snippet = parse(value)
+                if snippet is not None:
+                    overrides.append(snippet)
+            elif flag in ("-p", "--profile"):
+                profile = value
         index += 1
+    return overrides, profile
 
 
-def config_overrides(arguments):
-    """Yield the TOML snippets the user passed via -c/--config."""
-    for flag, value in value_flags(arguments):
-        if flag in ("-c", "--config") and value is not None:
-            try:
-                yield tomllib.loads(value)
-            except tomllib.TOMLDecodeError:
-                pass
-
-
-def parse(path):
-    """Parse a TOML file; None when absent, {} when Codex will report it."""
-    try:
-        return tomllib.loads(path.read_text())
-    except FileNotFoundError:
-        return None
-    except (tomllib.TOMLDecodeError, OSError):
-        # A broken config stops Codex itself; adding our own -c would only
-        # obscure the error it reports.
-        return {}
-
-
-def active_profile(arguments, document, overrides):
-    for flag, value in value_flags(arguments):
-        if flag in ("-p", "--profile") and value is not None:
-            return value
+def active_profile(cli_profile, overrides, document):
+    """The profile Codex resolves: -p/--profile, -c profile=..., then the file."""
+    if cli_profile is not None:
+        return cli_profile
     for override in overrides:
         if isinstance(override.get("profile"), str):
             return override["profile"]
-    if isinstance(document.get("profile"), str):
-        return document["profile"]
-    return None
+    declared = document.get("profile")
+    return declared if isinstance(declared, str) else None
 
 
 def chooses_key(home, document, profile):
+    """True when a layer Codex reads for this launch sets the key."""
     if KEY in document:
         return True
     if profile is None:
         return False
     profiles = document.get("profiles")
-    if isinstance(profiles, dict):
-        active = profiles.get(profile)
-        if isinstance(active, dict) and KEY in active:
-            return True
-    layered = parse(home / f"{profile}.config.toml")
+    active = profiles.get(profile) if isinstance(profiles, dict) else None
+    if isinstance(active, dict) and KEY in active:
+        return True
+    layered = read_toml(home / f"{profile}.config.toml")
     return isinstance(layered, dict) and KEY in layered
 
 
 def main(arguments):
-    overrides = list(config_overrides(arguments))
+    overrides, cli_profile = from_cli(arguments)
     if any(KEY in override for override in overrides):
         return
     home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
-    document = parse(home / "config.toml")
-    if document is None:
-        document = {}
-    if chooses_key(home, document, active_profile(arguments, document, overrides)):
+    document = read_toml(home / "config.toml") or {}
+    profile = active_profile(cli_profile, overrides, document)
+    if chooses_key(home, document, profile):
         return
     print(f"{KEY}=true")
 

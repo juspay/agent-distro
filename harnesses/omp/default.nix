@@ -11,7 +11,7 @@ let
   # Thinking blocks are transcript content, not the thinking-level indicator;
   # hide them for every profile, gateway or not. A user-set value, including
   # `false`, is never replaced.
-  configDefaults = (formats.yaml { }).generate "omp-config.yml" {
+  alwaysDefaults = (formats.yaml { }).generate "omp-config.yml" {
     hideThinkingBlock = true;
   };
   gatewayDefaults = (formats.yaml { }).generate "omp-config-gateway.yml" {
@@ -32,13 +32,13 @@ let
 
   initialization = ''
     agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.omp/agent}"
-    default_files=("${configDefaults}")
+    default_layers=("${alwaysDefaults}")
     ${lib.optionalString (gateway != null) ''
       if [ "''${JUSPAY:-1}" = "0" ]; then
         echo 'JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.' >&2
       fi
       if [ "''${AI_GATEWAY:-1}" != "0" ] && [ "''${JUSPAY:-1}" != "0" ]; then
-        default_files+=("${gatewayDefaults}")
+        default_layers+=("${gatewayDefaults}")
         ${ensureApiKey}
 
         # These two are how OMP finds the gateway and asks it what it serves, so the
@@ -56,9 +56,10 @@ let
     # Fill absent defaults in the persistent config, including installations
     # created before this wrapper. Existing keys always win, so /model and
     # /settings choices survive relaunch. Invalid YAML stops launch without a
-    # write. Honour OMP's relocated agent directory and its default otherwise.
+    # write; a directory we cannot write only warns. Honour OMP's relocated
+    # agent directory and its default otherwise.
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
-      ${configPython}/bin/python ${./fill-config-defaults.py} "$agent_dir/config.yml" "''${default_files[@]}"
+      ${configPython}/bin/python ${./fill-config-defaults.py} "$agent_dir/config.yml" "''${default_layers[@]}"
     fi
   '';
 in

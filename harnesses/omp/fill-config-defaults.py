@@ -35,17 +35,8 @@ def fill_absent(target, defaults, path=""):
     return added
 
 
-def merge_defaults(target, source):
-    """Fold one defaults file into another, later files winning per key."""
-    for key, value in source.items():
-        if isinstance(value, MutableMapping) and isinstance(target.get(key), MutableMapping):
-            merge_defaults(target[key], value)
-        else:
-            target[key] = value
-    return target
-
-
-def fill_defaults(config, defaults):
+def fill_defaults(config, layers):
+    """Fill absent keys from each layer, writing the config at most once."""
     # Follow a user's config symlink rather than replacing it.
     config = config.resolve()
     yaml = YAML()
@@ -63,7 +54,10 @@ def fill_defaults(config, defaults):
                 preamble += "\n"
     if not isinstance(data, MutableMapping):
         raise ValueError("config must be a YAML mapping")
-    if not fill_absent(data, defaults):
+    added = 0
+    for layer in layers:
+        added += fill_absent(data, layer)
+    if not added:
         return
     config.parent.mkdir(parents=True, exist_ok=True)
     mode = stat.S_IMODE(config.stat().st_mode) if exists else 0o600
@@ -83,13 +77,13 @@ def fill_defaults(config, defaults):
 if __name__ == "__main__":
     try:
         parser = YAML(typ="safe")
-        defaults = CommentedMap()
-        # Several files layer the unconditional defaults under the
-        # gateway-only ones, so each key has a single home.
-        for source in sys.argv[2:]:
-            loaded = parser.load(Path(source))
-            if loaded:
-                merge_defaults(defaults, loaded)
-        fill_defaults(Path(sys.argv[1]), defaults)
+        # Files layer in order: a later file adds only keys the earlier ones
+        # (and the user) left absent, so each default has one home.
+        layers = [parser.load(Path(source)) for source in sys.argv[2:]]
+        fill_defaults(Path(sys.argv[1]), [layer for layer in layers if layer])
+    except OSError as error:
+        # The defaults are a convenience; an agent directory the wrapper cannot
+        # write must not stop the harness from launching.
+        print(f"omp: warning: cannot fill config defaults in {sys.argv[1]}: {error}", file=sys.stderr)
     except Exception as error:
         sys.exit(f"omp: cannot fill config defaults in {sys.argv[1]}: {error}")
