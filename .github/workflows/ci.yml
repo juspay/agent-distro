@@ -42,17 +42,6 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 .github/scripts/test-update-flake.py
 
-      # A harness that misses the cache builds from source (omp and opencode
-      # together leave ~17 GB in the store), and the VM tests then need room
-      # for their images. The hosted Linux image's unused SDKs make that room;
-      # without it the runner fills its disk and the job dies with no log.
-      - name: Free disk space
-        if: runner.os == 'Linux'
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
-
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           github_access_token: ${{ github.token }}
@@ -95,10 +84,12 @@ jobs:
       - name: Wrapper package tests
         # The wrapper tests boot NixOS VMs (x86_64-linux only: the test flake
         # fixes its system, and ARM runners have no KVM). `nix flake check`
-        # builds the whole checks set.
+        # builds the whole checks set. Two VMs at a time: four saturate the
+        # hosted runner's four vCPUs, and GitHub then cancels the step midway
+        # with no error whenever the checks miss the cache.
         if: runner.os == 'Linux' && runner.arch == 'X64'
         run: |
-          cd test && nix flake check -L
+          cd test && nix flake check -L --max-jobs 2
 
       - name: Test the distribution template
         run: bash test/template.sh
