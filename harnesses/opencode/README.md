@@ -8,7 +8,9 @@ cached list or the profile's two aliases as fallback when unavailable.
 
 OpenCode v1 uses an npins release pin bounded below v2. Its source build is
 loaded from upstream's lock, except that every nixpkgs in it is the
-distribution's shared nixpkgs.
+distribution's shared nixpkgs. Bun alone comes from the recipe in upstream's
+locked nixpkgs, called with the shared package set: upstream's per-platform
+`node_modules` hashes hold only for that bun.
 
 The Darwin override supplies `codesign` from nixpkgs' `darwin.sigtool` and
 `codesign_allocate` from `darwin.cctools` for the ad-hoc signing step added in
