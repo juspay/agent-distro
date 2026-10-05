@@ -1,12 +1,14 @@
 CONFIG = "/home/testuser/.omp/agent/config.yml"
-# Runtime opt-out uses the same package, needs no gateway key, and must not
-# seed gateway settings before upstream OMP starts.
+# Runtime opt-out uses the same package and needs no gateway key. It still
+# hides thinking blocks, but never seeds gateway roles or the badge.
 machine.succeed(f"su - testuser -c 'env -u {gateway['keyEnv']} AI_GATEWAY=0 omp --version </dev/null'")
-machine.fail(f"test -e {CONFIG}")
+opted_out = machine.succeed(f"cat {CONFIG}")
+assert "hideThinkingBlock: true" in opted_out, opted_out
+assert "modelRoles" not in opted_out, opted_out
 
 deprecated = machine.succeed(f"su - testuser -c 'env -u {gateway['keyEnv']} JUSPAY=0 omp --version </dev/null 2>&1'")
 assert deprecated.count("JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.") == 1, deprecated
-machine.fail(f"test -e {CONFIG}")
+assert machine.succeed(f"cat {CONFIG}") == opted_out
 
 # First launch: this is also what seeds the config asserted on below.
 version = machine.succeed("su - testuser -c 'omp --version'")
@@ -36,6 +38,7 @@ assert effective_setting("modelRoles") == {
     "slow": f"litellm/{gateway['models']['large']}",
 }
 assert effective_setting("task.showResolvedModelBadge") is True
+assert effective_setting("hideThinkingBlock") is True
 machine.fail("test -e /home/testuser/.omp/agent/models.yml")
 # Reproduce an existing wizard config with an expensive primary. Preserve
 # unrelated settings and comments while adding all background roles and the
@@ -44,14 +47,15 @@ old_config = "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthrop
 write_config(CONFIG, old_config)
 run_as_user("omp --version")
 config = machine.succeed(f"cat {CONFIG}")
-for expected in ["# user settings", "setupVersion: 2", "default: 'anthropic/expensive:high' # keep choice", f"smol: litellm/{gateway['models']['small']}", f"task: litellm/{gateway['models']['large']}", f"slow: litellm/{gateway['models']['large']}", "showResolvedModelBadge: true"]:
+for expected in ["# user settings", "setupVersion: 2", "default: 'anthropic/expensive:high' # keep choice", f"smol: litellm/{gateway['models']['small']}", f"task: litellm/{gateway['models']['large']}", f"slow: litellm/{gateway['models']['large']}", "showResolvedModelBadge: true", "hideThinkingBlock: true"]:
     assert expected in config, config
 
 # A fully configured file must not even be rewritten — /model choices win,
-# and so does the user turning a defaulted setting off. The badge is the
-# only default that is a *choice* rather than a pointer at our gateway, so
-# `false` is the value a user is most likely to have set themselves.
-custom = config.replace(f"litellm/{gateway['models']['small']}", "litellm/custom-fast").replace(f"litellm/{gateway['models']['large']}", "litellm/custom-large").replace("showResolvedModelBadge: true", "showResolvedModelBadge: false")
+# and so does the user turning a defaulted setting off. The badge and the
+# thinking-block toggle are the defaults that are *choices* rather than
+# pointers at our gateway, so `false` is the value a user is most likely to
+# have set themselves.
+custom = config.replace(f"litellm/{gateway['models']['small']}", "litellm/custom-fast").replace(f"litellm/{gateway['models']['large']}", "litellm/custom-large").replace("showResolvedModelBadge: true", "showResolvedModelBadge: false").replace("hideThinkingBlock: true", "hideThinkingBlock: false")
 write_config(CONFIG, custom)
 before = machine.succeed(f"stat -c '%i %Y' {CONFIG}")
 run_as_user("omp --version")
@@ -60,6 +64,7 @@ assert machine.succeed(f"stat -c '%i %Y' {CONFIG}") == before
 # The mirror of the fresh-config probe: a setting the wrapper wants on, off
 # by the user's own hand, has to reach omp as off.
 assert effective_setting("task.showResolvedModelBadge") is False
+assert effective_setting("hideThinkingBlock") is False
 
 # Relocated configs get the same migration without changing the normal one.
 run_as_user("mkdir -p /home/testuser/relocated")
@@ -83,8 +88,8 @@ for invalid in ["modelRoles: [", "modelRoles: []\n", "modelRoles: null\n", "task
     assert machine.succeed(f"cat {relocated}") == invalid
 print("✅ existing roles, settings and comments survive migration; invalid config stays untouched")
 
-# Opting out also preserves existing user configuration without adding the
-# gateway's background roles or display defaults.
+# Opting out preserves existing user configuration and adds only the
+# non-gateway display default; the gateway's background roles stay out.
 personal = "# personal provider\nmodelRoles:\n  default: openai/my-model\n"
 write_config(relocated, personal)
 roles = json.loads(run_as_user(
@@ -92,4 +97,7 @@ roles = json.loads(run_as_user(
     "omp config get modelRoles --json"
 ))["value"]
 assert roles == {"default": "openai/my-model"}
-assert machine.succeed(f"cat {relocated}") == personal
+personal_filled = machine.succeed(f"cat {relocated}")
+assert "default: openai/my-model" in personal_filled, personal_filled
+assert "hideThinkingBlock: true" in personal_filled, personal_filled
+assert "smol:" not in personal_filled, personal_filled

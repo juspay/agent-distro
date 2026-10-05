@@ -26,6 +26,17 @@ terminal_session() {
   done
 }
 
+# Reasoning blocks are hidden unless the user chose otherwise, in config.toml
+# or with their own -c/--config. The helper reads both; without one (a bare
+# checkout) no default is injected.
+codex_reasoning_default() {
+  [ -n "${CODEX_REASONING_SCRIPT:-}" ] || return 0
+  python3 "$CODEX_REASONING_SCRIPT" "$@"
+}
+
 if terminal_session "$@"; then
   set -- --no-daemon "$@"
+  if reasoning=$(codex_reasoning_default "$@") && [ -n "$reasoning" ]; then
+    set -- -c "$reasoning" "$@"
+  fi
 fi

@@ -33,6 +33,18 @@ def check_contract():
 
 
 check_contract()
+
+reasoning = ['-c', 'hide_agent_reasoning=true']
+
+
+def forward(arguments):
+    result = subprocess.run(
+        ['bash', '-euo', 'pipefail', '-c',
+         'source "$CODEX_SESSION_DEFAULTS"; printf "%s\\0" "$@"',
+         'fixture', *arguments], env=env, capture_output=True, check=True)
+    return result.stdout.decode().split('\0')[:-1]
+
+
 for arguments, inject in [
     ([], True),
     (['hello'], True),
@@ -52,10 +64,19 @@ for arguments, inject in [
     (['-c', 'model="my-model"', 'app-server', 'daemon', 'version'], False),
     (['plugin', 'list', '--json'], False),
 ]:
-    result = subprocess.run(
-        ['bash', '-euo', 'pipefail', '-c',
-         'source "$CODEX_SESSION_DEFAULTS"; printf "%s\\0" "$@"',
-         'fixture', *arguments], env=env, capture_output=True, check=True)
-    forwarded = result.stdout.decode().split('\0')[:-1]
-    assert forwarded == (['--no-daemon'] if inject else []) + arguments, (arguments, forwarded)
+    forwarded = forward(list(arguments))
+    expected = (reasoning if inject else []) + (['--no-daemon'] if inject else []) + arguments
+    assert forwarded == expected, (arguments, forwarded)
+
+# A value the user chose on either side suppresses the default entirely.
+personal = config.read_text()
+config.write_text('hide_agent_reasoning = false\n')
+assert forward(['hello']) == ['--no-daemon', 'hello']
+config.write_text('hide_agent_reasoning = true\n')
+assert forward(['hello']) == ['--no-daemon', 'hello']
+config.write_text(personal)
+for argument in [['-c', 'hide_agent_reasoning=false'], ['-c', 'hide_agent_reasoning = true'],
+                 ['--config=hide_agent_reasoning=false'], ['-chide_agent_reasoning=false']]:
+    forwarded = forward([*argument, 'hello'])
+    assert forwarded == ['--no-daemon', *argument, 'hello'], (argument, forwarded)
 assert_preserved()

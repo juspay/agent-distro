@@ -31,7 +31,8 @@ with tempfile.TemporaryDirectory() as directory:
         if name != 'personal'}
     if not expected:
         assert not (relocated / 'mcp.json').exists()
-        assert not (relocated / 'settings.json').exists()
+        # An empty profile still gets the thinking-block default.
+        assert json.loads((relocated / 'settings.json').read_text()) == {'hideThinkingBlock': True}
     relocated.chmod(0o500)
     try:
         run('--version', overrides={'PI_CODING_AGENT_DIR': directory})
