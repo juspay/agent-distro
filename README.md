@@ -143,7 +143,7 @@ such as `skipped: cache https://cache.nixos.asia/oss not usable; add it to nix.s
 The same line is not repeated, and a skip is not retried until the next
 scheduled run. Activation warns while the cache is unusable.
 
-Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`. Update and failure events go to `~/.local/state/agent-distro/history.log`, e.g. `2026-10-01T23:03:17Z juspay updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. Full run output is in `journalctl --user -u agent-distro-update` on Linux and `~/.local/state/agent-distro/<source>/update.log` on macOS.
+Updates not arriving? `systemctl --user status agent-distro-update`; run manually with `systemctl --user start agent-distro-update`. Update and failure events go to `~/.local/state/agent-distro/history.log` in your local timezone, e.g. `2026-10-01T23:03:17+05:30 juspay updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. Full run output is in `journalctl --user -u agent-distro-update` on Linux and `~/.local/state/agent-distro/<source>/update.log` on macOS.
 
 ## Build your own distribution
 
