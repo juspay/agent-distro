@@ -10,20 +10,43 @@
  * config that cannot be written only warns; invalid YAML stops the launch
  * without a write.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { Document, isMap, isScalar, parse, parseDocument, type YAMLMap } from 'yaml';
-import { isSystemError, realpath, temporaryPath } from '../util.ts';
+import { Document, isAlias, isMap, isScalar, isSeq, parse, parseDocument, type YAMLMap } from 'yaml';
+import { decodeUtf8, isSystemError, realpath, writeTemporary } from '../util.ts';
 
 type Defaults = Record<string, unknown>;
 
 // Match ruamel.yaml's round-trip output, which earlier versions of this
 // wrapper wrote: block sequences sit at their key's indentation and flow
 // collections have no inner padding.
-const FORMAT = { indentSeq: false, flowCollectionPadding: false } as const;
+const FORMAT = { indentSeq: false, flowCollectionPadding: false, lineWidth: 0 } as const;
 
 const isPlainObject = (value: unknown): value is Defaults =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const resolve = (document: Document, node: unknown) => (isAlias(node) ? node.resolve(document) : node);
+
+/**
+ * The value `key` has in `map` as OMP reads it, or undefined when the user
+ * has not set it. Besides the map's own keys this sees what `<<` merge keys
+ * bring in, so a default never shadows a merged-in value, and it follows
+ * aliases, so filling a section fills the anchored mapping it names.
+ */
+function lookup(document: Document, map: YAMLMap, key: string): { value: unknown } | undefined {
+  const own = map.items.find((pair) => isScalar(pair.key) && pair.key.value === key);
+  if (own) return { value: resolve(document, own.value) };
+  for (const pair of map.items) {
+    if (!isScalar(pair.key) || pair.key.value !== '<<') continue;
+    const sources = isSeq(pair.value) ? pair.value.items : [pair.value];
+    for (const source of sources) {
+      const merged = resolve(document, source);
+      const found = isMap(merged) ? lookup(document, merged, key) : undefined;
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
 
 /**
  * Add every default the user has not set, recursing into shared mappings.
@@ -37,16 +60,16 @@ function fillAbsent(document: Document, target: YAMLMap, defaults: Defaults, pat
   let added = 0;
   for (const [key, value] of Object.entries(defaults)) {
     const where = path + key;
-    if (!target.has(key)) {
+    const found = lookup(document, target, key);
+    if (!found) {
       target.set(key, document.createNode(value));
       added += 1;
     } else if (isPlainObject(value)) {
       // A section the user set to something else is a config error, not a
       // default to skip: OMP would read past it and silently run without
       // the settings under it — the roles among them.
-      const section = target.get(key, true);
-      if (!isMap(section)) throw new Error(`${where} must be a YAML mapping`);
-      added += fillAbsent(document, section, value, `${where}.`);
+      if (!isMap(found.value)) throw new Error(`${where} must be a YAML mapping`);
+      added += fillAbsent(document, found.value, value, `${where}.`);
     }
   }
   return added;
@@ -57,7 +80,9 @@ export function fillDefaults(configPath: string, layers: Defaults[]) {
   // Follow a user's config symlink rather than replacing it.
   const config = realpath(configPath);
   const exists = existsSync(config);
-  const original = exists ? readFileSync(config, 'utf8') : '';
+  // Strict, so a file that is not UTF-8 stops the launch instead of being
+  // rewritten with replacement characters.
+  const original = exists ? decodeUtf8(readFileSync(config)) : '';
   let document = parseDocument(original);
   if (document.errors.length) throw document.errors[0];
   let preamble = '';
@@ -75,9 +100,8 @@ export function fillDefaults(configPath: string, layers: Defaults[]) {
   if (!added) return;
   mkdirSync(dirname(config), { recursive: true });
   const mode = exists ? statSync(config).mode & 0o7777 : 0o600;
-  const temporary = temporaryPath(dirname(config), '.config-');
+  const temporary = writeTemporary(dirname(config), '.config-', preamble + document.toString(FORMAT));
   try {
-    writeFileSync(temporary, preamble + document.toString(FORMAT), { flag: 'wx', mode: 0o600 });
     chmodSync(temporary, mode);
     renameSync(temporary, config);
   } finally {
@@ -88,7 +112,7 @@ export function fillDefaults(configPath: string, layers: Defaults[]) {
 if (import.meta.main) {
   const [config, ...sources] = process.argv.slice(2);
   try {
-    const layers = sources.map((source) => parse(readFileSync(source, 'utf8')) ?? {});
+    const layers = sources.map((source) => parse(decodeUtf8(readFileSync(source))) ?? {});
     if (!layers.every(isPlainObject)) throw new Error('every defaults layer must be a YAML mapping');
     fillDefaults(config, layers);
   } catch (error) {
