@@ -1,9 +1,17 @@
-# VM-free: the library functions must evaluate from a plain import of the
-# lib/*.nix files with an arbitrary nixpkgs pkgs (kolu's consumption path),
-# not only through flake.nix. Asserts that what they produce is exactly what
-# the Home Manager module builds from the same inputs: identical shim text,
-# the updater config's fields, and the same state directory. Missing required
-# arguments fail evaluation (no silent defaults).
+# VM-free: the library functions must evaluate from a plain `import` of the
+# lib/*.nix files with an arbitrary nixpkgs, not only through flake.nix/flake
+# inputs — kolu's consumption path. Two `pkgs` instances are used: agent-distro's
+# own (so the produced shims/config can be compared byte-for-byte against what
+# the Home Manager module builds from the same instance) and a second, fresh
+# `import pkgs.path { }` with its own config, proving the functions are not tied
+# to one specific nixpkgs instance.
+#
+# This is a wiring guard, not a behavioural test: the module already *calls*
+# mk-shims.nix/mk-updater.nix/state-directory.nix, so `myShim == moduleShim`
+# cannot drift unless the wiring is wrong. What it additionally does is force
+# the pieces the module does not: a missing required argument must fail naming
+# that argument (checked below by *calling* each function, not just reading
+# `functionArgs`), and mkPicker/mkFlake/lib.schedule must all evaluate.
 { pkgs, nixpkgs, agent-distro, home-manager }:
 let
   inherit (nixpkgs) lib;
@@ -39,9 +47,38 @@ let
     history = "${configuration.xdg.stateHome}/agent-distro/history.log";
     nix = lib.getExe (if configuration.nix.package == null then pkgs.nix else configuration.nix.package);
   };
+  schedule = import "${agent-distro}/lib/schedule.nix" lib;
 
-  # The module's own values, to prove the exports agree with its behaviour.
-  # Locate the shims derivation among the installed packages by name.
+  # A *second* nixpkgs instance — a fresh import of pkgs.path with its own
+  # config — to prove "arbitrary nixpkgs": the exports must not depend on
+  # agent-distro's specific package set or allowUnfree setting.
+  otherPkgs = import pkgs.path { system = pkgs.system; config.allowUnfree = false; };
+  otherShims = import "${agent-distro}/lib/mk-shims.nix" {
+    pkgs = otherPkgs;
+    inherit stateDirectory;
+    bundle = bundle;
+  };
+  otherUpdater = import "${agent-distro}/lib/mk-updater.nix" {
+    pkgs = otherPkgs;
+    inherit bundle;
+    inherit (svc) flake profile substituters;
+    inherit stateDirectory;
+    history = "${configuration.xdg.stateHome}/agent-distro/history.log";
+    nix = lib.getExe pkgs.nix;
+  };
+  otherPicker = import "${agent-distro}/lib/mk-picker.nix" {
+    pkgs = otherPkgs;
+    profiles = { vanilla = { profile = svc; launchers = null; }; };
+    default = "vanilla";
+  };
+
+  # The shim is identical text to the module's, so a consumer's edits to it
+  # cannot drift: same state line, same exec/fallback logic, same shebang.
+  sameShims = builtins.all
+    (n: builtins.readFile "${shims}/bin/${n}" == builtins.readFile "${moduleShims}/bin/${n}")
+    bundle.commands;
+
+  # The module's own values, to prove the exports agree with its wiring.
   moduleShims = lib.findFirst (p: p.name == "agent-distro-shims") null configuration.home.packages;
   moduleShim = builtins.readFile "${moduleShims}/bin/${name}";
   myShim = builtins.readFile "${shims}/bin/${name}";
@@ -52,31 +89,55 @@ let
   # readFile of a store-contained JSON keeps store-string context, which fromJSON
   # rejects; discard it (values are already their literal paths).
   config = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile updater.config));
-  schedule = import "${agent-distro}/lib/schedule.nix" lib;
+  otherConfig = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile otherUpdater.config));
 
-  # The shim is identical text to the module's, so a consumer's edits to it
-  # cannot drift: same state line, same exec/fallback logic, same shebang.
-  sameShims = builtins.map
-    (n: {
-      key = n;
-      value = builtins.readFile "${shims}/bin/${n}" == builtins.readFile "${moduleShims}/bin/${n}";
-    })
-    bundle.commands;
-  # Required arguments have no defaults (fail fast): `functionArgs` reports a
-  # formal parameter as `false` when it has no default, `true` when it does.
-  # So the mandatory arguments must be `false`, and the optional schedule ones
-  # (`periodSeconds`/`offsetSeconds`) `true`.
-  noDefaults =
-    builtins.all (arg: (builtins.functionArgs (import "${agent-distro}/lib/mk-shims.nix")).${arg} == false) [ "pkgs" "bundle" "stateDirectory" ]
-    && builtins.all (arg: (builtins.functionArgs (import "${agent-distro}/lib/mk-updater.nix")).${arg} == false) [ "flake" "profile" "stateDirectory" "nix" "substituters" ]
-    && (builtins.functionArgs (import "${agent-distro}/lib/mk-updater.nix")).periodSeconds == true
-    && (builtins.functionArgs (import "${agent-distro}/lib/mk-updater.nix")).offsetSeconds == true
-    && builtins.all (arg: (builtins.functionArgs (import "${agent-distro}/lib/state-directory.nix")).${arg} == false) [ "xdgStateHome" "flake" "profile" ];
+  # mkFlake must not only import but *evaluate*: build a distribution from a
+  # real profile and force its package names and lib attribute names. This is
+  # what would have caught the lib/mk-flake.nix parse regression.
+  mkFlakeOut = agent-distro.lib.mkFlake {
+    profile = agent-distro.profiles.${svc.profile};
+    cache = agent-distro.lib.cache;
+  };
+  mkFlakeLibNames = builtins.attrNames mkFlakeOut.lib;
+  mkFlakePackageNames = builtins.attrNames mkFlakeOut.packages.${pkgs.system};
+  expectedLibNames = [ "cache" "mkFlake" "mkLaunchers" "mkPicker" "mkShims"
+    "mkUpdater" "schedule" "stateDirectory" ];
+
+  # --- missing-required-argument checks, executed in the builder below ---
+  # For each function, call it with each required argument omitted. `builtins.tryEval`
+  # cannot catch a missing required argument (Nix raises it when forming the call),
+  # so each call runs through nix-instantiate and we grep the error names the arg.
+  # Placeholder values (empty sets) are never forced: the missing-arg error fires
+  # before the body runs.
+  missingChecks = [
+    { file = "mk-shims.nix"; required = [ "pkgs" "bundle" "stateDirectory" ]; }
+    { file = "mk-updater.nix"; required = [ "pkgs" "bundle" "flake" "profile" "stateDirectory" "history" "nix" "substituters" ]; }
+    { file = "state-directory.nix"; required = [ "xdgStateHome" "flake" "profile" ]; }
+  ];
+  builderChecks = lib.concatMapStringsSep "\n" (case:
+    lib.concatMapStringsSep "\n" (arg:
+      let call = ''
+        (import ${agent-distro}/lib/${case.file})
+          (builtins.removeAttrs { ${lib.concatMapStringsSep " " (k: "${k} = {};") case.required} } [ "${arg}" ])
+      '';
+      in ''
+        set -e
+        if nix-instantiate --eval --expr ${lib.escapeShellArg call} 2>err; then
+          echo "expected missing-argument error for '${arg}', but it evaluated" >&2
+          exit 1
+        fi
+        grep -F "without required argument '${arg}'" err >/dev/null || {
+          echo "missing-argument error for '${arg}' not found in:" >&2
+          cat err >&2
+          exit 1
+        }
+      '')
+      case.required)
+    missingChecks;
 in
-assert noDefaults;
+assert sameShims;
 assert stateDirectory == moduleState;
 assert myShim == moduleShim;
-assert builtins.all (entry: entry.value) sameShims;
 assert config.state == moduleState;
 assert config.history == "${configuration.xdg.stateHome}/agent-distro/history.log";
 assert config.profile == svc.profile;
@@ -84,10 +145,24 @@ assert config.flake == svc.flake;
 assert config.substituters == svc.substituters;
 assert config.periodSeconds == schedule.updatePeriodSeconds;
 assert config.offsetSeconds == schedule.updateOffsetSeconds;
+# A second nixpkgs must still produce a well-formed updater on the same schedule.
+assert config.periodSeconds == otherConfig.periodSeconds;
+assert config.offsetSeconds == otherConfig.offsetSeconds;
+assert otherUpdater ? program && otherUpdater ? command && otherUpdater ? config;
+# A second nixpkgs must produce structurally correct shims: same state dir.
+assert otherShims.passthru.stateDirectory == stateDirectory;
 # The module derives its ExecStart from the same command list the library
 # returns (Home Manager normalises a single command line to a one-element list).
 assert lib.escapeShellArgs updater.command ==
   builtins.head configuration.systemd.user.services.agent-distro-update.Service.ExecStart;
-pkgs.runCommand "lib-exports" { } ''
+# mkFlake evaluates: same eight-name lib, package names include the bundle + picker.
+assert lib.all (n: lib.elem n mkFlakeLibNames) expectedLibNames;
+assert lib.elem svc.profile mkFlakePackageNames;
+assert lib.elem "default" mkFlakePackageNames;
+# mkPicker with an arbitrary nixpkgs must build.
+assert otherPicker ? outPath;
+pkgs.runCommand "lib-exports" { nativeBuildInputs = [ pkgs.nix ]; } ''
+  export NIX_STATE_DIR="$TMPDIR/nix-state"
+  ${builderChecks}
   touch "$out"
 ''
