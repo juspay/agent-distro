@@ -7,6 +7,10 @@ let
   # .github/workflows/update-flake.yml.
   updateHoursUTC = [ "02" "08" "14" "20" ];
   defaultFrequency = "*-*-* ${lib.concatStringsSep "," updateHoursUTC}:00:00 UTC";
+  # launchd gates the same schedule as a period/phase pair: one period per
+  # daily run, phased onto the first hour.
+  updatePeriodSeconds = 86400 / builtins.length updateHoursUTC;
+  updateOffsetSeconds = lib.toIntBase10 (builtins.head updateHoursUTC) * 3600;
   available = bundles.${pkgs.stdenv.hostPlatform.system};
   bundle = available.${cfg.profile} or (throw
     "Unknown agent-distro profile \"${cfg.profile}\"; valid names: ${lib.concatStringsSep ", " (builtins.attrNames available)}.");
@@ -175,7 +179,7 @@ let
     ${state}
     source ${../lib/update-due.sh}
     stamp=$(${pkgs.coreutils}/bin/cat "$state/last-success" 2>/dev/null) || stamp=""
-    update_due "$(${pkgs.coreutils}/bin/date -u +%s)" "$stamp" 21600 7200 || exit 0
+    update_due "$(${pkgs.coreutils}/bin/date -u +%s)" "$stamp" ${toString updatePeriodSeconds} ${toString updateOffsetSeconds} || exit 0
     for attempt in 1 2 3; do
       ${updater} && exit 0
       [ "$attempt" -lt 3 ] || exit 1
