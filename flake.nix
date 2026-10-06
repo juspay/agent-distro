@@ -17,7 +17,8 @@
       mkLaunchers = import ./lib/mk-launchers.nix;
       mkFlake = import ./lib/mk-flake.nix { inherit nixpkgs; };
       systems = import ./lib/systems.nix;
-      packageSets = lib.genAttrs systems (system: import nixpkgs { inherit system; });
+      # Unfree so harness recipes (lib/harness-pkgs.nix) share this one instance.
+      packageSets = lib.genAttrs systems (system: import nixpkgs { inherit system; config.allowUnfree = true; });
       pkgsFor = system: packageSets.${system};
 
       # Discovered, not listed: adding a directory is the whole registration
@@ -37,16 +38,29 @@
         if profiles ? ${registry.default} then registry.default
         else throw "profiles/registry.nix defaults to \"${registry.default}\", which is not a directory under profiles/.";
 
-      bundles = lib.genAttrs systems (system:
-        let pkgs = pkgsFor system;
-        in lib.mapAttrs (_: profile: (mkLaunchers { inherit pkgs profile; }).bundle) profiles);
+      # Upstream's own packages, once per system. Each instantiates its
+      # packaging repo's nixpkgs, the dominant evaluation cost, so every
+      # profile and output shares these rather than re-importing them.
+      harnesses = lib.genAttrs systems (system:
+        lib.genAttrs discovered.ordered (name:
+          import (./harnesses + "/${name}/source.nix") { pkgs = pkgsFor system; }));
+
+      launchers = lib.genAttrs systems (system:
+        lib.mapAttrs
+          (_: profile: mkLaunchers {
+            inherit profile;
+            pkgs = pkgsFor system;
+            sources = name: _: harnesses.${system}.${name};
+          })
+          profiles);
+
+      bundles = lib.mapAttrs (_: lib.mapAttrs (_: ls: ls.bundle)) launchers;
 
       pickers = lib.genAttrs systems (system:
-        let pkgs = pkgsFor system;
-        in pkgs.callPackage ./lib/picker.nix {
+        (pkgsFor system).callPackage ./lib/picker.nix {
           inherit default;
           profiles = lib.mapAttrs
-            (_: profile: { inherit profile; launchers = mkLaunchers { inherit pkgs profile; }; })
+            (name: profile: { inherit profile; launchers = launchers.${system}.${name}; })
             profiles;
         });
     in
@@ -65,9 +79,7 @@
 
       # Upstream's own packages, for the daily update to report: a harness
       # version is a property of the lock, not of any profile.
-      harnesses = lib.genAttrs systems (system:
-        lib.genAttrs discovered.ordered (name:
-          import (./harnesses + "/${name}/source.nix") { pkgs = pkgsFor system; }));
+      inherit harnesses;
       harnessMeta = versions: lib.mapAttrs
         (name: meta: {
           inherit (meta) title order;

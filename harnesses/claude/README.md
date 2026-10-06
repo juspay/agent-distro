@@ -8,5 +8,5 @@ expansion, and the plugin root as working directory, as the spec requires.
 Extra user plugins compose with them; no persistent installation is needed.
 
 The npins branch pin tracks `sadjow/claude-code-nix`. Its standalone binary
-packaging recipe uses the packaging repo’s pinned package set, which allows
-unfree packages, preserving its upstream derivation at the same revision.
+packaging recipe is called with the distribution's shared nixpkgs, which allows
+unfree packages, rather than the packaging repo's own pin.

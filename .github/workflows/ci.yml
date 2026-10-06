@@ -84,10 +84,12 @@ jobs:
       - name: Wrapper package tests
         # The wrapper tests boot NixOS VMs (x86_64-linux only: the test flake
         # fixes its system, and ARM runners have no KVM). `nix flake check`
-        # builds the whole checks set.
+        # builds the whole checks set. Two VMs at a time: four saturate the
+        # hosted runner's four vCPUs, and GitHub then cancels the step midway
+        # with no error whenever the checks miss the cache.
         if: runner.os == 'Linux' && runner.arch == 'X64'
         run: |
-          cd test && nix flake check -L
+          cd test && nix flake check -L --max-jobs 2
 
       - name: Test the distribution template
         run: bash test/template.sh

@@ -9,5 +9,5 @@ not install, start, or update a shared server. Explicit `--remote` connections
 and daemon-management subcommands remain available.
 
 The npins branch pin tracks `sadjow/codex-cli-nix`. Its standalone binary
-packaging recipe uses the packaging repo’s pinned package set, with the
-`native` runtime, preserving its upstream derivation at the same revision.
+packaging recipe is called with the distribution's shared nixpkgs, with the
+`native` runtime, rather than the packaging repo's own pin.

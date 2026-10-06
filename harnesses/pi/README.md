@@ -7,5 +7,5 @@ profile defaults `hideThinkingBlock` to `true`; set it to `false` in
 `settings.json` to show thinking blocks again.
 
 The npins branch pin tracks `sadjow/pi-nix`. Its standalone binary packaging
-recipe uses the packaging repo’s pinned package set, preserving its upstream
-derivation at the same revision.
+recipe is called with the distribution's shared nixpkgs rather than the
+packaging repo's own pin.

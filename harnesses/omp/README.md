@@ -6,5 +6,5 @@ in user YAML while preserving existing values and comments. Every profile fills
 `hideThinkingBlock: true`, so thinking blocks stay hidden; set it to `false` in
 `config.yml` to show them again.
 
-OMP uses an npins release pin. Its source build is loaded with the shared
-pinned flake-compat, honouring upstream’s lock to preserve binary-cache paths.
+OMP uses an npins release pin. Its source build is loaded from upstream's lock,
+except that every nixpkgs in it is the distribution's shared nixpkgs.

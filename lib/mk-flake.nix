@@ -6,7 +6,7 @@ in
 let
   checked = import ./validate-profile.nix profile;
   launchers = nixpkgs.lib.genAttrs systems (system:
-    mkLaunchers { pkgs = import nixpkgs { inherit system; }; inherit profile; });
+    mkLaunchers { pkgs = import nixpkgs { inherit system; config.allowUnfree = true; }; inherit profile; });
   # Runnable outputs are shared by packages and apps; bundles have no main program.
   runnable = nixpkgs.lib.mapAttrs
     (_: ls: nixpkgs.lib.genAttrs ls.bundle.commands (name: ls.${name}) // { default = ls.picker; })
