@@ -9,9 +9,9 @@
  * models live in this harness's config.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isFile, temporaryPath } from '../util.ts';
+import { decodeUtf8, isFile, isSystemError, writeTemporary } from '../util.ts';
 
 /** A profile's gateway, as profile.nix declares it. */
 export type Gateway = {
@@ -30,6 +30,9 @@ export type Shape = {
 
 type Json = any;
 
+/** The gateway did not answer usefully; launch with what we have. */
+class Unavailable extends Error {}
+
 const atPath = (value: Json, path: string[]) => path.reduce((node, key) => node[key], value);
 
 function addModel(models: Json, name: string, shape: Shape) {
@@ -40,40 +43,55 @@ function addModel(models: Json, name: string, shape: Shape) {
   }
 }
 
+/** The ids the gateway serves, from its OpenAI-style /models listing. */
+function served(curl: string, url: string, keyEnv: string): string[] {
+  const key = process.env[keyEnv];
+  if (key === undefined) throw new Unavailable(`${keyEnv} is not set`);
+  let header = 'Authorization: Bearer ' + key;
+  if (header.includes('\r') || header.includes('\n')) throw new Unavailable('invalid gateway key');
+  // curl's config quoting keeps credentials off the process command line.
+  header = header.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  const response = spawnSync(curl,
+    ['--fail', '--silent', '--show-error', '--connect-timeout', '2', '--max-time', '5', '--config', '-', url + '/models'],
+    { input: `header = "${header}"\n`, maxBuffer: Infinity });
+  if (response.error) throw response.error;
+  if (response.status !== 0) throw new Unavailable(`curl exited with ${response.status ?? response.signal}`);
+  let text: string;
+  try {
+    text = decodeUtf8(response.stdout);
+  } catch {
+    throw new Unavailable('the model list is not UTF-8');
+  }
+  const models = JSON.parse(text)?.data;
+  if (!Array.isArray(models)) throw new Unavailable('models data is not a list');
+  return models.map((model) => {
+    const name = typeof model === 'object' && model !== null ? model.id : undefined;
+    if (typeof name !== 'string' || !name) throw new Unavailable('model id is not a nonempty string');
+    // As an object key it would set the prototype instead of adding a model.
+    if (name === '__proto__') throw new Unavailable('model id `__proto__` cannot be represented');
+    return name;
+  });
+}
+
 export function main(base: string, cache: string, curl: string, keyEnv: string, shapeSource: string | Shape) {
   const config = JSON.parse(readFileSync(base, 'utf8'));
   const shape: Shape = typeof shapeSource === 'string' ? JSON.parse(readFileSync(shapeSource, 'utf8')) : shapeSource;
   const provider = atPath(config, shape.provider);
   const url = atPath(provider, shape.url);
   try {
-    const key = process.env[keyEnv];
-    if (key === undefined) throw new Error(`${keyEnv} is not set`);
-    let header = 'Authorization: Bearer ' + key;
-    if (header.includes('\r') || header.includes('\n')) throw new Error('invalid gateway key');
-    // curl's config quoting keeps credentials off the process command line.
-    header = header.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-    const response = spawnSync(curl,
-      ['--fail', '--silent', '--show-error', '--connect-timeout', '2', '--max-time', '5', '--config', '-', url + '/models'],
-      { input: `header = "${header}"\n`, encoding: 'utf8' });
-    if (response.error) throw response.error;
-    if (response.status !== 0) throw new Error(`curl exited with ${response.status ?? response.signal}`);
-    const models = JSON.parse(response.stdout).data;
-    if (!Array.isArray(models)) throw new Error('models data is not a list');
-    for (const model of models) {
-      const name = model.id;
-      if (typeof name !== 'string' || !name) throw new Error('model id is not a nonempty string');
-      addModel(provider.models, name, shape);
-    }
+    for (const name of served(curl, url, keyEnv)) addModel(provider.models, name, shape);
     mkdirSync(dirname(cache), { recursive: true });
     // Concurrent launches must never see a partially written config.
-    const temporary = temporaryPath(dirname(cache), '.models-');
+    const temporary = writeTemporary(dirname(cache), '.models-', JSON.stringify(config, null, 2));
     try {
-      writeFileSync(temporary, JSON.stringify(config, null, 2), { flag: 'wx', mode: 0o600 });
       renameSync(temporary, cache);
     } finally {
       rmSync(temporary, { force: true });
     }
-  } catch {
+  } catch (error) {
+    // Only an unreachable or unhelpful gateway, or a cache we cannot write,
+    // falls back; anything else is a bug and stops the launch.
+    if (!(error instanceof Unavailable || error instanceof SyntaxError || isSystemError(error))) throw error;
     const fallback = isFile(cache) ? cache : base;
     const source = fallback === cache ? 'cached model list' : 'two profile aliases';
     process.stderr.write(`${shape.label}: gateway model discovery failed; using ${source} from ${fallback}\n`);

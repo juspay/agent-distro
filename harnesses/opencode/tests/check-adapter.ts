@@ -72,7 +72,7 @@ for (const schema of ['v1', 'v2'] as const) {
       // A stand-in curl: records its argv and stdin, then answers or fails.
       const curl = join(root, 'curl');
       writeFileSync(curl, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.argv"\ncat > "$0.stdin"\n`
-        + `[ -e "$0.down" ] && exit 7\necho '{"data":[{"id":"served"}]}'\n`);
+        + `[ -e "$0.down" ] && exit 7\n[ -e "$0.body" ] && exec cat "$0.body"\necho '{"data":[{"id":"served"}]}'\n`);
       chmodSync(curl, 0o755);
 
       const invoke = () => {
@@ -106,6 +106,17 @@ for (const schema of ['v1', 'v2'] as const) {
       assert.equal(selected, base);
       assert.ok(warning.includes(`two profile aliases from ${base}`), warning);
       assert.equal(warning.trimEnd().split('\n').length, 1, warning);
+
+      // An answer we cannot use falls back the same way, and writes nothing.
+      rmSync(curl + '.down');
+      for (const body of [Buffer.from('{"data":[{"id":"caf\xe9"}]}', 'latin1'), '{"data":[{"id":"__proto__"}]}',
+        '{"data":[null]}', '{"data":{}}', 'not json']) {
+        writeFileSync(curl + '.body', body);
+        [selected, warning] = invoke();
+        assert.equal(selected, base, String(body));
+        assert.ok(warning.includes(`two profile aliases from ${base}`), warning);
+        assert.ok(!existsSync(cache));
+      }
     });
 
     test('gateway and materialized skills', () => {

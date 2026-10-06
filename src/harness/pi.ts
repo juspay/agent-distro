@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { Gateway } from '../gateway/models.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
-import { isSystemError, realpath, temporaryPath } from '../util.ts';
+import { isSystemError, realpath, writeTemporary } from '../util.ts';
 
 type Fragment = { skills: string[]; mcpServers: Record<string, Record<string, unknown>> };
 type GatewayConfig = { providers: { litellm: unknown }; defaultProvider: string; defaultModel: string };
@@ -124,8 +124,7 @@ export function mergeState(mode: string, directory: string, fragmentPath: string
   try {
     for (const [path, data] of changes) {
       mkdirSync(dirname(path), { recursive: true });
-      const temporary = temporaryPath(dirname(path), '.pi-');
-      writeFileSync(temporary, JSON.stringify(data, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+      const temporary = writeTemporary(dirname(path), '.pi-', JSON.stringify(data, null, 2) + '\n');
       staged.push([temporary, path]);
       chmodSync(temporary, existsSync(path) ? statSync(path).mode & 0o7777 : 0o600);
     }
