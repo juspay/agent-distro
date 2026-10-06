@@ -12,9 +12,9 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       inherit (agent-distro.lib) mkLaunchers;
-      # Kolu's plugin as kolu ships it: a directory inside a store path.
-      koluPlugin = lib.findFirst (plugin: lib.hasSuffix "/agent-plugin" (toString plugin))
-        (throw "the juspay profile no longer pins kolu's agent-plugin") agent-distro.profiles.juspay.plugins;
+      # Kolu's plugin as kolu ships it, and as the juspay profile pins it: a
+      # directory inside a store path. Fetched only by the checks that use it.
+      koluPlugin = "${(import "${agent-distro}/profiles/juspay/npins").kolu}/agent-plugin";
       # Profiles are tested through the public builder, the same way a
       # third-party distribution reaches them.
       suite = features: profile: import ./lib.nix {

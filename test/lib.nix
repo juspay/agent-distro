@@ -50,7 +50,9 @@ let
         # Plugins a check may put on AGENT_DISTRO_PLUGINS; it is never set globally.
         environment.variables = lib.optionalAttrs gateway { ${profile.gateway.keyEnv} = "test-api-key"; }
           // { AGENT_DISTRO_TEST_PLUGIN = "${./fixtures/launch-plugin}"; }
-          // lib.optionalAttrs (koluPlugin != null) { AGENT_DISTRO_TEST_KOLU = "${koluPlugin}"; }
+          // lib.optionalAttrs (builtins.elem "koluLaunch" requires) {
+            AGENT_DISTRO_TEST_KOLU = if koluPlugin == null then throw "koluLaunch checks need koluPlugin" else "${koluPlugin}";
+          }
           // env;
       };
       testScript = ''
@@ -71,7 +73,6 @@ let
       (builtins.filter
         (check:
           assert builtins.all (feature: builtins.elem feature [ "plugins" "gateway" "kolu" "spec" "koluLaunch" ]) (check.requires or [ ]);
-          assert builtins.elem "koluLaunch" features -> koluPlugin != null;
           builtins.all (feature: builtins.elem feature features) (check.requires or [ ]))
         discovered.metadata.${harness}.checks))
     discovered.ordered;
