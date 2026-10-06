@@ -4,9 +4,10 @@
  * Usage: node choose.ts MENU_JSON [--profile NAME] [--remembered PROFILE/HARNESS]
  *
  * MENU_JSON is the `--list --json` value (src/listing.ts). Prints
- * `profile/harness` on stdout, or nothing when the user quits. The menu is
- * drawn on /dev/tty, since the shell captures stdout; a terminal too small or
- * unsupported for the boxed view gets a numbered list on stderr.
+ * `profile/harness` on stdout and exits 0, or prints nothing and exits 0 when
+ * the user quits; argument errors exit 2. The menu is drawn on /dev/tty,
+ * since the shell captures stdout; a terminal too small or unsupported for
+ * the boxed view at start gets a numbered list on stderr.
  */
 import { openSync, writeSync } from 'node:fs';
 import { emitKeypressEvents, createInterface, type Key } from 'node:readline';
@@ -19,45 +20,78 @@ type Row = { name: string; title: string; tagline: string; version?: string };
 class TooSmall extends Error {}
 
 const casefold = (text: string) => text.toLowerCase();
-const isPrintable = (character: string) => /^[^\p{C}\p{Z}]$/u.test(character) || character === ' ';
 
-// Terminal cells, approximately wcwidth: combining marks take none, East Asian
-// wide characters and emoji take two.
-const ZERO_WIDTH = /[\p{M}​-‏︀-️]/u;
-const DOUBLE_WIDTH = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|\p{Emoji_Presentation}/u;
-const cellWidth = (character: string) => (ZERO_WIDTH.test(character) ? 0 : DOUBLE_WIDTH.test(character) ? 2 : 1);
-const width = (text: string) => [...text].reduce((sum, character) => sum + cellWidth(character), 0);
+// Terminal cells per user-perceived character (grapheme): none for a lone
+// combining or format mark, two for East Asian wide characters, emoji
+// (presentation by default, or forced by U+FE0F) and flags, else one.
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+export const split = (text: string) => Array.from(graphemes.segment(text), (part) => part.segment);
+const ZERO_WIDTH = /^[\p{M}\p{Cf}\p{Cc}]+$/u;
+const DOUBLE_WIDTH = new RegExp(
+  '[\\u{1100}-\\u{115F}\\u{2329}-\\u{232A}\\u{2E80}-\\u{303E}\\u{3041}-\\u{33FF}\\u{3400}-\\u{4DBF}\\u{4E00}-\\u{9FFF}\\u{A000}-\\u{A4CF}\\u{A960}-\\u{A97F}\\u{AC00}-\\u{D7A3}\\u{F900}-\\u{FAFF}\\u{FE10}-\\u{FE19}\\u{FE30}-\\u{FE6F}\\u{FF00}-\\u{FF60}\\u{FFE0}-\\u{FFE6}\\u{FE0F}\\u{1B000}-\\u{1B2FF}\\u{20000}-\\u{3FFFD}]|\\p{Emoji_Presentation}|\\p{Regional_Indicator}',
+  'u',
+);
+const cells = (grapheme: string) => (ZERO_WIDTH.test(grapheme) ? 0 : DOUBLE_WIDTH.test(grapheme) ? 2 : 1);
+export const width = (text: string) => split(text).reduce((sum, grapheme) => sum + cells(grapheme), 0);
 const pad = (text: string, n: number) => text + ' '.repeat(Math.max(0, n - width(text)));
+// No separator left dangling before an ellipsis.
+const ellipsis = (text: string) => text.replace(/[\s·,;:–—-]+$/u, '') + '…';
 
 /** `text` in at most `n` cells; a cut ends in `…`, at a word boundary when one is near. */
-function fit(text: string, n: number): string {
+export function fit(text: string, n: number): string {
   if (width(text) <= n) return text;
   if (n <= 0) return '';
-  let out = '';
+  const parts = split(text);
   let used = 0;
-  for (const character of text) {
-    if (used + cellWidth(character) > n - 1) break;
-    out += character;
-    used += cellWidth(character);
+  let kept = 0;
+  while (kept < parts.length && used + cells(parts[kept]) <= n - 1) used += cells(parts[kept++]);
+  let out = parts.slice(0, kept).join('');
+  // Cut inside a word: back off to the last space when that keeps most of the room.
+  if (!/^\s/u.test(parts[kept])) {
+    const space = out.lastIndexOf(' ');
+    if (space > 0 && width(out.slice(0, space)) >= (n - 1) * 0.6) out = out.slice(0, space);
   }
-  const space = out.lastIndexOf(' ');
-  if (space > 0 && space >= (n - 1) * 0.6) out = out.slice(0, space);
-  // No separator left dangling before the ellipsis.
-  return out.replace(/[\s·,;:–—-]+$/u, '') + '…';
+  return ellipsis(out);
 }
 
-/** Word-wrapped into lines of `n` cells; a text needing more than `most` lines ends in `…`. */
-function wrap(text: string, n: number, most: number): string[] {
+/** The end of `text` in at most `n` cells, led by `…` when cut. */
+export function tail(text: string, n: number): string {
+  if (width(text) <= n) return text;
+  if (n <= 0) return '';
+  const parts = split(text);
+  let used = 0;
+  let from = parts.length;
+  while (from > 0 && used + cells(parts[from - 1]) <= n - 1) used += cells(parts[--from]);
+  return '…' + parts.slice(from).join('');
+}
+
+/**
+ * Word-wrapped into lines of `n` cells. A word wider than a line is broken
+ * across lines; a text needing more than `most` lines ends in `…`.
+ */
+export function wrap(text: string, n: number, most: number): string[] {
   const lines: string[] = [];
   for (const word of text.split(/\s+/).filter(Boolean)) {
     const last = lines.length - 1;
-    if (last >= 0 && width(lines[last]) + 1 + width(word) <= n) lines[last] += ' ' + word;
-    else lines.push(word);
+    if (last >= 0 && width(lines[last]) + 1 + width(word) <= n) {
+      lines[last] += ' ' + word;
+      continue;
+    }
+    let line = '';
+    for (const part of split(word)) {
+      if (line && width(line) + cells(part) > n) {
+        lines.push(line);
+        line = '';
+      }
+      line += part;
+    }
+    lines.push(line);
   }
-  if (lines.length <= most) return lines.map((line) => fit(line, n));
+  if (lines.length <= most) return lines;
   const kept = lines.slice(0, most);
-  kept[most - 1] = fit(lines.slice(most - 1).join(' '), n);
-  return kept.map((line) => fit(line, n));
+  const last = kept[most - 1];
+  kept[most - 1] = width(last) < n ? ellipsis(last) : fit(last + ' …', n);
+  return kept;
 }
 
 // SGR attributes; colour only where the terminal and NO_COLOR allow it. Only
@@ -74,11 +108,21 @@ export function palette(env: NodeJS.ProcessEnv): Palette {
 }
 const paint = (style: string, text: string) => (style && text ? style + text + RESET : text);
 
+// Leave the terminal as it was found however the process ends: a choice, a
+// quit, a crash, or a signal. Set while the boxed view is up.
+let restore = () => {};
+process.on('exit', () => restore());
+// Ctrl-C quits without a choice, as a key or as a signal; the others keep
+// the conventional status for the shell to pass on.
+for (const [signal, status] of [['SIGINT', 0], ['SIGTERM', 143], ['SIGHUP', 129]] as const) {
+  process.on(signal, () => process.exit(status));
+}
+
 export class Menu {
   profiles: Profile[];
   /** The profile pane's rows, one per profile, in the same order. */
   profileRows: Row[];
-  remembered: string;
+  remembered: { profile: string; harness: string };
   /** The profile whose harnesses have focus; null while profiles have focus. */
   profile: Profile | null;
   /** Cursor within the focused pane's filtered rows. */
@@ -90,17 +134,16 @@ export class Menu {
   constructor(data: Listing, remembered = '', colors = palette({})) {
     this.profiles = data.profiles;
     this.profileRows = this.profiles.map((p) => ({ name: p.name, title: p.name, tagline: p.description }));
-    this.remembered = remembered;
+    const slash = remembered.indexOf('/');
+    this.remembered = slash > 0 ? { profile: remembered.slice(0, slash), harness: remembered.slice(slash + 1) } : { profile: '', harness: '' };
     this.colors = colors;
     // A remembered choice only moves the cursor: profiles still take focus
-    // first whenever there is more than one.
+    // first whenever there is more than one. The first profile is the default.
     this.profile = this.profiles.length === 1 ? this.profiles[0] : null;
     if (this.profile) {
       this.index = this.harnessIndex(this.profile);
     } else {
-      const names = this.profiles.map((p) => p.name);
-      const start = this.remembered.includes('/') ? this.remembered.split('/')[0] : data.default;
-      this.index = Math.max(0, names.indexOf(start));
+      this.index = Math.max(0, this.profiles.findIndex((p) => p.name === this.remembered.profile));
     }
   }
 
@@ -117,9 +160,13 @@ export class Menu {
     return this.profile ?? this.profiles[this.profileRows.indexOf(this.rows()[this.index])];
   }
 
+  isRemembered(profile: string, harness?: string): boolean {
+    return this.remembered.profile === profile && (harness === undefined || this.remembered.harness === harness);
+  }
+
   /** The remembered harness under this profile, else the first row. */
   harnessIndex(profile: Profile): number {
-    return Math.max(0, profile.harnesses.findIndex((h) => this.remembered === profile.name + '/' + h.name));
+    return Math.max(0, profile.harnesses.findIndex((h) => this.isRemembered(profile.name, h.name)));
   }
 
   select(row: Row): string | undefined {
@@ -165,10 +212,11 @@ export class Menu {
   }
 
   /**
-   * One full frame for a terminal of `height` rows and `width` columns, and
-   * where the filter's cursor goes. Widths come from the data: the box is as
-   * wide as its widest content, and only taglines and descriptions give way
-   * when the terminal is narrower.
+   * One full frame for a terminal of `height` rows and `width_` columns.
+   * Widths come from the data: the box is as wide as its content wants and
+   * the terminal allows. When it must narrow, the room descriptions were
+   * given beyond the pane's base width goes first, then taglines, then the
+   * profile pane down to its names.
    */
   frame(height: number, width_: number): string {
     const { bold, dim, accent, chip, chipSelected } = this.colors;
@@ -189,19 +237,22 @@ export class Menu {
     // A harness row without its tagline: pointer, mark, title and version chip.
     const harnessMinimum = gutter + titleWidth + (chipWidth ? 2 + chipWidth : 0);
     const headerMinimum = width(brand) + width(counts) + 8;
-    // The narrowest profile pane that fits every description in its rows.
-    const minimumLeft = Math.max(gutter + nameWidth, width('Profiles'));
-    let left = minimumLeft;
-    if (twoPane) {
-      left = Math.max(left, 20);
-      while (left < 36 && this.profiles.some((p) => wrap(p.description, left, Infinity).length > descriptionRows)) left++;
-    }
+    const room = width_ - 4;
     let wanted = harnessMinimum + (longestTagline ? 2 + longestTagline : 0);
     wanted = Math.max(wanted, twoPane ? width('Harnesses · ') + nameWidth : width(this.profiles[0].description));
-    const boxWidth = Math.min(width_, Math.max(headerMinimum, (twoPane ? left + 3 + wanted : wanted) + 4));
-    const inner = boxWidth - 4;
-    // Narrower than wanted: taglines give way first, then the profile pane.
-    if (twoPane && inner - left - 3 < harnessMinimum) left = Math.max(minimumLeft, inner - 3 - harnessMinimum);
+    // The profile pane: never narrower than its names, nor than the brand
+    // above it (so the header has a place for the divider).
+    const minimumLeft = Math.max(gutter + nameWidth, width('Profiles'), width('agent-distro') + 1);
+    let left = 0;
+    if (twoPane) {
+      const base = Math.max(minimumLeft, 20);
+      left = base;
+      while (left < 36 && this.profiles.some((p) => wrap(p.description, left, Infinity).length > descriptionRows)) left++;
+      if (left + 3 + wanted > room) left = Math.max(base, room - 3 - wanted);
+      if (left + 3 + harnessMinimum > room) left = Math.max(minimumLeft, room - 3 - harnessMinimum);
+    }
+    const inner = Math.min(room, Math.max(headerMinimum - 4, twoPane ? left + 3 + wanted : wanted));
+    const boxWidth = inner + 4;
     const right = twoPane ? inner - left - 3 : inner;
     if (right < harnessMinimum || boxWidth < headerMinimum || height < bodyRows + 6) throw new TooSmall();
     // Taglines take the room left over, so version chips sit on the right edge.
@@ -234,7 +285,7 @@ export class Menu {
 
     const pointer = (selected: boolean, focused: boolean) => (selected ? paint(focused ? accent : dim, '❯') : ' ');
     const mark = (remembered: boolean) => (remembered ? paint(accent, '•') : ' ');
-    const description = shown ? wrap(shown.description, left, descriptionRows) : [];
+    const description = twoPane && shown ? wrap(shown.description, left, descriptionRows) : [];
     for (let i = 0; i < bodyRows; i++) {
       const cells: string[] = [];
       if (twoPane) {
@@ -243,7 +294,7 @@ export class Menu {
         if (r) {
           const selected = this.profile ? r.name === this.profile.name : i === this.index;
           const name = paint(selected ? bold : '', pad(r.name, left - gutter));
-          cells.push(pointer(selected, !this.profile) + ' ' + mark(this.remembered.startsWith(r.name + '/')) + ' ' + name);
+          cells.push(pointer(selected, !this.profile) + ' ' + mark(this.isRemembered(r.name)) + ' ' + name);
         } else if (i === 0 && !this.profile) {
           cells.push(paint(dim, pad('No matches', left)));
         } else if (i > this.profiles.length) {
@@ -255,7 +306,7 @@ export class Menu {
       const h = harnessRows[i];
       if (h) {
         const selected = !!this.profile && i === this.index;
-        const remembered = shown !== undefined && this.remembered === shown.name + '/' + h.name;
+        const remembered = shown !== undefined && this.isRemembered(shown.name, h.name);
         let text = pointer(selected, true) + ' ' + mark(remembered) + ' ' + paint(selected ? bold : '', pad(h.title, titleWidth));
         if (taglineWidth) text += '  ' + paint(dim, pad(fit(h.tagline, taglineWidth), taglineWidth));
         if (chipWidth) text += '  ' + paint(selected ? chipSelected : chip, ' ' + h.version.padStart(versionWidth) + ' ');
@@ -274,8 +325,8 @@ export class Menu {
     if (this.filtering) {
       const n = filtered.length;
       const count = n === 1 ? '1 match' : n ? `${n} matches` : 'no matches';
-      const room = inner - 2 - width(count) - 2;
-      const shownQuery = width(this.query) <= room ? this.query : '…' + [...this.query].slice(-(room - 1)).join('');
+      // Two cells for `/ `, two between the query and the count, one for the cursor.
+      const shownQuery = tail(this.query, inner - 2 - 2 - 1 - width(count));
       cursor = 2 + width(shownQuery);
       row(paint(accent, '/') + ' ' + pad(shownQuery, inner - 2 - width(count)) + paint(dim, count));
     } else {
@@ -289,11 +340,13 @@ export class Menu {
     while (keys.length > 2 && footerWidth() > width_ - x) keys.splice(-2, 1);
     lines.push(keys.map(([k, what]) => paint(bold, k) + ' ' + paint(dim, what)).join('   '));
 
-    let out = '\x1b[?2026h';
-    lines.forEach((line, i) => (out += `\x1b[${y + i};${x}H${line}\x1b[K`));
+    // Erase each line before drawing it: erasing after a line that ends in
+    // the last column would take that column with it.
+    let out = '';
+    lines.forEach((line, i) => (out += `\x1b[${y + i};${x}H\x1b[K${line}`));
     if (this.filtering) out += `\x1b[${y + lines.length - 3};${x + 2 + cursor}H\x1b[?25h`;
     else out += '\x1b[?25l';
-    return out + '\x1b[?2026l';
+    return out;
   }
 
   /** Apply one key; a string ends the menu (empty to quit), undefined keeps going. */
@@ -317,8 +370,9 @@ export class Menu {
       move(-1);
     } else if (this.filtering) {
       if (key === 'backspace' && !this.query) this.filtering = false;
-      else if (key === 'backspace') this.query = this.query.slice(0, -1);
-      else if ([...key].length === 1 && isPrintable(key)) this.query += key;
+      else if (key === 'backspace') this.query = split(this.query).slice(0, -1).join('');
+      // One character at a time; a ZWJ or variation selector joins the last.
+      else if (split(key).length === 1 && !/\p{Cc}/u.test(key)) this.query += key;
       else return;
       this.index = 0;
     } else if (key === 'q') {
@@ -334,13 +388,31 @@ export class Menu {
     }
   }
 
-  /** The boxed view on the terminal; rejects with TooSmall to fall back. */
-  draw(terminal: WriteStream): Promise<string> {
+  /**
+   * The boxed view on the terminal `fd`. Rejects with TooSmall, before
+   * taking the terminal over, when the first frame does not fit; later, a
+   * terminal shrunk too far shows a notice until it grows again.
+   */
+  draw(fd: number): Promise<string> {
     const input = process.stdin;
+    const terminal = new WriteStream(fd);
     return new Promise((resolve, reject) => {
-      const render = (clear = false) => {
+      // Synchronized output, so a terminal shows each frame whole.
+      const frame = (clear: boolean) => {
         const [width, height] = terminal.getWindowSize();
-        terminal.write((clear ? '\x1b[H\x1b[2J' : '') + this.frame(height, width));
+        return '\x1b[?2026h' + (clear ? '\x1b[H\x1b[2J' : '') + this.frame(height, width) + '\x1b[?2026l';
+      };
+      let small = false;
+      const render = (clear = false) => {
+        try {
+          terminal.write(frame(clear || small));
+          small = false;
+        } catch (error) {
+          if (!(error instanceof TooSmall)) throw error;
+          small = true;
+          const [width] = terminal.getWindowSize();
+          terminal.write('\x1b[?25l\x1b[H\x1b[2J' + fit('Terminal too small for agent-distro: enlarge it, or press q to quit.', width));
+        }
       };
       // True once the menu has ended; keys already decoded are then ignored.
       let ended = false;
@@ -349,9 +421,8 @@ export class Menu {
         ended = true;
         input.off('keypress', onKey);
         process.off('SIGWINCH', onResize);
-        input.setRawMode(false);
+        restore();
         input.pause();
-        terminal.write('\x1b[?25h\x1b[?1049l');
         if (error) reject(error);
         else resolve(choice);
       };
@@ -374,9 +445,13 @@ export class Menu {
         try {
           const sequence = key.sequence ?? character ?? '';
           if (key.ctrl && key.name === 'c') return finish(null);
-          // An Escape that starts no known sequence arrives glued to the keys
-          // after it: read it as Escape and then each of those keys.
-          if (key.meta && !key.code && sequence.length > 1 && sequence.startsWith('\x1b')) {
+          if (key.code && sequence.startsWith('\x1b\x1b')) {
+            // Escape and then an arrow, read as one sequence.
+            dispatch('escape');
+            dispatch(keyName(sequence.slice(1), key));
+          } else if (key.meta && !key.code && sequence.length > 1 && sequence.startsWith('\x1b')) {
+            // An Escape that starts no known sequence arrives glued to the
+            // keys after it: read it as Escape and then each of those keys.
             for (const part of ['\x1b', ...sequence.slice(1)]) dispatch(keyName(part));
           } else {
             dispatch(keyName(sequence, key));
@@ -398,17 +473,27 @@ export class Menu {
       // A terminal too small from the start never enters the full screen.
       let first: string;
       try {
-        const [width, height] = terminal.getWindowSize();
-        first = this.frame(height, width);
+        first = frame(true);
       } catch (error) {
         return reject(error);
       }
-      emitKeypressEvents(input, { escapeCodeTimeout: 25 });
+      terminal.on('error', (error) => finish(error));
+      // Generous enough for an arrow key split across packets over ssh.
+      emitKeypressEvents(input, { escapeCodeTimeout: 100 });
       input.setRawMode(true);
+      restore = () => {
+        restore = () => {};
+        try {
+          input.setRawMode(false);
+        } catch {}
+        try {
+          writeSync(fd, '\x1b[?25h\x1b[?1049l');
+        } catch {}
+      };
       input.on('keypress', onKey);
       process.on('SIGWINCH', onResize);
       input.resume();
-      terminal.write('\x1b[?1049h\x1b[H\x1b[2J' + first);
+      terminal.write('\x1b[?1049h' + first);
     });
   }
 
@@ -418,21 +503,25 @@ export class Menu {
     const say = (text = '') => process.stderr.write(text + '\n');
     for (;;) {
       const rows = this.rows();
+      const back = !!this.profile && this.profiles.length > 1;
       say('agent-distro' + this.banner());
-      say(this.profile ? this.profile.description : 'Choose a profile');
+      say(this.profile ? this.profile.description : 'Profiles');
       say();
-      rows.forEach((row, i) => say(`${i + 1}. ${row.title}  ${row.tagline}  ${row.version ?? ''}`));
-      process.stderr.write(`Choice [${this.index + 1}], h back, q quit: `);
+      rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.version].filter(Boolean).join('  ')));
+      process.stderr.write(`${this.profile ? 'Launch' : 'Pick a profile'} [${this.index + 1}]${back ? ', h profiles' : ''}, q quit: `);
       const line = await lines.next();
       const value = line.done ? '' : line.value.trim();
       if (line.done || value === 'q' || value === '\x1b') return '';
+      // As on the boxed view: h goes back, or quits with nowhere to go back to.
       if (value === 'h') {
         if (!this.back()) return '';
         continue;
       }
-      if (value && !/^[+-]?[0-9]+$/.test(value)) continue;
       const index = value ? Number(value) - 1 : this.index;
-      if (!(index >= 0 && index < rows.length)) continue;
+      if (!/^[0-9]*$/.test(value) || !(index >= 0 && index < rows.length)) {
+        say(`Not a choice: ${value}. Enter a number from 1 to ${rows.length}${back ? ', h' : ''} or q.`);
+        continue;
+      }
       const choice = this.select(rows[index]);
       if (choice) return choice;
     }
@@ -461,6 +550,16 @@ function parseArguments(args: string[]) {
   return { data, profile: parsed.values.profile ?? '', remembered: parsed.values.remembered ?? '' };
 }
 
+/** The controlling terminal, or undefined when there is none to draw on. */
+function openTerminal(): number | undefined {
+  try {
+    return openSync('/dev/tty', 'w');
+  } catch (error) {
+    if (['ENXIO', 'ENOENT'].includes((error as NodeJS.ErrnoException).code ?? '')) return undefined;
+    throw error;
+  }
+}
+
 async function main() {
   const { data, profile, remembered } = parseArguments(process.argv.slice(2));
   if (profile) {
@@ -468,18 +567,16 @@ async function main() {
     if (!data.profiles.length) usage('unknown profile: ' + profile);
   }
   const menu = new Menu(data, remembered, palette(process.env));
-  // Ctrl-C quits without a choice, as a key or as a signal.
-  process.on('SIGINT', () => process.exit(0));
+  const term = process.env.TERM ?? '';
+  // The shell captures stdout for the result; the menu draws on the terminal.
+  const fd = process.stdin.isTTY && term && term !== 'dumb' ? openTerminal() : undefined;
   let choice: string;
   try {
-    const term = process.env.TERM ?? '';
-    if (!process.stdin.isTTY || !term || term === 'dumb') throw new TooSmall();
-    // The shell captures stdout for the result; the menu draws on the terminal.
-    choice = await menu.draw(new WriteStream(openSync('/dev/tty', 'w')));
+    if (fd === undefined) throw new TooSmall();
+    choice = await menu.draw(fd);
   } catch (error) {
-    if (!(error instanceof TooSmall) && !(error as NodeJS.ErrnoException).syscall) throw error;
-    menu.query = '';
-    menu.filtering = false;
+    if (!(error instanceof TooSmall)) throw error;
+    menu.clearFilter();
     choice = await menu.plain();
   }
   if (choice) writeSync(1, choice + '\n');

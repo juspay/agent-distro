@@ -5,6 +5,7 @@ import os
 import pty
 import re
 import select
+import signal
 import struct
 import subprocess
 import sys
@@ -13,8 +14,9 @@ import termios
 import time
 
 LISTING = json.loads(sys.argv[1])
-DEFAULT = LISTING['default']
 PROFILES = [profile['name'] for profile in LISTING['profiles']]
+# The first profile is the default.
+DEFAULT = PROFILES[0]
 OTHERS = PROFILES[1:]
 HARNESSES = {profile['name']: profile['harnesses'] for profile in LISTING['profiles']}
 ROWS = HARNESSES[DEFAULT]
@@ -24,7 +26,10 @@ ESCAPE = b'\x1b'
 # The footer names what Enter does, so it tells which pane has focus.
 PROFILE_FOCUS = b'Enter pick profile'
 HARNESS_FOCUS = b'Enter launch'
-PLAIN_PROMPT = b'Choice ['
+# The numbered list's prompts, on the profile list and on a harness list.
+PLAIN_PROFILES = b'Pick a profile ['
+PLAIN_PROMPT = b'Launch ['
+TOO_SMALL = b'Terminal too small'
 # Match displayed text independently of terminal attributes.
 ANSI = re.compile(rb'\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[()][0-~]|[@-Z\\-_])')
 SGR = re.compile(rb'\x1b\[([0-9;]*)m')
@@ -37,15 +42,54 @@ def colours(raw):
 
 
 class Run:
-    def __init__(self, raw, choice):
+    def __init__(self, raw, choice, lflag):
         self.raw = raw
         self.drawn = ANSI.sub(b'', raw)
         self.choice = choice
+        # The terminal's local modes once everything has exited.
+        self.lflag = lflag
+
+    def restored(self):
+        """The alternate screen left and the cursor shown after the last frame, and the line discipline back."""
+        assert self.raw.rfind(b'\x1b[?1049l') > self.raw.rfind(b'\x1b[?1049h') >= 0, self.raw
+        assert self.raw.rfind(b'\x1b[?25h') > self.raw.rfind(b'\x1b[?25l'), self.raw
+        assert self.lflag & termios.ICANON and self.lflag & termios.ECHO, self.lflag
 
 
-def run(steps, expected, overrides=None, status=0, args=None, size=(24, 120), state=None):
+def chooser(session):
+    """The chooser's pid, among this session's processes."""
+    for entry in os.listdir('/proc'):
+        try:
+            if entry.isdigit() and os.getsid(int(entry)) == session and \
+                    b'picker/choose.ts' in open(f'/proc/{entry}/cmdline', 'rb').read():
+                return int(entry)
+        except OSError:
+            continue
+    raise AssertionError('no chooser running')
+
+
+def act(fd, pid, action):
+    """Send keys, or ('resize', rows, columns), ('signal', number) to every
+    process, ('kill', number) to the chooser alone, ('split', first, rest)."""
+    if not isinstance(action, tuple):
+        os.write(fd, action)
+    elif action[0] == 'resize':
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', action[1], action[2], 0, 0))
+    elif action[0] == 'signal':
+        os.killpg(pid, action[1])
+    elif action[0] == 'kill':
+        os.kill(chooser(pid), action[1])
+    elif action[0] == 'split':
+        # One key in two writes, as a slow link delivers it.
+        os.write(fd, action[1])
+        time.sleep(0.05)
+        os.write(fd, action[2])
+
+
+def run(steps, expected, overrides=None, status=0, args=None, size=(24, 80), state=None, prefix=()):
     """Run agent-distro on a PTY. Each step waits for its marker in the output
-    since the previous step, then sends bytes or ('resize', rows, columns)."""
+    since the previous step, then acts (see `act`). An override of None
+    removes that variable; `prefix` runs agent-distro under another command."""
     scratch = tempfile.TemporaryDirectory()
     home = state or scratch.name
     pending = list(steps)
@@ -55,7 +99,9 @@ def run(steps, expected, overrides=None, status=0, args=None, size=(24, 120), st
         for name in ('AI_PROFILE', 'AI_HARNESS', 'NO_COLOR'):
             env.pop(name, None)
         env.update(overrides or {})
-        os.execvpe('agent-distro', ['agent-distro'] + (args if args is not None else ['--version']), env)
+        env = {name: value for name, value in env.items() if value is not None}
+        command = list(prefix) + ['agent-distro'] + (args if args is not None else ['--version'])
+        os.execvpe(command[0], command, env)
     # Size the terminal before the picker starts.
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', *size, 0, 0))
     output = b''
@@ -73,25 +119,22 @@ def run(steps, expected, overrides=None, status=0, args=None, size=(24, 120), st
         output += chunk
         if pending and pending[0][0] in ANSI.sub(b'', output[since:]):
             time.sleep(0.5)
-            action = pending.pop(0)[1]
             since = len(output)
-            if isinstance(action, tuple):
-                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', action[1], action[2], 0, 0))
-            else:
-                os.write(fd, action)
+            act(fd, pid, pending.pop(0)[1])
     else:
         os.kill(pid, 9)
         raise AssertionError(output)
     _, result = os.waitpid(pid, 0)
+    lflag = termios.tcgetattr(fd)[3]
     os.close(fd)
     path = os.path.join(home, 'agent-distro', 'last-choice')
     choice = open(path).read().strip() if os.path.exists(path) else None
     scratch.cleanup()
     assert not pending, (pending, output)
-    assert os.waitstatus_to_exitcode(result) == status, output
+    assert status is None or os.waitstatus_to_exitcode(result) == status, (result, output)
     drawn = ANSI.sub(b'', output)
     assert expected in drawn, (expected, output)
-    return Run(output, choice)
+    return Run(output, choice, lflag)
 
 
 def flow(keys, profile_index=0):
@@ -114,7 +157,7 @@ def count(n):
 # `--list --json` is the menu the picker draws, and `--list` the same rows.
 listed = json.loads(subprocess.check_output(['agent-distro', '--list', '--json']))
 assert listed == LISTING, listed
-assert list(listed) == ['default', 'profiles'], listed
+assert list(listed) == ['profiles'], listed
 for profile in listed['profiles']:
     assert list(profile) == ['description', 'harnesses', 'name'], profile
     assert [row['name'] for row in profile['harnesses']] == NAMES, profile
@@ -126,8 +169,9 @@ listing = subprocess.check_output(['agent-distro', '--list']).decode().splitline
 assert listing == [f"{profile} {row['name']} {row['title']} {row['version']}"
                    for profile in PROFILES for row in HARNESSES[profile]], listing
 
-# The first screen: header counts, panes, every row of the default profile.
-first = run(flow(b'\r'), version(DEFAULT, NAMES[0]))
+# The first screen: header counts, panes, every row of the default profile,
+# in full on a wide terminal.
+first = run(flow(b'\r'), version(DEFAULT, NAMES[0]), size=(24, 120))
 drawn = first.drawn
 assert first.choice == DEFAULT + '/' + NAMES[0], first.choice
 if OTHERS:
@@ -147,6 +191,12 @@ for row in ROWS:
         assert row[field].encode() in drawn, (row, drawn)
 assert '╭─ agent-distro'.encode() in drawn and b'/ filter' in drawn, drawn
 assert colours(first.raw), first.raw
+first.restored()
+# 80×24 holds the same rows; taglines may be cut, never titles or versions.
+standard = run(flow(b'\r'), version(DEFAULT, NAMES[0]))
+for row in ROWS:
+    for field in ('title', 'version'):
+        assert row[field].encode() in standard.drawn, (row, standard.drawn)
 
 for index, profile in enumerate(PROFILES):
     for row, harness in enumerate(HARNESSES[profile]):
@@ -183,8 +233,29 @@ run(flow(b'/no-matches') + [(b'no matches', ESCAPE + b'\r')], version(DEFAULT, N
 run(flow(b'/' + query.encode() + b'x') + [(b'no matches', b'\x7f'), (count(len(matches)), b'\r')],
     version(DEFAULT, matches[0]['name']))
 
-# Quitting chooses nothing and remembers nothing.
-assert run(flow(b'q'), PROFILE_FOCUS if OTHERS else HARNESS_FOCUS).choice is None
+# Quitting chooses nothing, remembers nothing, and gives the terminal back.
+quit = run(flow(b'q'), PROFILE_FOCUS if OTHERS else HARNESS_FOCUS)
+assert quit.choice is None
+quit.restored()
+TOP = PROFILE_FOCUS if OTHERS else HARNESS_FOCUS
+for keys in (b'\x03', ESCAPE):
+    quit = run([(TOP, keys)], TOP)
+    assert quit.choice is None
+    quit.restored()
+# So does a signal. SIGINT to the chooser quits like Ctrl-C, exit 0; sent to
+# the whole group it also ends the shell, as for any script.
+quit = run([(TOP, ('kill', signal.SIGINT))], TOP)
+assert quit.choice is None
+quit.restored()
+for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    run([(TOP, ('signal', number))], TOP, status=None).restored()
+# SIGTERM to the chooser alone: its status reaches the caller.
+run([(TOP, ('kill', signal.SIGTERM))], TOP, status=143).restored()
+# Any failure other than quitting keeps its status (node rejects the option with 9).
+run([], b'NODE_OPTIONS', {'NODE_OPTIONS': '--no-such-option'}, status=9)
+# An arrow split across packets is still an arrow, not Escape.
+assert run(flow(('split', ESCAPE, b'[B')) + [(HARNESS_FOCUS, b'\r')],
+           version(DEFAULT, NAMES[1])).choice == DEFAULT + '/' + NAMES[1]
 if OTHERS:
     assert run([(PROFILE_FOCUS, ESCAPE)], PROFILE_FOCUS).choice is None
     assert run([(PROFILE_FOCUS, b'\r'), (HARNESS_FOCUS, b'h'), (PROFILE_FOCUS, ESCAPE)], HARNESS_FOCUS).choice is None
@@ -195,6 +266,8 @@ if OTHERS:
                   (PROFILE_FOCUS, DOWN * len(OTHERS)), (f'Harnesses · {last}'.encode(), b'\t'),
                   (HARNESS_FOCUS, b'\r')], version(last, NAMES[0]))
     assert tabbed.choice == last + '/' + NAMES[0], tabbed.choice
+    # Escape and an arrow read as one sequence are both kept: back, then down.
+    run(flow(ESCAPE + DOWN) + [(PROFILE_FOCUS, b'\r'), (HARNESS_FOCUS, b'\r')], version(PROFILES[1], NAMES[0]))
     # The profile filter matches names and descriptions.
     hits = [p for p in LISTING['profiles'] if last.lower() in (p['name'] + ' ' + p['description']).lower()]
     run([(PROFILE_FOCUS, b'/' + last.encode()), (count(len(hits)), b'\r'), (HARNESS_FOCUS, b'\r')],
@@ -209,16 +282,29 @@ assert not colours(plain_colours.raw), plain_colours.raw
 assert not colours(run([(PROFILE_FOCUS if OTHERS else HARNESS_FOCUS, b'q')], b'agent-distro', {'TERM': 'vt100'}).raw)
 
 # Too small, or unsupported, from the start: the numbered list on stderr.
-numbered = ([(b'Choose a profile', b'\r')] if OTHERS else []) + [(PLAIN_PROMPT, b'\r')]
-for overrides, size in [({}, (len(ROWS) + 5, 120)), ({}, (24, 20)), ({'TERM': 'dumb'}, (24, 120))]:
-    small = run(numbered, version(DEFAULT, NAMES[0]), overrides, size=size)
+# Input that is not a choice says so and asks again.
+numbered = ([(PLAIN_PROFILES, b'\r')] if OTHERS else []) + [(PLAIN_PROMPT, b'abc\r'), (b'Not a choice: abc', b'\r')]
+for overrides, size, prefix in [({}, (len(ROWS) + 5, 120), ()), ({}, (24, 20), ()), ({'TERM': 'dumb'}, (24, 120), ()),
+                                ({'TERM': None}, (24, 120), ()), ({}, (24, 120), ('setsid', '-w'))]:
+    small = run(numbered, version(DEFAULT, NAMES[0]), overrides, size=size, prefix=prefix)
     assert '╭'.encode() not in small.drawn, small.drawn
     assert f'1. {ROWS[0]["title"]}  {ROWS[0]["tagline"]}  {ROWS[0]["version"]}'.encode() in small.drawn, small.drawn
     assert small.choice == DEFAULT + '/' + NAMES[0], small.choice
-# Growing redraws; shrinking below the minimum falls back mid-session, in the same place.
+    if OTHERS:
+        assert f'1. {DEFAULT}  {LISTING["profiles"][0]["description"]}\r\n'.encode() in small.drawn, small.drawn
+        assert b'h profiles' in small.drawn, small.drawn
+    else:
+        assert b'h profiles' not in small.drawn, small.drawn
+# Growing redraws. Shrinking below the minimum shows a notice and keeps the
+# session, filter and cursor included, until the terminal grows again.
 run(flow(('resize', 30, 100)) + [(HARNESS_FOCUS, b'\r')], version(DEFAULT, NAMES[0]))
-shrunk = run(flow(DOWN) + [(HARNESS_FOCUS, ('resize', 6, 120)), (PLAIN_PROMPT, b'\r')], version(DEFAULT, NAMES[1]))
-assert b'Choice [2]' in shrunk.drawn, shrunk.drawn
+target = ROWS[-1]
+matches = [row for row in ROWS if target['title'].lower() in (row['title'] + ' ' + row['tagline']).lower()]
+held = run(flow(b'/' + target['title'].encode() + DOWN * matches.index(target))
+           + [(count(len(matches)), ('resize', 8, 30)), (TOO_SMALL, ('resize', 24, 80)),
+              (HARNESS_FOCUS, b'\r')], version(DEFAULT, target['name']))
+assert held.choice == DEFAULT + '/' + target['name'], held.choice
+assert PLAIN_PROMPT not in held.drawn, held.drawn
 
 with tempfile.TemporaryDirectory() as state:
     path = os.path.join(state, 'agent-distro', 'last-choice')

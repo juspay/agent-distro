@@ -73,6 +73,11 @@
                 ${lib.concatMapStringsSep " " (name: "${name}=${agent-distro.packages.${system}.${name}}") names}
               touch "$out"
             '';
+          # The picker's widths, truncation and layout, without a terminal.
+          picker-layout = pkgs.runCommand "picker-layout-check" { } ''
+            ${runtime.node} ${./check-picker-layout.ts} ${runtime.tree}/src
+            touch "$out"
+          '';
           # The same picker over the whole registry rather than one profile.
           registry = pkgs.testers.runNixOSTest (import ./test-picker.nix {
             name = "registry";
