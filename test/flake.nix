@@ -60,6 +60,19 @@
             grep -F '`$schema` is missing' "$failed/testBuildFailure.log"
             touch "$out"
           '';
+          # `--list --json` alone, without a VM: its type, the picker's menu,
+          # `--list`, and each profile's versions stripped of `+` suffixes.
+          list-json =
+            let
+              registry = import "${agent-distro}/profiles/registry.nix";
+              names = [ registry.default ] ++ lib.remove registry.default (lib.attrNames agent-distro.profiles);
+            in
+            pkgs.runCommand "list-json-check" { } ''
+              ${runtime.node} ${./check-list-json.ts} ${runtime.tree}/src \
+                ${lib.getExe agent-distro.packages.${system}.default} \
+                ${lib.concatMapStringsSep " " (name: "${name}=${agent-distro.packages.${system}.${name}}") names}
+              touch "$out"
+            '';
           # The same picker over the whole registry rather than one profile.
           registry = pkgs.testers.runNixOSTest (import ./test-picker.nix {
             name = "registry";

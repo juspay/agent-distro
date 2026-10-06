@@ -7,16 +7,25 @@ let
   discovered = import ./discover-harnesses.nix;
   harnesses = discovered.ordered;
   displayVersion = profile: harness: lib.head (lib.splitString "+" profiles.${profile}.launchers.${harness}.version);
-  rows = map (name: {
-    inherit name;
-    inherit (discovered.metadata.${name}) title tagline;
-    version = displayVersion default name;
-  }) harnesses;
-  menu = builtins.toJSON {
+  # The one source for `--list`, `--list --json` and the chooser's menu;
+  # src/listing.ts types it.
+  listing = {
     inherit default;
-    harnesses = rows;
-    profiles = map (name: { inherit name; inherit (profiles.${name}.profile) description; }) names;
+    profiles = map
+      (name: {
+        inherit name;
+        inherit (profiles.${name}.profile) description;
+        harnesses = map
+          (harness: {
+            name = harness;
+            inherit (discovered.metadata.${harness}) title tagline;
+            version = displayVersion name harness;
+          })
+          harnesses;
+      })
+      names;
   };
+  menu = builtins.toJSON listing;
   block = indent: lines: lib.concatMapStrings (line: "\n${indent}${line}") lines;
   arms = block "    " (lib.concatMap
     (name: map
@@ -28,12 +37,12 @@ let
   noTty = [ "Set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, use agent-distro <harness>, or run this from a terminal." ]
     ++ lib.optional (lib.length names > 1)
     "Set AI_PROFILE to one of ${lib.concatStringsSep ", " names}; it defaults to ${default}.";
-  listing = lib.concatMapStringsSep "\n" (profile: lib.concatMapStringsSep "\n"
-    (row: "${profile} ${row.name} ${row.title} ${displayVersion profile row.name}") rows) names;
+  lines = lib.concatMapStringsSep "\n" (profile: lib.concatMapStringsSep "\n"
+    (row: "${profile.name} ${row.name} ${row.title} ${row.version}") profile.harnesses) listing.profiles;
 in
 writeShellApplication {
   name = "agent-distro";
-  passthru.rows = rows;
+  passthru.listing = listing;
   text = ''
     invalid=${quote "Invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " harnesses}."}
 
@@ -46,7 +55,11 @@ writeShellApplication {
     }
 
     if [ "''${1-}" = --list ]; then
-      printf '%s\n' ${quote listing}
+      if [ "''${2-}" = --json ]; then
+        printf '%s\n' ${quote menu}
+      else
+        printf '%s\n' ${quote lines}
+      fi
       exit 0
     fi
 
