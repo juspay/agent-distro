@@ -24,15 +24,23 @@ const casefold = (text: string) => text.toLowerCase();
 // Terminal cells per user-perceived character (grapheme): none for a lone
 // combining or format mark, two for East Asian wide characters, emoji
 // (presentation by default, or forced by U+FE0F) and flags, else one.
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-export const split = (text: string) => Array.from(graphemes.segment(text), (part) => part.segment);
+// Text of only narrow, standalone characters (Latin, general punctuation,
+// arrows, box drawing) is one cell per code point; only other text pays for
+// ICU's segmenter, created on first use.
+const SIMPLE = /^[\x20-\x7e\u00a0-\u02ff\u2010-\u2027\u2030-\u205e\u2190-\u21ff\u2500-\u257f]*$/;
+let graphemes: Intl.Segmenter | undefined;
+export const split = (text: string) =>
+  SIMPLE.test(text)
+    ? [...text]
+    : Array.from((graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' })).segment(text), (part) => part.segment);
 const ZERO_WIDTH = /^[\p{M}\p{Cf}\p{Cc}]+$/u;
 const DOUBLE_WIDTH = new RegExp(
   '[\\u{1100}-\\u{115F}\\u{2329}-\\u{232A}\\u{2E80}-\\u{303E}\\u{3041}-\\u{33FF}\\u{3400}-\\u{4DBF}\\u{4E00}-\\u{9FFF}\\u{A000}-\\u{A4CF}\\u{A960}-\\u{A97F}\\u{AC00}-\\u{D7A3}\\u{F900}-\\u{FAFF}\\u{FE10}-\\u{FE19}\\u{FE30}-\\u{FE6F}\\u{FF00}-\\u{FF60}\\u{FFE0}-\\u{FFE6}\\u{FE0F}\\u{1B000}-\\u{1B2FF}\\u{20000}-\\u{3FFFD}]|\\p{Emoji_Presentation}|\\p{Regional_Indicator}',
   'u',
 );
 const cells = (grapheme: string) => (ZERO_WIDTH.test(grapheme) ? 0 : DOUBLE_WIDTH.test(grapheme) ? 2 : 1);
-export const width = (text: string) => split(text).reduce((sum, grapheme) => sum + cells(grapheme), 0);
+export const width = (text: string) =>
+  SIMPLE.test(text) ? text.length : split(text).reduce((sum, grapheme) => sum + cells(grapheme), 0);
 const pad = (text: string, n: number) => text + ' '.repeat(Math.max(0, n - width(text)));
 // No separator left dangling before an ellipsis.
 const ellipsis = (text: string) => text.replace(/[\s·,;:–—-]+$/u, '') + '…';

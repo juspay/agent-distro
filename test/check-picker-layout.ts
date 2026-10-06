@@ -16,9 +16,11 @@ const { Menu, palette, width, fit, tail, wrap } = await import(join(src, 'picker
 
 // Cells as a terminal draws them, one grapheme at a time.
 for (const [text, cells] of [
-  ['abc', 3], ['é', 1], ['é', 1], ['😀', 2], ['👨‍👩‍👧', 2], ['🇯🇵', 2],
-  ['❤️', 2], ['❤', 1], ['日本', 4], ['\u{2000B}', 2], ['한', 2], ['한', 2],
-  ['👨‍👩‍👧 Fam', 6],
+  ['abc', 3], ['é', 1], ['e\u0301', 1], ['😀', 2], ['👨\u200d👩\u200d👧', 2], ['🇯🇵', 2],
+  ['❤\ufe0f', 2], ['❤', 1], ['日本', 4], ['\u{2000B}', 2], ['한', 2], ['한', 2],
+  ['👨\u200d👩\u200d👧 Fam', 6],
+  // Plain Latin and punctuation take the fast path, with the same answer.
+  ['gateway · extensions…', 21], ['a\u0301 · b', 5],
 ] as const) {
   assert.equal(width(text), cells, JSON.stringify(text));
 }
@@ -105,7 +107,7 @@ assert.equal(
 
 // Wide and joined characters in the data keep the border straight.
 const emoji = listing(SHORT.slice(0, 2), [
-  harness('fam', '👨‍👩‍👧 Fam', '🇯🇵 flag · ❤️ heart', '1.0'),
+  harness('fam', '👨\u200d👩\u200d👧 Fam', '🇯🇵 flag · ❤\ufe0f heart', '1.0'),
   harness('cjk', '日本語', '中文说明 · 한국어 \u{2000B}', '2.0'),
   ...HARNESSES,
 ]);
@@ -123,8 +125,8 @@ assert.ok(Number(cursor[2]) < 60, `cursor at column ${cursor[2]}`);
 // Backspace removes a whole character: no lone surrogate, no half a family.
 const typed = new Menu(emoji, '', colors);
 typed.press('/');
-for (const key of ['a', '😀', '👨', '‍', '👩', '‍', '👧']) typed.press(key);
-assert.equal(typed.query, 'a😀👨‍👩‍👧');
+for (const key of ['a', '😀', '👨', '\u200d', '👩', '\u200d', '👧']) typed.press(key);
+assert.equal(typed.query, 'a😀👨\u200d👩\u200d👧');
 typed.press('backspace');
 assert.equal(typed.query, 'a😀');
 typed.press('backspace');
