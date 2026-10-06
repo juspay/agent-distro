@@ -84,6 +84,12 @@ test('megabytes of derivation show still name what would compile', () => {
   assert.deepEqual(wouldCompile(nix, 'path:/fixture#p', []), { names: 'pkg-1,pkg-2,pkg-3' });
 });
 
+test('a dry run over 1 MiB is read whole', () => {
+  // About 1.3 MiB of paths to fetch, with the derivations to build last.
+  const nix = fakeNix('long-dry-run', { drvs: 5, fetched: 16000 });
+  assert.deepEqual(wouldCompile(nix, 'path:/fixture#p', []), { names: 'pkg-1,pkg-2,pkg-3' });
+});
+
 test('nothing to build is nothing to compile', () => {
   assert.deepEqual(wouldCompile(fakeNix('none', { drvs: 0 }), 'path:/fixture#p', []), { names: '' });
 });
@@ -109,4 +115,12 @@ test('an update that cannot tell skips without building', () => {
   assert.deepEqual(result.builds, []);
   assert.match(result.history, / p skipped: cannot tell what the bundle would build /);
   assert.ok(!result.stamped);
+});
+
+test('an update with nothing to compile builds', () => {
+  const result = run(fakeNix('cached', { drvs: 0 }));
+  assert.equal(result.status, 0);
+  assert.equal(result.builds.length, 1);
+  assert.match(result.history, / p updated: Pi 1\.0\n$/);
+  assert.ok(result.stamped);
 });
