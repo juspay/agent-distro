@@ -55,6 +55,7 @@ previews their harnesses; Enter or Tab moves to the harness pane (here with
 | `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list; also usable in scripts and non-interactive shells |
 | `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
+| `AGENT_DISTRO_PLUGINS` | `:`-separated plugin directories | Loads more plugins for that launch; see [Plugins at launch](#plugins-at-launch) |
 
 Use `agent-distro <harness>` to launch directly, `agent-distro <profile> <harness>` to select
 both, or `agent-distro <profile>` to narrow the chooser. For example:
@@ -163,6 +164,38 @@ selector) takes;
 and `version` is the display version, as `--list` prints it, without the
 package's `+` revision suffix. The plain `--list` and the chooser read the
 same value, so the three cannot disagree. `--list` takes no other arguments.
+
+### Plugins at launch
+
+A profile fixes the plugins its harnesses start with. Put more [Agent
+Plugins](https://agent-plugins.org) directories on `AGENT_DISTRO_PLUGINS`, and
+every harness loads them too, in every profile, for that launch:
+
+```sh
+AGENT_DISTRO_PLUGINS=~/src/my-plugin agent-distro claude
+AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-distro juspay omp
+```
+
+- **Read like a profile's plugins.** Each directory goes through the same
+  reader: an invalid manifest fails the launch with a message naming the
+  field, and skipped skills, a disabled `mcp.json` or an invalid server entry
+  are reported on stderr while the launch goes on. An entry that is not a
+  directory fails the launch, naming it. Empty components are ignored.
+- **Matched by name, never by version.** A plugin whose `plugin.json` `name`
+  matches one of the profile's replaces it; on the variable, the last of a
+  name wins. No `version` is compared.
+- **Translated once.** Each harness's translation of a plugin is cached under
+  `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`. A plugin
+  under `/nix/store` is keyed by its store path, as is; any other directory by
+  a hash of its contents (its NAR serialization, computed without Nix) and its
+  path, so an edited checkout is translated again on its next launch. A launch
+  never calls Nix, and a cache it cannot write fails it.
+- **For that launch only.** Unset the variable and the harness is back to the
+  profile's plugins: Claude Code and OMP take them as arguments, OpenCode in its
+  session config, Codex through `-c` overrides, and Pi's merge takes back on
+  the next launch what the previous one added. Each harness's README says how.
+
+Unset or empty, the launchers behave exactly as they do without this feature.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
@@ -396,10 +429,14 @@ pinned in `lib/npins`, which [lib/runtime.nix](./lib/runtime.nix) links in
 as `node_modules/yaml`. The commands you run, and the shims Home Manager
 installs, stay small generated shell scripts that call into it.
 
-Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
-An invalid manifest fails the build with a message naming the field; skipped
-skills, disabled `mcp.json` files and invalid server entries are reported in
-the build log, as the spec's failure boundaries require. A bare MCP `command` is
+Every plugin is read once, harness-independently, against Agent Plugins 1.0.0:
+a profile's at build time, and one from `AGENT_DISTRO_PLUGINS` at launch, by
+the same reader and the same harness writers, into the cache described in
+[Plugins at launch](#plugins-at-launch).
+An invalid manifest fails the build (or the launch) with a message naming the
+field; skipped skills, disabled `mcp.json` files and invalid server entries are
+reported in the build log (or on stderr), as the spec's failure boundaries
+require. A bare MCP `command` is
 found on `PATH`: the profile's `packages` first, then the user's own. A `./`
 command runs from the plugin.
 
@@ -428,7 +465,7 @@ The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
 root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
 ```
 
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
@@ -447,13 +484,17 @@ Consumers run `nix flake update agent-distro`.
 For manual updates, run `bash .github/scripts/update-sources.sh`,
 `nix flake update`, and then `bash test/update-lock.sh`.
 
-Consumers can import `test/lib.nix { pkgs; launchers; profile; features; }`.
-Checks are selected by required features (`plugins`, `gateway`, `kolu`, `spec`)
+Consumers can import `test/lib.nix { pkgs; launchers; profile; features; koluPlugin ? null; }`.
+Checks are selected by required features (`plugins`, `gateway`, `kolu`, `spec`,
+and `koluLaunch`, which loads `koluPlugin` through `AGENT_DISTRO_PLUGINS`)
 from each harness's metadata; `picker` is shared. Rebuild and gateway checks
 also accept `mkLaunchers`. Select plugin rebuild checks only for nonempty skill
-plugins. The test flake covers vanilla, Juspay, and spec fixtures, plus `registry`
+plugins. The test flake covers vanilla (with kolu's plugin loaded at launch), Juspay,
+and spec fixtures, plus `registry`
 (the picker over the whole profile registry). Checks of the TypeScript alone
-run without a VM: `reader` (the plugin reader), `<harness>-adapter` (a
+run without a VM: `reader` (the plugin reader), `launch-plugins`
+(`AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence and the
+launches it fails), `<harness>-adapter` (a
 harness's `tests/check-adapter.ts`), `update-schedule` (the updater's
 schedule and cache policy), `list-json` (`--list --json` against its
 type, the chooser's menu and `--list`), and `picker-layout` (the chooser's
