@@ -18,9 +18,15 @@ let
     cp -r ${../src} "$out/src"
     ln -s ${yaml} "$out/node_modules/yaml"
   '';
-in
-{
-  inherit node tree;
   # The command line that runs one module, e.g. `script "plugin/read.ts"`.
   script = module: "${node} ${tree}/src/${module}";
+in
+{
+  inherit node tree script;
+  # One Agent Plugin, validated once into a harness-independent description
+  # for any adapter that needs more than its directory. A fatal manifest
+  # violation fails the build.
+  readPlugin = plugin: pkgs.runCommand "agent-plugin.json" { } ''
+    ${script "plugin/read.ts"} ${plugin} > "$out"
+  '';
 }

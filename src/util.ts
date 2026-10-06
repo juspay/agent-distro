@@ -71,17 +71,6 @@ export function decodeUtf8(bytes: Uint8Array): string {
 }
 
 /**
- * One POSIX shell word, quoted only when it needs to be. Generated launchers
- * are byte-identical to the ones earlier releases wrote with Python's
- * shlex.quote, whose rules these are.
- */
-export function shellQuote(value: string): string {
-  if (!value) return "''";
-  if (!/[^\w@%+=:,./-]/.test(value)) return value;
-  return "'" + value.replace(/'/g, `'"'"'`) + "'";
-}
-
-/**
  * Write `data` to a new file in `directory`, for a rename into place. The file
  * is removed if writing it fails, so a full disk leaves nothing behind.
  */

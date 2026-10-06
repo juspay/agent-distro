@@ -1,17 +1,16 @@
 # Pi's subcommands require resources in settings, not prepended CLI flags.
 { pkgs, plugins, gateway, package, profileName }:
 let
-  inherit (pkgs) lib callPackage writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
+  inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
   pi = package;
 
   runtime = import ../../lib/runtime.nix pkgs;
-  readPlugin = callPackage ../../lib/read-plugin.nix { };
   config = runCommand "pi-config" { } ''
     ${runtime.script "harness/pi.ts"} write-config "$out" ${writeText "pi-args.json" (builtins.toJSON {
       inherit gateway;
       bash = runtimeShell;
       env = "${coreutils}/bin/env";
-      descriptions = map (plugin: "${readPlugin plugin}") plugins;
+      descriptions = map (plugin: "${runtime.readPlugin plugin}") plugins;
     })}
   '';
 in

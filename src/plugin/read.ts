@@ -302,35 +302,6 @@ function readStdio(server: JsonObject, root: string): StdioServer {
   return result;
 }
 
-/** The parts of Python's urlsplit the checks below need, with its errors. */
-function splitUrl(url: string): { scheme: string; netloc: string; host: string | null } {
-  const match = /^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/s.exec(url);
-  const scheme = match ? match[1].toLowerCase() : '';
-  const rest = match ? match[2] : url;
-  const netloc = rest.startsWith('//') ? /^\/\/([^/?#]*)/.exec(rest)![1] : '';
-  if (netloc.includes('[') !== netloc.includes(']')) throw new Invalid('`url` is not a valid URL: Invalid IPv6 URL');
-  const hostinfo = netloc.slice(netloc.lastIndexOf('@') + 1);
-  let host: string;
-  let port: string;
-  const bracketed = /^\[([^\]]*)\](?::(.*))?$/.exec(hostinfo);
-  if (bracketed) {
-    host = bracketed[1];
-    port = bracketed[2] ?? '';
-    if (!isIPv6(host.split('%')[0])) {
-      throw new Invalid(`\`url\` is not a valid URL: '${host}' does not appear to be an IPv4 or IPv6 address`);
-    }
-  } else {
-    const colon = hostinfo.lastIndexOf(':');
-    host = colon < 0 ? hostinfo : hostinfo.slice(0, colon);
-    port = colon < 0 ? '' : hostinfo.slice(colon + 1);
-  }
-  if (port) {
-    if (!/^[0-9]+$/.test(port)) throw new Invalid('`url` is not a valid URL: Port could not be cast to integer value');
-    if (Number(port) > 65535) throw new Invalid('`url` is not a valid URL: Port out of range 0-65535');
-  }
-  return { scheme, netloc, host: host ? host.toLowerCase() : null };
-}
-
 function isLoopback(host: string): boolean {
   if (host === 'localhost') return true;
   if (isIPv4(host)) return LOOPBACK.check(host, 'ipv4');
@@ -344,13 +315,17 @@ function readRemote(server: JsonObject, kind: RemoteServer['type']): RemoteServe
   if ([...url].some((c) => /\s/u.test(c) || c < ' ' || c === '\x7f')) {
     throw new Invalid('`url` contains whitespace or control characters');
   }
-  const parts = splitUrl(url);
-  if (!['http', 'https'].includes(parts.scheme) || !parts.host) {
+  // The platform's URL parser decides validity; what the spec forbids is
+  // checked on the text as written, which the parser would normalize away.
+  const parsed = URL.parse(url);
+  if (!parsed) throw new Invalid('`url` is not a valid URL');
+  const authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)/.exec(url)?.[1];
+  if (!['http:', 'https:'].includes(parsed.protocol) || !authority || !parsed.hostname) {
     throw new Invalid('`url` must be an absolute http or https URL');
   }
-  if (parts.netloc.includes('@')) throw new Invalid('`url` must not contain user information');
+  if (authority.includes('@')) throw new Invalid('`url` must not contain user information');
   if (url.includes('#')) throw new Invalid('`url` must not contain a fragment');
-  if (parts.scheme === 'http' && !isLoopback(parts.host)) {
+  if (parsed.protocol === 'http:' && !isLoopback(parsed.hostname.replace(/^\[(.*)\]$/, '$1'))) {
     throw new Invalid('`url` must use https unless its host is localhost or a loopback address');
   }
 
@@ -417,37 +392,33 @@ function readMcp(root: string, version: string, report: Report): Record<string, 
   return servers;
 }
 
-/** Print the description of `plugin` to stdout; the exit status. */
-export function main(plugin: string): number {
+/**
+ * The description of `plugin`; throws Fatal for an invalid manifest. Each
+ * report is also passed to `report` as it happens.
+ */
+export function readPlugin(plugin: string, report: Report = () => {}): Description {
   const reports: string[] = [];
-  const report = (message: string) => {
+  const note = (message: string) => {
     reports.push(message);
-    process.stderr.write(`${plugin}: ${message}\n`);
+    report(message);
   };
-
   const root = realpath(plugin);
-  let manifest: Manifest;
-  try {
-    if (!isDirectory(root)) throw new Fatal('the plugin is not a directory');
-    manifest = readManifest(root, report);
-  } catch (error) {
-    if (!(error instanceof Fatal)) throw error;
-    process.stderr.write(`${plugin}: invalid Agent Plugin: ${error.message}\n`);
-    return 1;
-  }
+  if (!isDirectory(root)) throw new Fatal('the plugin is not a directory');
+  const manifest = readManifest(root, note);
   const version = PLUGIN_SCHEMAS[manifest.$schema];
-  const description: Description = {
-    root,
-    version,
-    manifest,
-    skills: readSkills(root, report),
-    mcpServers: readMcp(root, version, report),
-    reports,
+  return {
+    root, version, manifest, skills: readSkills(root, note), mcpServers: readMcp(root, version, note), reports,
   };
-  process.stdout.write(JSON.stringify(description, null, 2) + '\n');
-  return 0;
 }
 
 if (import.meta.main) {
-  process.exitCode = main(process.argv[2]);
+  const plugin = process.argv[2];
+  try {
+    const description = readPlugin(plugin, (message) => process.stderr.write(`${plugin}: ${message}\n`));
+    process.stdout.write(JSON.stringify(description, null, 2) + '\n');
+  } catch (error) {
+    if (!(error instanceof Fatal)) throw error;
+    process.stderr.write(`${plugin}: invalid Agent Plugin: ${error.message}\n`);
+    process.exitCode = 1;
+  }
 }

@@ -186,18 +186,10 @@ const mismatch = plugin(minimal(), {
     mcpServers: { s: { type: 'stdio', command: 'x' } },
   },
 });
-let stdout = '';
-let stderr = '';
-const writes = [process.stdout.write, process.stderr.write];
-process.stdout.write = ((chunk: string) => (stdout += chunk, true)) as typeof process.stdout.write;
-process.stderr.write = ((chunk: string) => (stderr += chunk, true)) as typeof process.stderr.write;
-try {
-  assert.equal(module.main(mismatch), 0);
-} finally {
-  [process.stdout.write, process.stderr.write] = writes;
-}
-assert.deepEqual(JSON.parse(stdout).mcpServers, {});
-assert.ok(stderr.includes('plugin.json targets 1.0.0'), stderr);
+const reported: string[] = [];
+const mismatched = module.readPlugin(mismatch, (message: string) => reported.push(message));
+assert.deepEqual(mismatched.mcpServers, {});
+assert.ok(reported.some((r) => r.includes('plugin.json targets 1.0.0')), reported.join('\n'));
 
 // §7.2.1, §9.2: each invalid entry is skipped alone.
 const invalid: Record<string, unknown> = {

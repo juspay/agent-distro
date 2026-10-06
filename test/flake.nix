@@ -28,7 +28,6 @@
         plugins = [ ./fixtures/spec-plugin ./fixtures/mcp-only ./fixtures/my-skills ];
         gateway = null;
       };
-      readPlugin = pkgs.callPackage "${agent-distro}/lib/read-plugin.nix" { };
       runtime = import "${agent-distro}/lib/runtime.nix" pkgs;
       reserved = [ "default" ] ++ (import "${agent-distro}/lib/discover-harnesses.nix").ordered;
       named = profile: lib.mapAttrs' (check: lib.nameValuePair "${profile}-${check}");
@@ -55,7 +54,7 @@
           reader = pkgs.runCommand "read-plugin-checks"
             {
               failed = pkgs.testers.testBuildFailure
-                (readPlugin (pkgs.writeTextDir "plugin.json" ''{"name": "no-schema"}''));
+                (runtime.readPlugin (pkgs.writeTextDir "plugin.json" ''{"name": "no-schema"}''));
             } ''
             ${runtime.node} ${./check-read-plugin.ts} ${runtime.tree}/src/plugin/read.ts
             grep -F '`$schema` is missing' "$failed/testBuildFailure.log"

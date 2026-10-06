@@ -73,9 +73,9 @@ function served(curl: string, url: string, keyEnv: string): string[] {
   });
 }
 
-export function main(base: string, cache: string, curl: string, keyEnv: string, shapeSource: string | Shape) {
+export function main(base: string, cache: string, curl: string, keyEnv: string, shapePath: string) {
   const config = JSON.parse(readFileSync(base, 'utf8'));
-  const shape: Shape = typeof shapeSource === 'string' ? JSON.parse(readFileSync(shapeSource, 'utf8')) : shapeSource;
+  const shape: Shape = JSON.parse(readFileSync(shapePath, 'utf8'));
   const provider = atPath(config, shape.provider);
   const url = atPath(provider, shape.url);
   try {

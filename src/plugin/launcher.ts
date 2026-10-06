@@ -1,6 +1,16 @@
 /** Agent Plugins stdio environment and placeholder contract. */
 import type { Description, StdioServer } from './read.ts';
-import { shellQuote } from '../util.ts';
+
+/**
+ * One POSIX shell word, quoted only when it needs to be. Generated launchers
+ * are byte-identical to the ones earlier releases wrote with Python's
+ * shlex.quote, whose rules these are.
+ */
+function shellQuote(value: string): string {
+  if (!value) return "''";
+  if (!/[^\w@%+=:,./-]/.test(value)) return value;
+  return "'" + value.replace(/'/g, `'"'"'`) + "'";
+}
 
 /** One bash word: the two placeholders expand once, all else is literal. */
 export function word(value: string): string {

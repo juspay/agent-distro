@@ -10,6 +10,7 @@
 import { openSync, writeSync } from 'node:fs';
 import { emitKeypressEvents, createInterface, type Key } from 'node:readline';
 import { WriteStream } from 'node:tty';
+import { parseArgs } from 'node:util';
 
 type Row = { name: string; title: string; tagline: string; version?: string };
 type Profile = Row & { description: string };
@@ -261,38 +262,29 @@ export class Menu {
 }
 
 function usage(message: string): never {
-  process.stderr.write('usage: choose.ts [-h] [--profile PROFILE] [--remembered REMEMBERED] menu\n'
-    + `choose.ts: error: ${message}\n`);
+  process.stderr.write(`choose.ts: ${message}\nusage: choose.ts MENU_JSON [--profile NAME] [--remembered PROFILE/HARNESS]\n`);
   process.exit(2);
 }
 
-function parseArgs(argv: string[]) {
-  const options: Record<string, string> = {};
-  const positional: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    const match = /^--(profile|remembered)(?:=(.*))?$/s.exec(argv[i]);
-    if (match) {
-      const value = match[2] ?? argv[++i];
-      if (value === undefined) usage(`argument --${match[1]}: expected one argument`);
-      options[match[1]] = value;
-    } else if (argv[i].startsWith('-') && argv[i] !== '-') {
-      usage(`unrecognized arguments: ${argv[i]}`);
-    } else {
-      positional.push(argv[i]);
-    }
+function parseArguments(args: string[]) {
+  let parsed;
+  try {
+    parsed = parseArgs({ args, allowPositionals: true, options: { profile: { type: 'string' }, remembered: { type: 'string' } } });
+  } catch (error) {
+    usage((error as Error).message);
   }
-  if (positional.length !== 1) usage(positional.length ? `unrecognized arguments: ${positional.slice(1).join(' ')}` : 'the following arguments are required: menu');
+  if (parsed.positionals.length !== 1) usage('expected one MENU_JSON argument');
   let data: MenuData;
   try {
-    data = JSON.parse(positional[0]);
-  } catch {
-    usage(`argument menu: invalid loads value: '${positional[0]}'`);
+    data = JSON.parse(parsed.positionals[0]);
+  } catch (error) {
+    usage(`MENU_JSON is not JSON: ${(error as Error).message}`);
   }
-  return { data, profile: options.profile ?? '', remembered: options.remembered };
+  return { data, profile: parsed.values.profile ?? '', remembered: parsed.values.remembered };
 }
 
 async function main() {
-  const { data, profile, remembered } = parseArgs(process.argv.slice(2));
+  const { data, profile, remembered } = parseArguments(process.argv.slice(2));
   if (profile) {
     data.profiles = data.profiles.filter((p) => p.name === profile);
     if (!data.profiles.length) usage('unknown profile: ' + profile);
