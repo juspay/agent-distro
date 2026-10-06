@@ -1,0 +1,11 @@
+{
+  "pins": {
+    "yaml": {
+      "type": "Url",
+      "url": "https://registry.npmjs.org/yaml/-/yaml-2.9.1.tgz",
+      "unpack": true,
+      "hash": "sha256-1lYDT0Bi5ecchTe6Ll2S0N/Sc/cGR16XTQ0LYVb1tFk="
+    }
+  },
+  "version": 8
+}

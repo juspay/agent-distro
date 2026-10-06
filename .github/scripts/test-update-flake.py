@@ -44,6 +44,46 @@ class UpdateFlakeTests(unittest.TestCase):
                 'profiles/team/npins', 'harnesses/new-agent/npins', 'lib/npins', 'lib/helper/npins'})
             self.assertEqual((harness / 'custom-pin.txt').read_text(), 'updated\n')
 
+    def test_yaml_repin_stays_on_its_major(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / 'bin'
+            tools.mkdir()
+            (tools / 'nix').write_text('#!/bin/sh\n'
+                                       '[ "$1" = run ] && [ "$2" = nixpkgs#npins ] && [ "$3" = -- ] || exit 1\n'
+                                       'shift 3\nexec npins "$@"\n')
+            # Records every call: `update` per directory, `add` with its URL.
+            (tools / 'npins').write_text('#!/bin/sh\n'
+                                         '[ "$1" = --directory ] && [ -d "$2" ] || exit 1\n'
+                                         'echo "$2 $3 $7" >> pin-calls\n')
+            # The registry's abbreviated packument: a newer major and a
+            # prerelease that must both be passed over.
+            (tools / 'curl').write_text('#!/bin/sh\n'
+                                        'echo \'{"versions": {"2.8.0": {}, "2.10.1": {}, "2.9.0": {}, '
+                                        '"3.0.0": {}, "2.11.0-rc.1": {}}}\'\n')
+            for tool in tools.iterdir():
+                tool.chmod(0o755)
+            env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}')
+            sources = root / 'lib/npins/sources.json'
+            sources.parent.mkdir(parents=True)
+            sources.write_text(json.dumps({'pins': {'yaml': {
+                'type': 'Url', 'url': 'https://registry.npmjs.org/yaml/-/yaml-2.8.0.tgz'}}, 'version': 8}))
+            subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
+            self.assertEqual((root / 'pin-calls').read_text().splitlines(), [
+                'lib/npins update ', 'lib/npins add https://registry.npmjs.org/yaml/-/yaml-2.10.1.tgz'])
+
+            # A sources.json that cannot be read stops the update loudly.
+            sources.write_text('{')
+            result = subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env,
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+
+            # Without a yaml pin there is nothing to re-pin.
+            sources.write_text(json.dumps({'pins': {}, 'version': 8}))
+            (root / 'pin-calls').unlink()
+            subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
+            self.assertEqual((root / 'pin-calls').read_text().splitlines(), ['lib/npins update '])
+
     def test_versions_are_one_json_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

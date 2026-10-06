@@ -2,23 +2,23 @@
 # OpenCode v2 reuses this adapter with its own schema, shape and session setup.
 { pkgs, plugins, gateway, package, profileName, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
 let
-  inherit (pkgs) lib callPackage writeShellApplication runCommand writeText runtimeShell python3 coreutils curl gum;
+  inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
   opencode = package;
 
   name = if schema == "v2" then "opencode2" else "opencode";
-  readPlugin = callPackage ../../lib/read-plugin.nix { };
+  runtime = import ../../lib/runtime.nix pkgs;
   config = runCommand "${name}-config" { } ''
-    PYTHONPATH=${../../lib} ${python3.interpreter} ${./write-config.py} "$out" ${writeText "${name}-args.json" (builtins.toJSON {
+    ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON {
       inherit schema gateway;
       bash = runtimeShell;
       env = "${coreutils}/bin/env";
-      descriptions = map (plugin: "${readPlugin plugin}") plugins;
+      descriptions = map (plugin: "${runtime.readPlugin plugin}") plugins;
     })}
   '';
   initialization = lib.optionalString (gateway != null) ''
     if [ "''${AI_GATEWAY:-1}" != "0" ]; then
       ${import ../../lib/gateway-key.nix { inherit gum gateway; }}
-      config=$(${python3.interpreter} ${../../lib/gateway_models.py} ${config}/gateway.json  \
+      config=$(${runtime.script "gateway/models.ts"} ${config}/gateway.json \
         "''${XDG_CACHE_HOME:-$HOME/.cache}/agent-distro/${name}/${builtins.hashString "sha256" (toString config)}/opencode.json" \
         ${curl}/bin/curl ${lib.escapeShellArg gateway.keyEnv} ${shape})
     fi

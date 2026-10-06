@@ -1,13 +1,14 @@
 # OMP owns LiteLLM initialization and portable extension loading.
 { pkgs, plugins, gateway, package, profileName }:
 let
-  inherit (pkgs) lib writeShellApplication formats python3 gum;
+  inherit (pkgs) lib writeShellApplication formats gum;
   omp = package;
 
   ensureApiKey = import ../../lib/gateway-key.nix { inherit gum gateway; };
   # Defaults are merged only into absent keys, preserving /model and /settings
-  # choices. Use a round-trip YAML parser to retain comments and quoted values.
-  configPython = python3.withPackages (ps: [ ps.ruamel-yaml ]);
+  # choices. src/harness/omp.ts round-trips the YAML to retain comments and
+  # quoted values.
+  runtime = import ../../lib/runtime.nix pkgs;
   # Thinking blocks are transcript content, not the thinking-level indicator;
   # hide them for every profile, gateway or not. A user-set value, including
   # `false`, is never replaced.
@@ -59,7 +60,7 @@ let
     # write; a directory we cannot write only warns. Honour OMP's relocated
     # agent directory and its default otherwise.
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
-      ${configPython}/bin/python ${./fill-config-defaults.py} "$agent_dir/config.yml" "''${default_layers[@]}"
+      ${runtime.script "harness/omp.ts"} "$agent_dir/config.yml" "''${default_layers[@]}"
     fi
   '';
 in

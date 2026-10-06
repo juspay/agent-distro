@@ -1,7 +1,8 @@
 # Selection only: each launcher owns its initialization and plugin protocol.
 # Store-path dispatch holds every launcher in the closure: no flake or network.
-{ lib, writeShellApplication, python3, profiles, default }:
+{ lib, pkgs, writeShellApplication, profiles, default }:
 let
+  runtime = import ./runtime.nix pkgs;
   names = [ default ] ++ lib.remove default (lib.attrNames profiles);
   discovered = import ./discover-harnesses.nix;
   harnesses = discovered.ordered;
@@ -32,7 +33,6 @@ let
 in
 writeShellApplication {
   name = "agent-distro";
-  runtimeInputs = [ python3 ];
   passthru.rows = rows;
   text = ''
     invalid=${quote "Invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " harnesses}."}
@@ -88,7 +88,7 @@ writeShellApplication {
     fi
     narrow=""
     if [ "''${AI_PROFILE+x}" = x ] || [ -n "$selected_profile" ]; then narrow=$profile; fi
-    choice=$(python3 ${./picker/choose.py} ${quote menu} --profile "$narrow" --remembered "$remembered") || exit 0
+    choice=$(${runtime.script "picker/choose.ts"} ${quote menu} --profile "$narrow" --remembered "$remembered") || exit 0
     if [ -n "$choice" ]; then
       # Only the chooser reaches here; direct selections never update state.
       # A failed state write must never prevent launching the selected agent.

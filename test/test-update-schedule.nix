@@ -23,8 +23,10 @@ assert builtins.all (interval: interval.Hour == null) calendar;
 # the launchd program evaluates that derivation on any platform (no build).
 assert builtins.head darwin.launchd.agents.agent-distro-update.config.ProgramArguments != "";
 assert !(builtins.tryEval (configuration "aarch64-darwin" { frequency = "daily"; }).home.activationPackage.drvPath).success;
+let runtime = import "${agent-distro}/lib/runtime.nix" pkgs; in
 pkgs.runCommand "update-schedule" { } ''
-  ${pkgs.bash}/bin/bash -eu ${./check-update-due.sh} ${agent-distro}/lib/update-due.sh
-  ${pkgs.bash}/bin/bash -eu ${./check-cache-usable.sh} ${agent-distro}/lib/cache-usable.sh
+  ${runtime.node} ${./check-update-due.ts} ${runtime.tree}/src
+  ${runtime.node} ${./check-cache-usable.ts} ${runtime.tree}/src
+  ${runtime.node} ${./check-would-compile.ts} ${runtime.tree}/src
   touch "$out"
 ''

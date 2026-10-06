@@ -39,7 +39,11 @@ commands // {
         (name: "${name}\t${discovery.metadata.${name}.title}\t${commands.${name}.version}\n")
         harnesses)} "$out/share/agent-distro/versions"
     '';
-    passthru.commands = harnesses;
+    passthru = {
+      commands = harnesses;
+      # For the Home Manager updater: the Node and tree the launchers use.
+      runtime = import ./runtime.nix pkgs;
+    };
   };
   picker = pkgs.callPackage ./picker.nix {
     default = profile.name;

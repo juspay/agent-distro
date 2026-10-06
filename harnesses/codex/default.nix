@@ -2,13 +2,13 @@
 # Portable plugin contents and provider policy stay outside this adapter.
 { pkgs, plugins, gateway, package, profileName }:
 let
-  inherit (pkgs) lib callPackage writeShellApplication runCommand jq;
+  inherit (pkgs) lib writeShellApplication runCommand jq;
   codex = package;
   marketplaceName = "${profileName}-ai";
 
   # Codex loads the original directory itself; the description only supplies
   # its validated name, so an invalid manifest fails here as it does for Claude.
-  readPlugin = callPackage ../../lib/read-plugin.nix { };
+  inherit (import ../../lib/runtime.nix pkgs) readPlugin;
   marketplace = runCommand "codex-${marketplaceName}-marketplace" { nativeBuildInputs = [ jq ]; } ''
     mkdir -p "$out/.agents/plugins"
     touch entries.json "$out/plugin-ids"

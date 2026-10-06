@@ -264,6 +264,15 @@ LiteLLM proxy used by OMP, Pi, and OpenCode.
 
 Harness design notes live in each directory under [harnesses/](./harnesses).
 
+What runs on your machine beyond the harnesses themselves (the plugin reader,
+each harness's config writer, the picker and the Home Manager updater) is
+TypeScript under [src/](./src), run by Node 24's native type stripping: no
+`package.json`, bundler or compile step. Node comes from the distribution's
+nixpkgs. Its one npm dependency, `yaml` (for OMP's config), is a tarball
+pinned in `lib/npins`, which [lib/runtime.nix](./lib/runtime.nix) links in
+as `node_modules/yaml`. The commands you run, and the shims Home Manager
+installs, stay small generated shell scripts that call into it.
+
 Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
 An invalid manifest fails the build with a message naming the field; skipped
 skills, disabled `mcp.json` files and invalid server entries are reported in
@@ -292,9 +301,17 @@ just demo              # re-record doc/demo.gif
 python3 .github/scripts/test-update-flake.py
 ```
 
+The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
+root does not run them. Build them from the test flake:
+
+```sh
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule}
+```
+
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
-directories under `profiles/`, `harnesses/`, and `lib/`, and runs each harness's
-`update.py`. CI then updates the root and test locks. The update report reads
+directories under `profiles/`, `harnesses/`, and `lib/`, re-pins `yaml` to
+the newest npm release of its major version, and runs each harness's `update.py`. CI then updates
+the root and test locks. The update report reads
 resolved versions and each harness's release-note metadata.
 
 CI pushes realised paths to the OSS cache (`ATTIC_TOKEN` is needed except on
@@ -312,8 +329,10 @@ Checks are selected by required features (`plugins`, `gateway`, `kolu`, `spec`)
 from each harness's metadata; `picker` is shared. Rebuild and gateway checks
 also accept `mkLaunchers`. Select plugin rebuild checks only for nonempty skill
 plugins. The test flake covers vanilla, Juspay, and spec fixtures, plus `registry`
-(the picker over the whole profile registry) and `reader` (plugin-reader checks
-without a VM).
+(the picker over the whole profile registry). Checks of the TypeScript alone
+run without a VM: `reader` (the plugin reader), `<harness>-adapter` (a
+harness's `tests/check-adapter.ts`), and `update-schedule` (the updater's
+schedule and cache policy).
 
 ## Adding a harness
 
@@ -325,6 +344,13 @@ optional custom updater in `update.py`. Nothing outside this directory needs
 registration: the picker, bundles, outputs, reserved names, checks, and daily
 report all discover it. The explicit `profileName` argument supports
 profile-specific registration, such as Codex’s marketplace name.
+
+An adapter that needs more than shell (translating plugin descriptions into
+the harness's config, merging user state at launch) keeps that logic in
+`src/harness/<name>.ts` and calls it with
+`(import ../../lib/runtime.nix pkgs).script "harness/<name>.ts"`. Unit checks
+that need no VM go in `tests/check-adapter.ts`, which receives the runtime's
+`src` and the harness directory.
 
 Checks declare `{ name; script; requires ? []; packages ? []; env ? {}; diskSize ? null; }`.
 Packages can name `updated`, `upstream`, `koluFixture`, or `recordFixture`.

@@ -16,6 +16,9 @@ def position(pin):
             at['notes'] = ('https://github.com/{owner}/{repo}/releases/tag/'.format(**repository)
                            + pin['version'])
         return at
+    if pin['type'] == 'Url':
+        # A fixed tarball, such as an npm release: its file name says where it is.
+        return {'at': pin['url'].rsplit('/', 1)[-1]}
     return {'at': pin['revision'][:7]}
 
 
