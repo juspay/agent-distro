@@ -12,7 +12,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { realpath } from '../util.ts';
 import { checkCaches } from './cache.ts';
@@ -93,16 +93,28 @@ export function wouldCompile(nix: string, target: string, options: string[]): Pl
   const shown = spawnSync(nix, ['derivation', 'show', ...drvs], { ...UNBOUNDED, stdio: ['ignore', 'pipe', 'inherit'] });
   if (shown.error) return { unknown: `nix derivation show: ${shown.error.message}` };
   if (shown.status !== 0) return { unknown: `nix derivation show exited ${shown.status ?? shown.signal}` };
+  type Derivation = { name: string; env?: Record<string, string> };
+  let derivations: Record<string, unknown>;
   try {
     const parsed = JSON.parse(shown.stdout);
-    const derivations: Record<string, { name: string; env?: Record<string, string> }> = parsed.derivations ?? parsed;
-    const names = Object.values(derivations).filter((drv) => drv.env?.allowSubstitutes !== '')
-      .slice(0, 3).map((drv) => drv.name);
-    if (!names.every((name) => typeof name === 'string')) throw new Error('a derivation has no name');
-    return { names: names.join(',') };
+    derivations = parsed?.derivations ?? parsed;
   } catch (error) {
     return { unknown: `nix derivation show: ${(error as Error).message}` };
   }
+  // Only an answer about every derivation the dry run named counts: {}, [],
+  // or a partial answer would otherwise read as "nothing to compile".
+  // Nix keys them by store path, or by base name in newer releases.
+  const shownAs = (drv: string) =>
+    typeof derivations === 'object' && derivations !== null && !Array.isArray(derivations)
+      ? derivations[drv] ?? derivations[basename(drv)] : undefined;
+  const answers = drvs.map(shownAs);
+  const missing = drvs.find((_, i) => {
+    const answer = answers[i] as Derivation | undefined;
+    return typeof answer !== 'object' || answer === null || typeof answer.name !== 'string';
+  });
+  if (missing) return { unknown: `nix derivation show did not describe ${missing}` };
+  const names = (answers as Derivation[]).filter((drv) => drv.env?.allowSubstitutes !== '').map((drv) => drv.name);
+  return { names: names.slice(0, 3).join(',') };
 }
 
 /** One update; the exit status. A skip is not a failure. */
