@@ -23,7 +23,7 @@
  * the last of a name wins.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Fatal, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
@@ -106,9 +106,17 @@ function narNode(hash: ReturnType<typeof createHash>, path: string) {
   if (stat.isSymbolicLink()) {
     put('symlink', 'target', readlinkSync(path, { encoding: 'buffer' }));
   } else if (stat.isFile()) {
-    put('regular');
-    if (stat.mode & 0o100) put('executable', '');
-    put('contents', readFileSync(path));
+    // Read what was stat'ed: never through a link that replaced the file since.
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const file = fstatSync(fd);
+      if (!file.isFile()) throw new LaunchError(`${VARIABLE}: ${path} changed while it was hashed`);
+      put('regular');
+      if (file.mode & 0o100) put('executable', '');
+      put('contents', readFileSync(fd));
+    } finally {
+      closeSync(fd);
+    }
   } else if (stat.isDirectory()) {
     put('directory');
     const names = readdirSync(path, { encoding: 'buffer' }).sort(Buffer.compare);
