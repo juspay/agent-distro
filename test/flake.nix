@@ -41,10 +41,10 @@
         // lib.listToAttrs (lib.concatMap
           (harness:
             let directory = "${agent-distro}/harnesses/${harness}";
-            in lib.optional (builtins.pathExists "${directory}/tests/check-adapter.py") {
+            in lib.optional (builtins.pathExists "${directory}/tests/check-adapter.ts") {
               name = "${harness}-adapter";
               value = pkgs.runCommand "${harness}-adapter-checks" { } ''
-                PYTHONPATH=${agent-distro}/lib ${pkgs.python3.interpreter} ${directory}/tests/check-adapter.py ${directory}
+                ${runtime.node} ${directory}/tests/check-adapter.ts ${runtime.tree}/src ${directory}
                 touch "$out"
               '';
             })

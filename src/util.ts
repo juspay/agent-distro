@@ -1,6 +1,7 @@
 /** Filesystem and quoting helpers every runtime module shares. */
 import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /** Like Python's os.path.realpath: resolves what exists, keeps the rest. */
 export function realpath(path: string, depth = 0): string {
@@ -71,3 +72,7 @@ export function shellQuote(value: string): string {
   if (!/[^\w@%+=:,./-]/.test(value)) return value;
   return "'" + value.replace(/'/g, `'"'"'`) + "'";
 }
+
+/** A fresh name in `directory` for a file that is renamed into place. */
+export const temporaryPath = (directory: string, prefix: string) =>
+  join(directory, prefix + randomBytes(6).toString('hex'));

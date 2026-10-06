@@ -2,12 +2,13 @@
 # portable; no provider initialization or persistent plugin install is needed.
 { pkgs, plugins, gateway, package, profileName }:
 let
-  inherit (pkgs) lib callPackage writeShellApplication runCommand writeText runtimeShell python3 coreutils;
+  inherit (pkgs) lib callPackage writeShellApplication runCommand writeText runtimeShell coreutils;
   claude = package;
 
+  runtime = import ../../lib/runtime.nix pkgs;
   readPlugin = callPackage ../../lib/read-plugin.nix { };
   adaptPlugin = plugin: runCommand "claude-plugin" { } ''
-    PYTHONPATH=${../../lib} ${python3.interpreter} ${./write-plugin.py} "$out" ${writeText "claude-plugin-args.json" (builtins.toJSON {
+    ${runtime.script "harness/claude.ts"} "$out" ${writeText "claude-plugin-args.json" (builtins.toJSON {
       bash = runtimeShell;
       env = "${coreutils}/bin/env";
       description = "${readPlugin plugin}";
