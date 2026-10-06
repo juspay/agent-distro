@@ -125,6 +125,11 @@ nix profile install github:juspay/agent-distro#juspay
 nix profile upgrade juspay
 ```
 
+For the same scheduled, cache-only updater without Home Manager, drive it from
+the library: `agent-distro.lib.mkUpdater` (see [Library](#library)) provides the
+`command` and a runnable `program`, and `agent-distro.lib.mkShims` keeps the
+installed commands pointing at the updated bundle.
+
 The updater never compiles harnesses from source. It passes the project cache
 (`cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`)
 to every update, and needs nothing more when you are a trusted Nix user or run
@@ -181,6 +186,42 @@ agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "
 agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → every harness launcher, plus picker and bundle
 ```
+
+### Library
+
+Beyond the launchers, `agent-distro.lib` exposes the pieces Home Manager uses
+under the hood, so any Nix consumer — not only Home Manager — can keep a
+profile installed, updated, and chosen. Every function evaluates from a plain
+`import` of its `lib/*.nix` file with an arbitrary nixpkgs `pkgs`; a required
+argument left out is an eval error naming it.
+
+```nix
+agent-distro.lib.stateDirectory { xdgStateHome; flake; profile; }
+# → the string "<xdgStateHome>/agent-distro/<sha256 of {flake, profile}>", the
+#   same hash Home Manager computes today. One function, so a consumer and the
+#   updater can never disagree on where `current` lives.
+
+agent-distro.lib.mkShims { pkgs; bundle; stateDirectory; }
+# → a derivation whose bin/ holds one shim per bundle.commands, each
+#   `exec "<stateDirectory>/current/bin/<name>"` when executable, else
+#   `exec <bundle>/bin/<name>`; identical text to the Home Manager module's shims.
+
+agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; periodSeconds ? …; offsetSeconds ? …; }
+# → { config = <the generated JSON file>; command = [ node update.ts config ];
+#   program = <a writeShellApplication running `command "$@"`>; }. The Home
+#   Manager module's systemd ExecStart, launchd ProgramArguments (`++ ["--scheduled"]`)
+#   and activation `--cache-warnings` all come from this. `periodSeconds` and
+#   `offsetSeconds` default to the 02/08/14/20 UTC schedule's values; the updater
+#   never compiles, handing nix only `substituters`.
+
+agent-distro.lib.mkPicker { pkgs; profiles; default; }
+# → lib/picker.nix's derivation: the interactive profile/harness chooser.
+```
+
+The schedule the updater follows is one `lib/schedule.nix`, exposed as
+`agent-distro.lib.schedule`: `updateHoursUTC`, `defaultFrequency`,
+`updatePeriodSeconds` and `updateOffsetSeconds`, so the module, `mkUpdater` and
+any consumer read the same numbers.
 
 A single-profile distribution draws the narrowed list above — one profile's
 rows under its description; `mkFlake` gives you the individual launchers and a

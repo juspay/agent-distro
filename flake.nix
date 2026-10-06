@@ -87,7 +87,15 @@
         })
         discovered.metadata;
 
-      lib = { inherit mkLaunchers mkFlake; cache = import ./lib/cache.nix; };
+      lib = {
+        inherit mkLaunchers mkFlake;
+        cache = import ./lib/cache.nix;
+        stateDirectory = import ./lib/state-directory.nix;
+        mkShims = import ./lib/mk-shims.nix;
+        mkUpdater = import ./lib/mk-updater.nix;
+        mkPicker = import ./lib/mk-picker.nix;
+        schedule = import ./lib/schedule.nix lib;
+      };
       # Resolved profile data, for the tests and for third parties.
       inherit profiles;
       templates.default = {

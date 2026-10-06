@@ -1,6 +1,16 @@
 { nixpkgs }:
 let
   mkLaunchers = import ./mk-launchers.nix;
+  # The shared library: the same functions flake.nix's `lib` expose, so a
+  # third-party distribution built with mkFlake reaches them the same way.
+  libFunctions = nixpkgs.lib: {
+    inherit mkLaunchers;
+    stateDirectory = import ./state-directory.nix;
+    mkShims = import ./mk-shims.nix;
+    mkUpdater = import ./mk-updater.nix;
+    mkPicker = import ./mk-picker.nix;
+    schedule = import ./schedule.nix nixpkgs.lib;
+  };
 in
 { profile, systems ? import ./systems.nix, cache ? import ./cache.nix }:
 let
@@ -29,4 +39,5 @@ builtins.seq checked {
         program = nixpkgs.lib.getExe package;
       }))
     runnable;
+  lib = libFunctions nixpkgs.lib;
 }
