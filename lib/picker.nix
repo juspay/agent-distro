@@ -8,9 +8,8 @@ let
   harnesses = discovered.ordered;
   displayVersion = profile: harness: lib.head (lib.splitString "+" profiles.${profile}.launchers.${harness}.version);
   # The one source for `--list`, `--list --json` and the chooser's menu;
-  # src/listing.ts types it.
+  # src/listing.ts types it. The default profile comes first.
   listing = {
-    inherit default;
     profiles = map
       (name: {
         inherit name;
@@ -55,11 +54,11 @@ writeShellApplication {
     }
 
     if [ "''${1-}" = --list ]; then
-      if [ "''${2-}" = --json ]; then
-        printf '%s\n' ${quote menu}
-      else
-        printf '%s\n' ${quote lines}
-      fi
+      case "$#:''${2-}" in
+        1:) printf '%s\n' ${quote lines} ;;
+        2:--json) printf '%s\n' ${quote menu} ;;
+        *) echo "usage: agent-distro --list [--json]" >&2; exit 2 ;;
+      esac
       exit 0
     fi
 
@@ -101,7 +100,8 @@ writeShellApplication {
     fi
     narrow=""
     if [ "''${AI_PROFILE+x}" = x ] || [ -n "$selected_profile" ]; then narrow=$profile; fi
-    choice=$(${runtime.script "picker/choose.ts"} ${quote menu} --profile "$narrow" --remembered "$remembered") || exit 0
+    # Quitting prints nothing and exits 0; any other failure keeps its status.
+    choice=$(${runtime.script "picker/choose.ts"} ${quote menu} --profile "$narrow" --remembered "$remembered") || exit
     if [ -n "$choice" ]; then
       # Only the chooser reaches here; direct selections never update state.
       # A failed state write must never prevent launching the selected agent.
