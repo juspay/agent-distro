@@ -29,17 +29,25 @@ AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
 
 To keep the agents installed and updated daily, see [Install](#install).
 
-With several profiles, choose a profile first (the default is highlighted),
-then choose a harness. The profile screen looks like this:
+With several profiles, the chooser has two panes: profiles on the left, with
+the highlighted profile's description under them, and that profile's harnesses
+on the right, each with its tagline and version. Moving through profiles
+previews their harnesses; Enter or Tab moves to the harness pane (here with
+`juspay/claude` remembered from last time):
 
 ```
-agent-distro · 2 profiles · 6 harnesses
-Choose a profile
-
-❯   juspay   Juspay skills + Kolu, via Juspay's LiteLLM gateway
-    vanilla  Upstream harnesses with your own provider
-
-Enter choose  / filter  q quit
+╭─ agent-distro ───────┬──────────────────────────────────────────── 2 profiles · 6 harnesses ─╮
+│ Profiles             │ Harnesses · juspay                                                    │
+│ ❯ • juspay           │     Oh My Pi     gateway or own provider · extensions         18.6.3  │
+│     vanilla          │     Codex        OpenAI login · plugins via marketplace      0.160.1  │
+│                      │ ❯ • Claude Code  Anthropic login · plugin dirs per session   2.1.291  │
+│ Juspay skills +      │     OpenCode     v1 · gateway or own provider                1.18.34  │
+│ Kolu, via Juspay's   │     OpenCode v2  v2 preview · private server per launch       2.0.24  │
+│ LiteLLM gateway      │     Pi           OMP's upstream · gateway via models.json      1.0.4  │
+├──────────────────────┴───────────────────────────────────────────────────────────────────────┤
+│ / filter…                                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+↑↓ jk move   Enter launch   ← profiles   Tab switch pane   / filter   q quit
 ```
 
 | Variable (names unchanged for script compatibility) | Values | Effect |
@@ -56,6 +64,7 @@ agent-distro codex --version
 agent-distro juspay claude --version
 agent-distro juspay
 agent-distro --list                      # profile harness title version, one row per line
+agent-distro --list --json               # the same, as JSON (below)
 ```
 
 `AI_HARNESS` and `AI_PROFILE` take precedence over positional selections;
@@ -63,39 +72,97 @@ the profile otherwise defaults to the registry default. Recognized leading
 names are consumed; other arguments and everything after `--` are passed to
 the harness unchanged.
 
-After selecting `juspay`, the harness list looks like this (versions reflect
-the packages pinned at build time, without revision suffixes):
+Narrowed to one profile (`agent-distro juspay`, `AI_PROFILE`, or a
+single-profile distribution), the chooser is the harness pane alone, under the
+profile's description. Versions reflect the packages pinned at build time,
+without revision suffixes:
 
 ```
-agent-distro · juspay
-Juspay skills + Kolu, via Juspay's LiteLLM gateway
-
-❯   Oh My Pi     gateway or own provider · extensions                                       18.4.4
-    Codex        OpenAI login · plugins via marketplace                                    0.159.3
-    Claude Code  Anthropic login · plugin dirs per session                                 2.1.286
-    OpenCode     v1 · gateway or own provider                                              1.18.33
-    OpenCode v2  v2 preview · private server per launch                                     2.0.20
-    Pi           OMP's upstream · gateway via models.json                                   0.99.2
-
-↑/↓ j/k  Enter choose  ← back to profiles  / filter  q quit
+╭─ agent-distro · juspay ───────────────────────────────── 6 harnesses ─╮
+│ Juspay skills + Kolu, via Juspay's LiteLLM gateway                    │
+│ ❯   Oh My Pi     gateway or own provider · extensions         18.6.3  │
+│     Codex        OpenAI login · plugins via marketplace      0.160.1  │
+│     Claude Code  Anthropic login · plugin dirs per session   2.1.291  │
+│     OpenCode     v1 · gateway or own provider                1.18.34  │
+│     OpenCode v2  v2 preview · private server per launch       2.0.24  │
+│     Pi           OMP's upstream · gateway via models.json      1.0.4  │
+├───────────────────────────────────────────────────────────────────────┤
+│ / filter…                                                             │
+╰───────────────────────────────────────────────────────────────────────╯
+↑↓ jk move   Enter launch   / filter   q quit
 ```
 
-Narrowed to one profile, the chooser opens this harness list directly and omits
-`← back to profiles`.
+| Key | Does |
+| --- | --- |
+| ↑/↓, `j`/`k` | Move |
+| Enter | On a profile, show its harnesses; on a harness, launch it |
+| Tab | Switch between the profile and harness panes (several profiles only) |
+| ←, `h`, Escape | Back to profiles from the harness pane; on the first pane, quit |
+| `/` | Filter the focused pane by title or tagline (a profile's name or description) |
+| Escape (filtering) | Clear the filter, keeping the cursor on its row |
+| `q`, Ctrl-C | Quit without choosing |
 
-Use arrows or `j`/`k` to move and Enter to choose. On a harness list with
-multiple profiles, `← back to profiles` means Left, `h`, or Escape returns to
-profiles. Escape otherwise exits, and `q` or Ctrl-C exits. `/` filters by
-title or tagline; Escape clears the filter. Small or unsupported terminals
-get a numbered list instead.
+While filtering, the filter line shows the query as typed and how many rows
+match; ↑/↓ still move, Backspace edits, and Enter takes the highlighted match.
+The footer lists only the keys that apply at that moment. Colour follows
+[`NO_COLOR`](https://no-color.org) and the terminal type. Small or
+unsupported terminals (`TERM` unset or `dumb`, no controlling terminal, or
+fewer rows or columns than the box needs) get a numbered list on stderr
+instead. A terminal that shrinks below that once the box is up shows a notice
+until it grows again, with the cursor and filter kept. Without a terminal on
+stdin, agent-distro says which variables to set instead of drawing anything.
 
 An interactive selection is remembered in
 `${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
-the profile screen starts on that profile, and its harness list starts on that
-harness, marked with `·`.
+the chooser starts on that profile and then on that harness, both marked with
+`•`.
 Every interactive choice updates it, including `agent-distro <profile>`. Direct selections
 with `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro <profile> <harness>` never update it.
 An unavailable state directory is silently ignored.
+
+`agent-distro --list --json` prints what the chooser draws, for programs that
+offer the same choice (such as [kolu](https://github.com/juspay/kolu)), on one
+line. Its shape is stable, typed as `Listing` in [src/listing.ts](./src/listing.ts);
+here it is pretty-printed, with each profile cut to one harness:
+
+```json
+{
+  "profiles": [
+    {
+      "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
+      "harnesses": [
+        {
+          "name": "claude",
+          "tagline": "Anthropic login · plugin dirs per session",
+          "title": "Claude Code",
+          "version": "2.1.291"
+        }
+      ],
+      "name": "juspay"
+    },
+    {
+      "description": "Upstream harnesses with your own provider",
+      "harnesses": [
+        {
+          "name": "claude",
+          "tagline": "Anthropic login · plugin dirs per session",
+          "title": "Claude Code",
+          "version": "2.1.291"
+        }
+      ],
+      "name": "vanilla"
+    }
+  ]
+}
+```
+
+The first profile is the default, and `harnesses` is in menu order. Keys
+within an object are sorted. Each `name` is unique at its level, free of
+whitespace and `/`, and is what `AI_PROFILE` or `AI_HARNESS` (or a positional
+selector) takes;
+and `version` is the display version, as `--list` prints it, without the
+package's `+` revision suffix. The plain `--list` and the chooser read the
+same value, so the three cannot disagree. `--list` takes no other arguments.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
@@ -170,7 +237,7 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | Field | Meaning |
 | --- | --- |
 | `name` | Distribution identifier; Codex marketplace is `<name>-ai` |
-| `description` | Header above the picker's list |
+| `description` | Shown with the profile in the picker |
 | `plugins` | List of [Agent Plugins](https://agent-plugins.org/specification/) directories: a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json` |
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
 | `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness |
@@ -361,7 +428,7 @@ The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
 root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
 ```
 
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
@@ -387,8 +454,10 @@ also accept `mkLaunchers`. Select plugin rebuild checks only for nonempty skill
 plugins. The test flake covers vanilla, Juspay, and spec fixtures, plus `registry`
 (the picker over the whole profile registry). Checks of the TypeScript alone
 run without a VM: `reader` (the plugin reader), `<harness>-adapter` (a
-harness's `tests/check-adapter.ts`), and `update-schedule` (the updater's
-schedule and cache policy).
+harness's `tests/check-adapter.ts`), `update-schedule` (the updater's
+schedule and cache policy), `list-json` (`--list --json` against its
+type, the chooser's menu and `--list`), and `picker-layout` (the chooser's
+cell widths, truncation and box at common terminal sizes).
 
 ## Adding a harness
 

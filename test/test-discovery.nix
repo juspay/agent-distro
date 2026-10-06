@@ -47,7 +47,7 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
         home-manager = {};
       };
     in assert builtins.elem \"discovery-stub\" launchers.bundle.commands;
-       assert builtins.any (row: row.name == \"discovery-stub\" && row.title == \"Discovery Stub\") launchers.picker.rows;
+       assert builtins.any (row: row.name == \"discovery-stub\" && row.title == \"Discovery Stub\") (builtins.head launchers.picker.listing.profiles).harnesses;
        assert distro.harnesses.x86_64-linux ? discovery-stub;
        assert (distro.harnesses.x86_64-linux.discovery-stub).name == \"discovery-stub\";
        assert !(builtins.tryEval (distro.lib.mkFlake { profile = profile // { name = \"discovery-stub\"; }; })).success;

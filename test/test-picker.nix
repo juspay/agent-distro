@@ -3,11 +3,6 @@ let
   common = import ./common.nix;
   names = [ default ] ++ builtins.filter (n: n != default) (builtins.attrNames profiles);
   harnesses = (import ../lib/discover-harnesses.nix).ordered;
-  menuShape = {
-    rows = menu.rows;
-    inherit default;
-    others = builtins.filter (n: n != default) names;
-  };
 in
 {
   inherit name;
@@ -41,9 +36,10 @@ in
                 f"su - testuser -c 'AI_GATEWAY=0 AI_PROFILE={profile} AI_HARNESS={harness} agent-distro --version </dev/null'"
             )
 
+    # The listing as Nix computed it; the check compares `--list --json` to it.
     machine.succeed(
         "su - testuser -c " + shlex.quote(
-            "python ${./check-picker.py} " + shlex.quote(${builtins.toJSON (builtins.toJSON menuShape)})
+            "python ${./check-picker.py} " + shlex.quote(${builtins.toJSON (builtins.toJSON menu.listing)})
         )
     )
   '';
