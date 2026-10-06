@@ -23,7 +23,7 @@
  * the last of a name wins.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Fatal, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
@@ -100,33 +100,38 @@ function narString(hash: ReturnType<typeof createHash>, value: string | Buffer) 
 }
 
 function narNode(hash: ReturnType<typeof createHash>, path: string) {
-  const stat = lstatSync(path);
   const put = (...values: (string | Buffer)[]) => values.forEach((value) => narString(hash, value));
   put('(', 'type');
-  if (stat.isSymbolicLink()) {
-    put('symlink', 'target', readlinkSync(path, { encoding: 'buffer' }));
-  } else if (stat.isFile()) {
-    // Read what was stat'ed: never through a link that replaced the file since.
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const file = fstatSync(fd);
-      if (!file.isFile()) throw new LaunchError(`${VARIABLE}: ${path} changed while it was hashed`);
+  // Open first and ask the open file what it is, so nothing read can differ
+  // from what was checked. O_NOFOLLOW refuses a symlink, which is then read
+  // as one; O_NONBLOCK keeps a FIFO from blocking the launch.
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ELOOP') throw error;
+    put('symlink', 'target', readlinkSync(path, { encoding: 'buffer' }), ')');
+    return;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (stat.isFile()) {
       put('regular');
-      if (file.mode & 0o100) put('executable', '');
+      if (stat.mode & 0o100) put('executable', '');
       put('contents', readFileSync(fd));
-    } finally {
-      closeSync(fd);
+    } else if (stat.isDirectory()) {
+      put('directory');
+      const names = readdirSync(path, { encoding: 'buffer' }).sort(Buffer.compare);
+      for (const name of names) {
+        put('entry', '(', 'name', name, 'node');
+        narNode(hash, join(path, name.toString()));
+        put(')');
+      }
+    } else {
+      throw new LaunchError(`${VARIABLE}: ${path} is not a regular file, directory or symlink, so it cannot be hashed`);
     }
-  } else if (stat.isDirectory()) {
-    put('directory');
-    const names = readdirSync(path, { encoding: 'buffer' }).sort(Buffer.compare);
-    for (const name of names) {
-      put('entry', '(', 'name', name, 'node');
-      narNode(hash, join(path, name.toString()));
-      put(')');
-    }
-  } else {
-    throw new LaunchError(`${VARIABLE}: ${path} is not a regular file, directory or symlink, so it cannot be hashed`);
+  } finally {
+    closeSync(fd);
   }
   put(')');
 }
