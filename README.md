@@ -125,10 +125,15 @@ nix profile install github:juspay/agent-distro#juspay
 nix profile upgrade juspay
 ```
 
-For the same scheduled, cache-only updater without Home Manager, drive it from
-the library: `agent-distro.lib.mkUpdater` (see [Library](#library)) provides the
-`command` and a runnable `program`, and `agent-distro.lib.mkShims` keeps the
-installed commands pointing at the updated bundle.
+Without Home Manager you can still update, cache-only, but you own the driving:
+`agent-distro.lib.mkUpdater` (see [Library](#library)) gives the `command` and a
+runnable `program` (never compiling; it passes nix only `substituters`), and
+`agent-distro.lib.mkShims` keeps installed commands pointing at the updated
+bundle. The updater schedules nothing itself — it checks the UTC boundary only
+when you pass `--scheduled` (as the module's launchd does), so a non-HM consumer
+runs it on its own cadence and must also create the `stateDirectory`, prune old
+out-links when a new bundle lands, and run `--cache-warnings` once to surface an
+unusable cache. Home Manager does all of that for you.
 
 The updater never compiles harnesses from source. It passes the project cache
 (`cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`)
@@ -179,9 +184,10 @@ runs `nix run github:<you>/my-distribution`, and updates with
 `nix flake update agent-distro`.
 
 ```nix
-agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; }
+agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; }
 # → packages.<system>: every harness, default picker, and <profile.name> bundle
-#   apps.<system>: every harness and default picker; homeManagerModules.default
+#   apps.<system>: every harness and default picker; homeManagerModules.default;
+#   lib: the same eight-name library attrset this flake exposes
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → every harness launcher, plus picker and bundle
@@ -205,17 +211,22 @@ agent-distro.lib.mkShims { pkgs; bundle; stateDirectory; }
 # → a derivation whose bin/ holds one shim per bundle.commands, each
 #   `exec "<stateDirectory>/current/bin/<name>"` when executable, else
 #   `exec <bundle>/bin/<name>`; identical text to the Home Manager module's shims.
+#   `bundle` must be a bundle from `mkLaunchers` of this agent-distro (it carries
+#   `commands`); anything else is an eval error naming the problem.
 
-agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; periodSeconds ? …; offsetSeconds ? …; }
+agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; }
 # → { config = <the generated JSON file>; command = [ node update.ts config ];
 #   program = <a writeShellApplication running `command "$@"`>; }. The Home
 #   Manager module's systemd ExecStart, launchd ProgramArguments (`++ ["--scheduled"]`)
-#   and activation `--cache-warnings` all come from this. `periodSeconds` and
-#   `offsetSeconds` default to the 02/08/14/20 UTC schedule's values; the updater
-#   never compiles, handing nix only `substituters`.
+#   and activation `--cache-warnings` all come from this. `bundle` must be a
+#   `mkLaunchers` bundle with a `runtime` (post-#59 ones do); the period/offset
+#   come from `lib.schedule` and are not overridable here; the updater never
+#   compiles, handing nix only `substituters`.
 
 agent-distro.lib.mkPicker { pkgs; profiles; default; }
-# → lib/picker.nix's derivation: the interactive profile/harness chooser.
+# → lib/picker.nix's derivation: the interactive profile/harness chooser, where
+#   `profiles = { <name> = { profile; launchers; }; … }` — one entry per profile,
+#   `launchers` the `mkLaunchers` result for it — and `default` names the preselected one.
 ```
 
 The schedule the updater follows is one `lib/schedule.nix`, exposed as
@@ -232,8 +243,9 @@ cache). The Home Manager updater only installs what that cache holds and never
 compiles, so push your own builds to a cache and pass it, or your users' updates
 are skipped.
 
-`mkFlake` returns `packages`, `apps`, and `homeManagerModules`; add other
-outputs with `//`.
+`mkFlake` returns `packages` (every harness, the default picker, and the
+`<profile.name>` bundle), `apps`, `homeManagerModules.default`, and the same
+`lib` attrset `flake.nix` exposes; add other outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
 
 ```nix
