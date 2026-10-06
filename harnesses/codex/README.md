@@ -10,13 +10,18 @@ and daemon-management subcommands remain available.
 
 A plugin on `AGENT_DISTRO_PLUGINS` is never registered in `config.toml`. It gets
 a one-plugin marketplace in the cache, named `agent-distro-<hash of its cache
-key>`; Codex's own `plugin add` copies it into `$CODEX_HOME/plugins/cache`
-through a throwaway `CODEX_HOME` whose `plugins` is the real one, and each
-launch passes `-c` overrides that register that marketplace, enable the plugin
-and disable the profile plugin of the same name. Codex loads a cached copy only
-while enabled, so without the variable it is inert; it stays behind, and an
-edited plugin gets a new key and a new copy. Codex's `-c` splits keys at every
-`.`, so a plugin whose name contains one is reported and skipped.
+key>`, and each launch passes `-c` overrides that register that marketplace,
+enable the plugin and disable the profile plugin of the same name. Codex loads
+a plugin only from its install cache, so the first launch runs Codex's own
+`plugin add` with a throwaway `CODEX_HOME`: empty, with no `auth.json` or
+config (installing from a local marketplace needs no login, checked with
+0.160.1), and inside the real one so a rename can move its result into
+`$CODEX_HOME/plugins/cache`. The rename is atomic, so an interrupted install
+leaves nothing that looks installed and is simply repeated, and of two
+concurrent installs the first is kept. The copy stays, inert without the
+override; launches stamp the ones they use, and an install removes the ones
+unused for 14 days. Codex's `-c` splits keys at every `.`, so a plugin whose
+name contains one is reported and skipped.
 
 The npins branch pin tracks `sadjow/codex-cli-nix`. Its standalone binary
 packaging recipe is called with the distribution's shared nixpkgs, with the

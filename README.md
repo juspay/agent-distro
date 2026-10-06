@@ -176,24 +176,41 @@ AGENT_DISTRO_PLUGINS=~/src/my-plugin agent-distro claude
 AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-distro juspay omp
 ```
 
+- **Entries.** Directories separated by `:`, so a path containing `:` cannot
+  be given; empty components are ignored. A relative entry is resolved against
+  the directory the launcher starts in, and symlinks are followed. `~` is
+  expanded by the shell, and only where an assignment expands it: unquoted,
+  in bash or zsh, not in fish. An entry that is not a directory fails the
+  launch, naming it.
 - **Read like a profile's plugins.** Each directory goes through the same
   reader: an invalid manifest fails the launch with a message naming the
   field, and skipped skills, a disabled `mcp.json` or an invalid server entry
-  are reported on stderr while the launch goes on. An entry that is not a
-  directory fails the launch, naming it. Empty components are ignored.
+  are reported on stderr, on every launch, while the launch goes on.
 - **Matched by name, never by version.** A plugin whose `plugin.json` `name`
   matches one of the profile's replaces it; on the variable, the last of a
   name wins. No `version` is compared.
 - **Translated once.** Each harness's translation of a plugin is cached under
-  `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`. A plugin
-  under `/nix/store` is keyed by its store path, as is; any other directory by
-  a hash of its contents (its NAR serialization, computed without Nix) and its
-  path, so an edited checkout is translated again on its next launch. A launch
-  never calls Nix, and a cache it cannot write fails it.
+  `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`, which
+  must be an absolute path. A plugin under `/nix/store` is keyed by its store
+  path, as is, without reading it. Any other directory is keyed by a hash of
+  its contents (its NAR serialization, computed without Nix, leaving out a
+  top-level `.git`) and of its absolute path, so an edited checkout is
+  translated again on its next launch, and a key is particular to one machine
+  and user. That directory is hashed in full on every launch: a large tree
+  (a `node_modules`, say) costs launch time, and a FIFO or an unreadable file
+  in it fails the launch. A launch never calls Nix, and a cache it cannot
+  write fails it.
+- **Kept while in use.** Each launch marks the translations it uses. A launch
+  that translates something new removes what no launch has used for 14 days,
+  so old versions of an edited checkout and translations for an older
+  agent-distro do not pile up. With no harness running, removing
+  `~/.cache/agent-distro/plugins` is always safe.
 - **For that launch only.** Unset the variable and the harness is back to the
   profile's plugins: Claude Code and OMP take them as arguments, OpenCode in its
-  session config, Codex through `-c` overrides, and Pi's merge takes back on
-  the next launch what the previous one added. Each harness's README says how.
+  session config, and Codex through `-c` overrides; Codex keeps an inert copy
+  in its plugin cache, removed once unused for 14 days. Pi only reads its own
+  files, so it records what a launch added and its next launch, whenever that
+  is, takes it back. Each harness's README says how.
 
 Unset or empty, the launchers behave exactly as they do without this feature.
 
@@ -423,7 +440,9 @@ Harness design notes live in each directory under [harnesses/](./harnesses).
 What runs on your machine beyond the harnesses themselves (the plugin reader,
 each harness's config writer, the picker and the Home Manager updater) is
 TypeScript under [src/](./src), run by Node 24's native type stripping: no
-`package.json`, bundler or compile step. Node comes from the distribution's
+`package.json`, bundler or compile step. (The one exception is the entry for
+`AGENT_DISTRO_PLUGINS`, plain JavaScript so that it can turn on Node's compile
+cache before any TypeScript loads.) Node comes from the distribution's
 nixpkgs. Its one npm dependency, `yaml` (for OMP's config), is a tarball
 pinned in `lib/npins`, which [lib/runtime.nix](./lib/runtime.nix) links in
 as `node_modules/yaml`. The commands you run, and the shims Home Manager
