@@ -5,8 +5,10 @@
 { pkgs, bundle, stateDirectory }:
 let
   inherit (pkgs) lib;
-  # Discover commands from the bundle, keeping shims and collision checks together.
-  names = bundle.commands;
+  # Fail fast on the wrong kind of bundle: only a mkLaunchers bundle carries
+  # `commands` (plain derivations, and bundles from other distros, do not).
+  names = if bundle ? commands then bundle.commands
+    else throw "mkShims: `bundle` has no `commands`; pass a bundle built with mkLaunchers of this agent-distro.";
 in
 pkgs.symlinkJoin {
   name = "agent-distro-shims";
