@@ -76,9 +76,9 @@ type LaunchArgs = Inputs & { profile: (ProfileEntry & { dir: string })[] };
  * replacing the launcher's own. A plugin on the variable is one more
  * session-only plugin directory.
  */
-export const adapter: Adapter<LaunchArgs, LaunchArgs['profile'][number]> = {
+export const adapter: Adapter<LaunchArgs, LaunchArgs['profile'][number], Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
-  translate: (description, out, args, report) => writePlugin(description, out, args, report),
+  translate: (description, out, inputs, report) => writePlugin(description, out, inputs, report),
   launch: ({ kept, plugins }) => [
     ...kept.map((plugin) => plugin.entry.dir),
     ...plugins.map((plugin) => plugin.translation),

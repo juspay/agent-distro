@@ -10,7 +10,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { LaunchError, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
+import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
 import type { Gateway } from '../gateway/models.ts';
@@ -37,6 +37,10 @@ export function pluginFragment(description: Description, out: string, { bash, en
   });
   return { skills, servers };
 }
+
+const isFragment = (value: unknown): value is Fragment => typeof value === 'object' && value !== null
+  && 'skills' in value && (value.skills === null || typeof value.skills === 'string')
+  && 'servers' in value && typeof value.servers === 'object' && value.servers !== null;
 
 /** Where each schema keeps skill paths and servers. */
 function sections(config: Record<string, any>, schema: string): { skills: string[]; servers: Record<string, Server> } {
@@ -116,11 +120,12 @@ type LaunchArgs = Inputs & { schema: string; name: string; config: string; profi
  * BASE) without the replaced profile plugins and with the variable's, written
  * to the cache by content. Prints its path, for OPENCODE_CONFIG.
  */
-export const adapter: Adapter<LaunchArgs> = {
+export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
-  translate: (description, out, args, report) =>
-    writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, args, report))),
+  translate: (description, out, inputs, report) =>
+    writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
   launch: ({ args, kept, replaced, plugins, rest, cache }) => {
+    if (!plugins.length) return rest[0];
     const config = JSON.parse(readFileSync(rest[0], 'utf8'));
     const { skills, servers } = sections(config, args.schema);
     const owners: Record<string, string> = {};
@@ -132,11 +137,11 @@ export const adapter: Adapter<LaunchArgs> = {
     }
     for (const plugin of plugins) {
       claim(owners, plugin.description);
-      const fragment: Fragment = JSON.parse(readFileSync(join(plugin.translation, 'fragment.json'), 'utf8'));
+      const fragment = readCached(join(plugin.translation, 'fragment.json'), isFragment);
       if (fragment.skills) skills.push(fragment.skills);
       Object.assign(servers, fragment.servers);
     }
-    return writeAddressed(join(cache, args.name, 'launch'), config);
+    return writeAddressed(join(cache!, args.name, 'launch'), config);
   },
 };
 

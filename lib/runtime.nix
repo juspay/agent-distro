@@ -32,10 +32,6 @@ in
   # The command a launcher runs, only when AGENT_DISTRO_PLUGINS is set, to
   # bring the plugins named there into this launch. `args` names the adapter
   # (`harness`) and the profile's plugins (`profile`, each with its
-  # `description`); see src/plugin/launch.ts. Node's compile cache keeps the
-  # type-stripped modules, so a launch whose plugins are all translated
-  # already costs little more than starting Node.
-  launchPlugins = args:
-    "NODE_COMPILE_CACHE=\"\${XDG_CACHE_HOME:-\${HOME:-}/.cache}/agent-distro/node-compile-cache\" "
-    + "${script "plugin/launch.ts"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON args)}";
+  # `description`); see src/plugin/launch.ts.
+  launchPlugins = args: "${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON args)}";
 }
