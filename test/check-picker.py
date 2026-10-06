@@ -34,7 +34,7 @@ def run(keys, expected, overrides=None, status=0, args=None):
         env.pop('AI_HARNESS', None)
         env.update(overrides or {})
         os.execvpe('agent-distro', ['agent-distro'] + (args if args is not None else ['--version']), env)
-    # Give curses a usable terminal before it starts.
+    # Give the picker a full-screen-sized terminal before it starts.
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 120, 0, 0))
     output = b''
     deadline = time.monotonic() + 60

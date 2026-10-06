@@ -301,9 +301,16 @@ just demo              # re-record doc/demo.gif
 python3 .github/scripts/test-update-flake.py
 ```
 
+The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
+root does not run them. Build them from the test flake:
+
+```sh
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule}
+```
+
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
 directories under `profiles/`, `harnesses/`, and `lib/`, re-pins `yaml` to
-npm's latest release, and runs each harness's `update.py`. CI then updates
+the newest npm release of its major version, and runs each harness's `update.py`. CI then updates
 the root and test locks. The update report reads
 resolved versions and each harness's release-note metadata.
 
