@@ -1,3 +1,5 @@
+<img src="doc/logo.svg" width="96" alt="agent-distro logo">
+
 # agent-distro
 
 **Your team's coding agents, in one command.** Package your skills, MCP servers,
@@ -458,6 +460,11 @@ harness's `tests/check-adapter.ts`), `update-schedule` (the updater's
 schedule and cache policy), `list-json` (`--list --json` against its
 type, the chooser's menu and `--list`), and `picker-layout` (the chooser's
 cell widths, truncation and box at common terminal sizes).
+
+### Logo
+
+`doc/logo.svg` is the source vector; downstream consumers (kolu) vendor a copy;
+keep it transparent, textless, readable at 16 px.
 
 ## Adding a harness
 
