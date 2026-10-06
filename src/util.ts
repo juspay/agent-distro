@@ -1,28 +1,44 @@
 /** Filesystem and quoting helpers every runtime module shares. */
-import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, lstatSync, openSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { basename, dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 
-/** Like Python's os.path.realpath: resolves what exists, keeps the rest. */
-export function realpath(path: string, depth = 0): string {
-  const absolute = resolve(path);
-  try {
-    return realpathSync(absolute);
-  } catch {
-    if (absolute === '/' || depth > 40) return absolute;
-    const parent = realpath(dirname(absolute), depth + 1);
-    const joined = resolve(parent, basename(absolute));
-    // A dangling link still names where it points.
-    const link = lstatSync(joined, { throwIfNoEntry: false });
-    if (link?.isSymbolicLink()) {
-      try {
-        return realpath(resolve(parent, readlinkSync(joined)), depth + 1);
-      } catch {
-        return joined;
-      }
+/**
+ * Resolve `path` one component at a time on disk, following each symlink
+ * before the components after it, so `link/..` is the parent of the link's
+ * target, not of the link. Components that do not exist are kept as written.
+ * Plugin-root containment depends on this: Node's path.resolve and
+ * fs.realpathSync collapse `..` textually first, which the shell running a
+ * launcher does not.
+ */
+export function realpath(path: string): string {
+  // A stack of components still to resolve, the next one last.
+  const pending = (path.startsWith('/') ? path : process.cwd() + '/' + path).split('/').reverse();
+  let resolved = '';
+  let links = 0;
+  while (pending.length) {
+    const part = pending.pop()!;
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      resolved = resolved.slice(0, resolved.lastIndexOf('/'));
+      continue;
     }
-    return joined;
+    const next = resolved + '/' + part;
+    let target: string | undefined;
+    try {
+      if (lstatSync(next).isSymbolicLink()) target = readlinkSync(next);
+    } catch {
+      target = undefined;
+    }
+    // A link loop resolves no further, like any path that does not exist.
+    if (target === undefined || ++links > 40) {
+      resolved = next;
+      continue;
+    }
+    if (target.startsWith('/')) resolved = '';
+    pending.push(...target.split('/').reverse());
   }
+  return resolved || '/';
 }
 
 export function lexists(path: string): boolean {
@@ -44,35 +60,41 @@ function stat(path: string) {
 export const isFile = (path: string) => stat(path)?.isFile() ?? false;
 export const isDirectory = (path: string) => stat(path)?.isDirectory() ?? false;
 
-/** An operating-system error (Python's OSError), as opposed to a bad value. */
+/** An operating-system error, as opposed to a bad value. */
 export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && typeof (error as NodeJS.ErrnoException).syscall === 'string';
 }
 
-/** JSON as Python's json.dumps writes it in messages: ASCII-only. */
-export function pyJson(value: unknown): string {
-  return JSON.stringify(value).replace(/[\u0080-￿]/g,
-    (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+/** UTF-8 text, refusing bytes that are not UTF-8 rather than replacing them. */
+export function decodeUtf8(bytes: Uint8Array): string {
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
 }
 
-/** A string as Python's repr() writes it. */
-export function pyRepr(value: string): string {
-  const quote = value.includes("'") && !value.includes('"') ? '"' : "'";
-  const escaped = value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
-    .replace(/[\x00-\x1f\x7f]/g, (c) => '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0'));
-  return quote + (quote === "'" ? escaped.replace(/'/g, "\\'") : escaped) + quote;
-}
-
-/** A list of strings as Python's repr() writes it. */
-export const pyList = (values: string[]) => '[' + values.map(pyRepr).join(', ') + ']';
-
-/** One shell word, as Python's shlex.quote writes it. */
+/**
+ * One POSIX shell word, quoted only when it needs to be. Generated launchers
+ * are byte-identical to the ones earlier releases wrote with Python's
+ * shlex.quote, whose rules these are.
+ */
 export function shellQuote(value: string): string {
   if (!value) return "''";
   if (!/[^\w@%+=:,./-]/.test(value)) return value;
   return "'" + value.replace(/'/g, `'"'"'`) + "'";
 }
 
-/** A fresh name in `directory` for a file that is renamed into place. */
-export const temporaryPath = (directory: string, prefix: string) =>
-  join(directory, prefix + randomBytes(6).toString('hex'));
+/**
+ * Write `data` to a new file in `directory`, for a rename into place. The file
+ * is removed if writing it fails, so a full disk leaves nothing behind.
+ */
+export function writeTemporary(directory: string, prefix: string, data: string): string {
+  const path = join(directory, prefix + randomBytes(6).toString('hex'));
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    writeFileSync(fd, data);
+  } catch (error) {
+    rmSync(path, { force: true });
+    throw error;
+  } finally {
+    closeSync(fd);
+  }
+  return path;
+}

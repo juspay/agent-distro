@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -41,10 +41,49 @@ function fatal(root: string, field: string) {
   assert.ok(stderr.includes('invalid Agent Plugin') && stderr.includes(field), `${field}: ${stderr}`);
 }
 
+type Schema = Record<string, any>;
+const schema: Schema = JSON.parse(readFileSync(join(dirname(reader), 'description.schema.json'), 'utf8'));
+
+/** The JSON Schema keywords description.schema.json uses, and no more. */
+function validate(value: any, rule: Schema, at = '$'): void {
+  const fail = (message: string) => assert.fail(`${at}: ${message}: ${JSON.stringify(value)}`);
+  const kind = Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
+  if (rule.type && rule.type !== kind) fail(`not ${rule.type}`);
+  if ('const' in rule && value !== rule.const) fail(`not ${rule.const}`);
+  if (rule.enum && !rule.enum.includes(value)) fail(`not one of ${rule.enum}`);
+  if (rule.pattern && !new RegExp(rule.pattern).test(value)) fail(`does not match ${rule.pattern}`);
+  if (rule.minLength !== undefined && value.length < rule.minLength) fail('too short');
+  if (rule.maxLength !== undefined && value.length > rule.maxLength) fail('too long');
+  if (rule.items) value.forEach((item: any, i: number) => validate(item, rule.items, `${at}[${i}]`));
+  if (rule.oneOf) {
+    const passing = rule.oneOf.filter((option: Schema) => {
+      try {
+        validate(value, option, at);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (passing.length !== 1) fail(`matches ${passing.length} of oneOf`);
+  }
+  if (kind !== 'object') return;
+  for (const key of rule.required ?? []) if (!(key in value)) fail(`lacks ${key}`);
+  for (const [key, needs] of Object.entries(rule.dependentRequired ?? {})) {
+    if (key in value) for (const need of needs as string[]) if (!(need in value)) fail(`${key} without ${need}`);
+  }
+  for (const [key, item] of Object.entries(value)) {
+    const property = rule.properties?.[key] ?? rule.additionalProperties;
+    if (property === false) fail(`unexpected ${key}`);
+    if (property && property !== true) validate(item, property, `${at}.${key}`);
+  }
+}
+
 function ok(root: string) {
   const { code, stdout, stderr } = read(root);
   assert.equal(code, 0, `${root}: ${stderr}`);
   const description = JSON.parse(stdout);
+  // Every description the reader writes is one description.schema.json allows.
+  validate(description, schema);
   // Every report is in both the description and the build log.
   for (const r of description.reports) assert.ok(stderr.includes(r), stderr);
   return description;
@@ -114,13 +153,15 @@ mkdirSync(join(skills, 'skills/b'));
 symlinkSync(join(elsewhere, 'SKILL.md'), join(skills, 'skills/b/SKILL.md'));
 symlinkSync('../shared', join(skills, 'skills/linked'));
 symlinkSync('c', join(skills, 'skills/linked-skill'));
+mkdirSync(join(skills, 'skills/__proto__'));
+writeFileSync(join(skills, 'skills/__proto__/SKILL.md'), 'x');
 const found = ok(skills);
 assert.deepEqual(found.skills, {
   a: ['SKILL.md', 'notes.md', 'scripts/run.sh'],
   c: ['SKILL.md'],
   'linked-skill': ['SKILL.md'],
 });
-for (const label of ['skills/a/secret', 'skills/a/loop', 'skills/a/dangling', 'skills/b']) {
+for (const label of ['skills/a/secret', 'skills/a/loop', 'skills/a/dangling', 'skills/b', 'skills/__proto__']) {
   assert.ok(found.reports.some((r: string) => r.startsWith(label + ':')), label);
 }
 
@@ -183,6 +224,10 @@ const invalid: Record<string, unknown> = {
   'cwd-prefix': { type: 'stdio', command: 'x', cwd: '${PLUGIN_ROOT}x' },
   'cwd-link': { type: 'stdio', command: 'x', cwd: './out' },
   'command-link': { type: 'stdio', command: './out/x' },
+  // `out/..` is the parent of out's target, outside the root, not the root.
+  'command-link-parent': { type: 'stdio', command: './out/../x' },
+  'cwd-link-parent': { type: 'stdio', command: 'x', cwd: './out/..' },
+  'cwd-root-link-parent': { type: 'stdio', command: 'x', cwd: '${PLUGIN_ROOT}/out/..' },
   'no-url': { type: 'streamable-http' },
   'stdio-field': { type: 'sse', url: 'https://example.com', command: 'x' },
   'plain-http': { type: 'streamable-http', url: 'http://example.com/mcp' },
@@ -210,11 +255,14 @@ const validServers: Record<string, Record<string, unknown>> = {
   loopback6: { type: 'streamable-http', url: 'http://[::1]:1/mcp' },
   remote: { type: 'streamable-http', url: 'https://example.com/mcp', headers: { 'X-Tenant': 'a b' } },
 };
-const root = plugin(minimal(), { 'bin/server': '', 'mcp.json': { $schema: MCP, mcpServers: { ...invalid, ...validServers } } });
+// JSON.parse keeps `__proto__` as a key, as an mcp.json would.
+const mcpJson = JSON.stringify({ $schema: MCP, mcpServers: { ...invalid, ...validServers } })
+  .replace('"mcpServers":{', '"mcpServers":{"__proto__":{"type":"stdio","command":"x"},');
+const root = plugin(minimal(), { 'bin/server': '', 'mcp.json': mcpJson });
 symlinkSync(work, join(root, 'out'));
 const loaded = ok(root);
 assert.deepEqual(new Set(Object.keys(loaded.mcpServers)), new Set(Object.keys(validServers)));
-for (const name of Object.keys(invalid)) {
+for (const name of [...Object.keys(invalid), '__proto__']) {
   assert.ok(loaded.reports.some((r: string) => r.startsWith(`mcp.json: server "${name}" skipped`)), name);
 }
 assert.deepEqual(loaded.mcpServers.bare, validServers.bare);

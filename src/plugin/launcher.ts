@@ -1,6 +1,6 @@
 /** Agent Plugins stdio environment and placeholder contract. */
 import type { Description, StdioServer } from './read.ts';
-import { pyJson, shellQuote } from '../util.ts';
+import { shellQuote } from '../util.ts';
 
 /** One bash word: the two placeholders expand once, all else is literal. */
 export function word(value: string): string {
@@ -20,7 +20,7 @@ export function launcher(
   const data = '${XDG_DATA_HOME:-$HOME/.local/share}/agent-distro/plugins/' + plugin;
   const lines = [
     `#!${bash}`,
-    `# ${plugin}: MCP server ${pyJson(name)}, launched per Agent Plugins ${description.version}.`,
+    `# ${plugin}: MCP server ${JSON.stringify(name)}, launched per Agent Plugins ${description.version}.`,
     'set -euo pipefail',
     `root=$(cd -- ${shellQuote(description.root)} && pwd -P)`,
     'data=' + (dataEnv ? '${' + dataEnv + ':-' + data + '}' : data),

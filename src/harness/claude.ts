@@ -19,7 +19,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launcher } from '../plugin/launcher.ts';
 import { copySkills, fileName, launchable, readDescription } from '../plugin/resources.ts';
-import { pyJson } from '../util.ts';
 
 const MANIFEST_FIELDS = ['name', 'version', 'description', 'author', 'homepage', 'repository', 'license', 'keywords'] as const;
 const TRANSPORTS = { 'streamable-http': 'http', sse: 'sse' } as const;
@@ -47,7 +46,7 @@ function main(out: string, argsPath: string) {
       return;
     }
     if (!launchable(description, server)) {
-      process.stderr.write(`${description.root}: mcp.json: server ${pyJson(name)} skipped, `
+      process.stderr.write(`${description.root}: mcp.json: server ${JSON.stringify(name)} skipped, `
         + 'Claude Code adapter cannot launch a command containing "="\n');
       return;
     }

@@ -9,7 +9,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
-import { pyJson } from '../util.ts';
 import type { Gateway } from '../gateway/models.ts';
 
 type Args = { schema: string; bash: string; env: string; gateway: Gateway | null; descriptions: string[] };
@@ -35,8 +34,8 @@ function main(out: string, argsPath: string) {
     if (skills) skillsPaths.push(skills);
     Object.entries(description.mcpServers).forEach(([name, server], index) => {
       if (Object.hasOwn(owners, name)) {
-        process.stderr.write(`OpenCode: MCP server ${pyJson(name)} is declared by both `
-          + `plugins ${pyJson(owners[name])} and ${pyJson(plugin)}\n`);
+        process.stderr.write(`OpenCode: MCP server ${JSON.stringify(name)} is declared by both `
+          + `plugins ${JSON.stringify(owners[name])} and ${JSON.stringify(plugin)}\n`);
         process.exit(1);
       }
       owners[name] = plugin;
@@ -45,7 +44,7 @@ function main(out: string, argsPath: string) {
         return;
       }
       if (!launchable(description, server)) {
-        process.stderr.write(`${description.root}: mcp.json: server ${pyJson(name)} skipped, `
+        process.stderr.write(`${description.root}: mcp.json: server ${JSON.stringify(name)} skipped, `
           + 'OpenCode adapter cannot launch a command containing "="\n');
         return;
       }

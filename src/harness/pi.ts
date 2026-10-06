@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { Gateway } from '../gateway/models.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
-import { isSystemError, pyJson, pyRepr, realpath, temporaryPath } from '../util.ts';
+import { isSystemError, realpath, temporaryPath } from '../util.ts';
 
 type Fragment = { skills: string[]; mcpServers: Record<string, Record<string, unknown>> };
 type GatewayConfig = { providers: { litellm: unknown }; defaultProvider: string; defaultModel: string };
@@ -41,8 +41,8 @@ export function writeConfig(out: string, argsPath: string) {
     if (skillPath) skills.push(skillPath);
     Object.entries(description.mcpServers).forEach(([name, server], index) => {
       if (Object.hasOwn(owners, name)) {
-        throw new Invalid(`Pi: MCP server ${pyRepr(name)} is declared by both `
-          + `plugins ${pyRepr(owners[name])} and ${pyRepr(plugin)}`);
+        throw new Invalid(`Pi: MCP server ${JSON.stringify(name)} is declared by both `
+          + `plugins ${JSON.stringify(owners[name])} and ${JSON.stringify(plugin)}`);
       }
       owners[name] = plugin;
       let reason: string | null = null;
@@ -57,7 +57,7 @@ export function writeConfig(out: string, argsPath: string) {
       } else {
         servers[name] = { url: server.url, headers: server.headers };
       }
-      if (reason) process.stderr.write(`${description.root}: mcp.json: server ${pyJson(name)} skipped, ${reason}\n`);
+      if (reason) process.stderr.write(`${description.root}: mcp.json: server ${JSON.stringify(name)} skipped, ${reason}\n`);
     });
   }
   writeFileSync(join(out, 'config.json'), JSON.stringify({ skills, mcpServers: servers }, null, 2));

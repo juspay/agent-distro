@@ -21,7 +21,7 @@ export function copySkills(description: Description, skills: string): string | n
 }
 
 /** A server name as a file name. */
-export const fileName = (name: string) => name.replace(/[^A-Za-z0-9._-]/g, '_');
+export const fileName = (name: string) => name.replace(/[^A-Za-z0-9._-]/gu, '_');
 
 /** `env` reads its first argument without "=" as the command. */
 export const launchable = (description: Description, server: StdioServer) =>
