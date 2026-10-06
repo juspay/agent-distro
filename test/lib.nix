@@ -1,5 +1,7 @@
 # Metadata selects the checks; shared code supplies only VM and fixture plumbing.
-{ pkgs, launchers, profile, mkLaunchers ? import ../lib/mk-launchers.nix, features ? [ ] }:
+# `koluPlugin` is kolu's Agent Plugin directory, for the `koluLaunch` checks:
+# they load it through AGENT_DISTRO_PLUGINS rather than from the profile.
+{ pkgs, launchers, profile, mkLaunchers ? import ../lib/mk-launchers.nix, features ? [ ], koluPlugin ? null }:
 let
   inherit (pkgs) lib;
   common = import ./common.nix;
@@ -45,7 +47,11 @@ let
         imports = [ common.baseNode ] ++ lib.optional gateway common.gatewayNode;
         virtualisation.diskSize = if diskSize == null then 1024 else diskSize;
         environment.systemPackages = [ selected.${harness} pkgs.python3 ] ++ map (key: (fixtures harness).${key}) packages;
-        environment.variables = lib.optionalAttrs gateway { ${profile.gateway.keyEnv} = "test-api-key"; } // env;
+        # Plugins a check may put on AGENT_DISTRO_PLUGINS; it is never set globally.
+        environment.variables = lib.optionalAttrs gateway { ${profile.gateway.keyEnv} = "test-api-key"; }
+          // { AGENT_DISTRO_TEST_PLUGIN = "${./fixtures/launch-plugin}"; }
+          // lib.optionalAttrs (koluPlugin != null) { AGENT_DISTRO_TEST_KOLU = "${koluPlugin}"; }
+          // env;
       };
       testScript = ''
         import json
@@ -64,7 +70,8 @@ let
     (harness: map (check: { name = check.name; value = mkCheck harness check; })
       (builtins.filter
         (check:
-          assert builtins.all (feature: builtins.elem feature [ "plugins" "gateway" "kolu" "spec" ]) (check.requires or [ ]);
+          assert builtins.all (feature: builtins.elem feature [ "plugins" "gateway" "kolu" "spec" "koluLaunch" ]) (check.requires or [ ]);
+          assert builtins.elem "koluLaunch" features -> koluPlugin != null;
           builtins.all (feature: builtins.elem feature features) (check.requires or [ ]))
         discovered.metadata.${harness}.checks))
     discovered.ordered;

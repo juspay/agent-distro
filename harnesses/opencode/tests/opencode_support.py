@@ -20,10 +20,12 @@ env = dict(os.environ, AI_GATEWAY='0', OPENCODE_DISABLE_MODELS_FETCH='true',
            OPENCODE_DISABLE_AUTOUPDATE='true', OPENCODE_PASSWORD='fixture')
 
 
-def run(*args, launcher=binary):
+def run(*args, launcher=binary, plugins=None):
+    # `plugins` is AGENT_DISTRO_PLUGINS for this launch only.
+    extra = {} if plugins is None else {'AGENT_DISTRO_PLUGINS': plugins}
     # Upstream exits before large pipe writes drain; a file keeps the full JSON.
     with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as output:
-        result = subprocess.run([launcher, '--pure', *args], env=env, text=True,
+        result = subprocess.run([launcher, '--pure', *args], env=env | extra, text=True,
                                 stdout=output, stderr=subprocess.PIPE, timeout=90)
         output.seek(0)
         stdout = output.read()
@@ -31,8 +33,12 @@ def run(*args, launcher=binary):
     return stdout
 
 
-def config(launcher=binary):
-    return json.loads(run('debug', 'config', launcher=launcher))
+def config(launcher=binary, plugins=None):
+    return json.loads(run('debug', 'config', launcher=launcher, plugins=plugins))
+
+
+def skill_locations(launcher=binary, plugins=None):
+    return [skill['location'] for skill in json.loads(run('debug', 'skill', launcher=launcher, plugins=plugins))]
 
 
 def servers(resolved):
@@ -57,3 +63,13 @@ def check_inventory(launcher=binary):
         assert server['type'] in ['local', 'remote'], (name, server)
     assert settings.read_bytes() == preserved
     return resolved
+
+
+def checkout(name, skill):
+    """A plugin working copy outside the store, as a user edits one."""
+    root = home / 'checkouts' / name
+    (root / 'skills' / skill).mkdir(parents=True)
+    (root / 'plugin.json').write_text(json.dumps({
+        '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', 'name': name}))
+    (root / 'skills' / skill / 'SKILL.md').write_text(f'---\nname: {skill}\ndescription: {skill}\n---\n')
+    return str(root)

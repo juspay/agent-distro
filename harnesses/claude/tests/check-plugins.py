@@ -28,6 +28,28 @@ assert all(p['installPath'].startswith('/nix/store/') and
 for plugin, names in expected.items():
     assert inventory(plugin, launcher='claude-updated')[0] == set(names)
 
+# AGENT_DISTRO_PLUGINS: a store plugin the profile lacks joins for that launch.
+fixture = os.environ['AGENT_DISTRO_TEST_PLUGIN']
+launched = json.loads(run('plugin', 'list', '--json', plugins=fixture))
+assert {p['id'] for p in launched} == {p + '@inline' for p in expected} | {'launch-fixture@inline'}, launched
+added = next(p for p in launched if p['id'] == 'launch-fixture@inline')
+assert added['scope'] == 'session' and '/agent-distro/plugins/store-' in added['installPath'], added
+assert inventory('launch-fixture', plugins=fixture)[0] == {'launched'}
+
+# A checkout named like a profile plugin replaces it, whatever its version.
+name = next(iter(expected))
+shadow = checkout(name, 'shadowed')
+shadowed = json.loads(run('plugin', 'list', '--json', plugins=shadow))
+assert {p['id'] for p in shadowed} == {p + '@inline' for p in expected}, shadowed
+replaced = next(p for p in shadowed if p['id'] == name + '@inline')
+assert '/agent-distro/plugins/sha256-' in replaced['installPath'], replaced
+assert inventory(name, plugins=shadow)[0] == {'shadowed'}
+
+# Unset, the launch is the profile's again.
+identify = lambda listing: {(p['id'], p['installPath']) for p in listing}
+assert identify(json.loads(run('plugin', 'list', '--json'))) == identify(plugins)
+assert inventory(name)[0] == set(expected[name])
+
 for path, contents in preserved.items():
     assert path.read_bytes() == contents, path
 assert not (config_dir / 'plugins/installed_plugins.json').exists()

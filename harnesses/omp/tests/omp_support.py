@@ -12,7 +12,8 @@ expected = json.loads(sys.argv[1])
 expected_skills = {skill for skills in expected.values() for skill in skills}
 
 
-def discover(launcher='omp', env=None):
+def discover(launcher='omp', env=None, skills=None):
+    want = expected_skills if skills is None else skills
     with tempfile.TemporaryDirectory() as cwd, tempfile.TemporaryFile(mode='w+') as output:
         process = subprocess.Popen([launcher, 'acp'], cwd=cwd, env=env,
                                    stdin=subprocess.PIPE, stdout=output,
@@ -51,9 +52,19 @@ def discover(launcher='omp', env=None):
             process.stdin.flush()
             messages = wait_for_response(2)
             assert any(m.get('id') == 2 and 'result' in m for m in messages), messages
-            skills = set(re.findall(r'"name":\s*"skill:([^"]+)"', json.dumps(messages)))
-            assert skills == expected_skills, (skills, expected_skills, messages)
+            found = set(re.findall(r'"name":\s*"skill:([^"]+)"', json.dumps(messages)))
+            assert found == want, (found, want, messages)
             return environ
         finally:
             process.terminate()
             process.communicate(timeout=10)
+
+
+def checkout(name, skill):
+    """A plugin working copy outside the store, as a user edits one."""
+    root = Path.home() / 'checkouts' / name
+    (root / 'skills' / skill).mkdir(parents=True)
+    (root / 'plugin.json').write_text(json.dumps({
+        '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', 'name': name}))
+    (root / 'skills' / skill / 'SKILL.md').write_text(f'---\nname: {skill}\ndescription: {skill}\n---\n')
+    return str(root)

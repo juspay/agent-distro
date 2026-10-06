@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "launch-fixture",
+  "version": "1.0.0",
+  "description": "A plugin no profile ships, loaded through AGENT_DISTRO_PLUGINS"
+}

@@ -12,13 +12,17 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       inherit (agent-distro.lib) mkLaunchers;
+      # Kolu's plugin as kolu ships it: a directory inside a store path.
+      koluPlugin = lib.findFirst (plugin: lib.hasSuffix "/agent-plugin" (toString plugin))
+        (throw "the juspay profile no longer pins kolu's agent-plugin") agent-distro.profiles.juspay.plugins;
       # Profiles are tested through the public builder, the same way a
       # third-party distribution reaches them.
       suite = features: profile: import ./lib.nix {
-        inherit pkgs profile mkLaunchers features;
+        inherit pkgs profile mkLaunchers features koluPlugin;
         launchers = mkLaunchers { inherit pkgs profile; };
       };
-      vanilla = suite [ ] agent-distro.profiles.vanilla;
+      # No plugins of its own, so kolu arrives only through AGENT_DISTRO_PLUGINS.
+      vanilla = suite [ "koluLaunch" ] agent-distro.profiles.vanilla;
       juspay = suite [ "plugins" "gateway" "kolu" ] agent-distro.profiles.juspay;
       # Test-only: the plugin shapes the Agent Plugins spec allows beyond what
       # the real profiles happen to use.
@@ -58,6 +62,14 @@
             } ''
             ${runtime.node} ${./check-read-plugin.ts} ${runtime.tree}/src/plugin/read.ts
             grep -F '`$schema` is missing' "$failed/testBuildFailure.log"
+            touch "$out"
+          '';
+          # AGENT_DISTRO_PLUGINS alone, without a VM: cache keys (a store
+          # path as is, a checkout by content), re-translation after an edit,
+          # name-based precedence, and the launches that must fail.
+          launch-plugins = pkgs.runCommand "launch-plugins-check" { } ''
+            ${runtime.node} ${./check-launch-plugins.ts} ${runtime.tree}/src \
+              ${./fixtures/my-skills} ${./fixtures}/my-skills ${pkgs.nix}/bin/nix-hash
             touch "$out"
           '';
           # `--list --json` alone, without a VM: its type, the picker's menu,

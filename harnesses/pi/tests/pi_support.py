@@ -28,9 +28,15 @@ def run(*args, launcher='pi', overrides=None, success=True):
     return result.stdout
 
 
-def discover(launcher='pi'):
+def with_plugins(plugins):
+    # AGENT_DISTRO_PLUGINS for one launch only.
+    return {} if plugins is None else {'AGENT_DISTRO_PLUGINS': plugins}
+
+
+def discover(launcher='pi', plugins=None, skills=None):
+    want = expected_skills if skills is None else skills
     with tempfile.TemporaryDirectory() as cwd, tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen([launcher, '--no-session', '--mode', 'rpc'], cwd=cwd, env=env,
+        process = subprocess.Popen([launcher, '--no-session', '--mode', 'rpc'], cwd=cwd, env=env | with_plugins(plugins),
                                    stdin=subprocess.PIPE, stdout=output, stderr=errors, text=True)
         try:
             process.stdin.write('{"type":"get_commands","id":"skills"}\n')
@@ -45,9 +51,9 @@ def discover(launcher='pi'):
                     response = responses[0]
                     assert response['success'], response
                     commands = [c for c in response['data']['commands'] if c['source'] == 'skill']
-                    assert {c['name'] for c in commands} == {'skill:' + s for s in expected_skills}, commands
+                    assert {c['name'] for c in commands} == {'skill:' + s for s in want}, commands
                     for plugin, names in expected.items():
-                        for name in names:
+                        for name in names if skills is None else []:
                             assert any(c['sourceInfo']['path'].endswith(f'/{plugin}/{name}/SKILL.md')
                                        for c in commands), (plugin, name, commands)
                     return commands
@@ -60,8 +66,8 @@ def discover(launcher='pi'):
             process.communicate(timeout=10)
 
 
-def inventory(launcher='pi'):
-    run('--version', launcher=launcher)
+def inventory(launcher='pi', plugins=None):
+    run('--version', launcher=launcher, overrides=with_plugins(plugins))
     resolved = json.loads(settings.read_text())
     for key, value in user_settings.items():
         if key != 'skills':
@@ -77,3 +83,13 @@ def inventory(launcher='pi'):
         assert servers['mcpServers']['remote'] == {
             'url': 'http://127.0.0.1:9/mcp', 'headers': {'X-Tenant': 'fixture'}}
     return resolved, servers
+
+
+def checkout(name, skill):
+    """A plugin working copy outside the store, as a user edits one."""
+    root = Path.home() / 'checkouts' / name
+    (root / 'skills' / skill).mkdir(parents=True)
+    (root / 'plugin.json').write_text(json.dumps({
+        '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', 'name': name}))
+    (root / 'skills' / skill / 'SKILL.md').write_text(f'---\nname: {skill}\ndescription: {skill}\n---\n')
+    return str(root)

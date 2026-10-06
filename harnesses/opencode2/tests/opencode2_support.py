@@ -21,10 +21,15 @@ env = dict(os.environ, AI_GATEWAY='0', OPENCODE_DISABLE_MODELS_FETCH='true',
            OPENCODE_DISABLE_AUTOUPDATE='true', OPENCODE_PASSWORD='fixture')
 
 
-def run(*args, launcher=binary):
+def with_plugins(plugins):
+    # AGENT_DISTRO_PLUGINS for one launch only.
+    return env if plugins is None else env | {'AGENT_DISTRO_PLUGINS': plugins}
+
+
+def run(*args, launcher=binary, plugins=None):
     # Upstream exits before large pipe writes drain; a file keeps the full JSON.
     with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as output:
-        result = subprocess.run([launcher, *args], env=env, text=True,
+        result = subprocess.run([launcher, *args], env=with_plugins(plugins), text=True,
                                 stdout=output, stderr=subprocess.PIPE, timeout=90)
         output.seek(0)
         stdout = output.read()
@@ -32,14 +37,15 @@ def run(*args, launcher=binary):
     return stdout
 
 
-def config(launcher=binary):
+def config(launcher=binary, plugins=None):
     # The personal fixture and generated document have disjoint settings.
-    return {key: value for entry in api('config', launcher) if entry['type'] == 'document'
+    return {key: value for entry in api('config', launcher, plugins) if entry['type'] == 'document'
             for key, value in entry['info'].items()}
 
 
-def api(resource, launcher=binary):
-    with subprocess.Popen([launcher, 'serve', '--stdio', '--port', '0'], env=env,
+def api(resource, launcher=binary, plugins=None):
+    # The server reads the config; `api` only talks to it.
+    with subprocess.Popen([launcher, 'serve', '--stdio', '--port', '0'], env=with_plugins(plugins),
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as server:
         try:
             url = json.loads(server.stdout.readline())['url']
@@ -81,3 +87,17 @@ def check_inventory(launcher=binary):
         assert server['type'] in ['local', 'remote'], (name, server)
     assert settings.read_bytes() == preserved
     return resolved
+
+
+def checkout(name, skill):
+    """A plugin working copy outside the store, as a user edits one."""
+    root = home / 'checkouts' / name
+    (root / 'skills' / skill).mkdir(parents=True)
+    (root / 'plugin.json').write_text(json.dumps({
+        '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', 'name': name}))
+    (root / 'skills' / skill / 'SKILL.md').write_text(f'---\nname: {skill}\ndescription: {skill}\n---\n')
+    return str(root)
+
+
+def skill_locations(plugins=None):
+    return [skill['path'] for skill in api('skill', plugins=plugins)['data']]
