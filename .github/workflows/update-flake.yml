@@ -2,9 +2,10 @@ name: Update Flake
 
 on:
   schedule:
-    # modules/home-manager.nix defaults to 12:00 UTC, one hour after this job.
+    # modules/home-manager.nix defaults to 02:00, 08:00, 14:00, 20:00 UTC, two
+    # hours after each run of this job.
     # Keep that default aligned when changing this upstream schedule.
-    - cron: '0 11 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 # Runs share the update branch and pull request, so they must not overlap.

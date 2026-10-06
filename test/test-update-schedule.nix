@@ -15,10 +15,13 @@ let
   darwin = configuration "aarch64-darwin" { };
   calendar = darwin.launchd.agents.agent-distro-update.config.StartCalendarInterval;
 in
-assert linux.systemd.user.timers.agent-distro-update.Timer.OnCalendar == "*-*-* 12:00:00 UTC";
+assert linux.systemd.user.timers.agent-distro-update.Timer.OnCalendar == "*-*-* 02,08,14,20:00:00 UTC";
 assert darwin.services.agent-distro.frequency == linux.services.agent-distro.frequency;
 assert map (interval: interval.Minute) calendar == [ 0 ];
 assert builtins.all (interval: interval.Hour == null) calendar;
+# The Darwin gate derives its period/phase from the same hours list; forcing
+# the launchd program evaluates that derivation on any platform (no build).
+assert builtins.head darwin.launchd.agents.agent-distro-update.config.ProgramArguments != "";
 assert !(builtins.tryEval (configuration "aarch64-darwin" { frequency = "daily"; }).home.activationPackage.drvPath).success;
 pkgs.runCommand "update-schedule" { } ''
   ${pkgs.bash}/bin/bash -eu ${./check-update-due.sh} ${agent-distro}/lib/update-due.sh

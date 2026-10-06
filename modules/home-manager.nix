@@ -3,9 +3,14 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.agent-distro;
-  # One hour after the 11:00 UTC cron in .github/workflows/update-flake.yml.
-  updateHourUTC = 12;
-  defaultFrequency = "*-*-* ${toString updateHourUTC}:00:00 UTC";
+  # Two hours after the 00:00/06:00/12:00/18:00 UTC crons in
+  # .github/workflows/update-flake.yml.
+  updateHoursUTC = [ "02" "08" "14" "20" ];
+  defaultFrequency = "*-*-* ${lib.concatStringsSep "," updateHoursUTC}:00:00 UTC";
+  # launchd gates the same schedule as a period/phase pair: one period per
+  # daily run, phased onto the first hour.
+  updatePeriodSeconds = 86400 / builtins.length updateHoursUTC;
+  updateOffsetSeconds = lib.toIntBase10 (builtins.head updateHoursUTC) * 3600;
   available = bundles.${pkgs.stdenv.hostPlatform.system};
   bundle = available.${cfg.profile} or (throw
     "Unknown agent-distro profile \"${cfg.profile}\"; valid names: ${lib.concatStringsSep ", " (builtins.attrNames available)}.");
@@ -174,7 +179,7 @@ let
     ${state}
     source ${../lib/update-due.sh}
     stamp=$(${pkgs.coreutils}/bin/cat "$state/last-success" 2>/dev/null) || stamp=""
-    update_due "$(${pkgs.coreutils}/bin/date -u +%s)" "$stamp" ${toString updateHourUTC} || exit 0
+    update_due "$(${pkgs.coreutils}/bin/date -u +%s)" "$stamp" ${toString updatePeriodSeconds} ${toString updateOffsetSeconds} || exit 0
     for attempt in 1 2 3; do
       ${updater} && exit 0
       [ "$attempt" -lt 3 ] || exit 1
@@ -185,7 +190,7 @@ let
 in
 {
   options.services.agent-distro = {
-    enable = lib.mkEnableOption "daily updates of every harness";
+    enable = lib.mkEnableOption "scheduled updates of every harness";
     profile = lib.mkOption {
       type = lib.types.str;
       default = defaultProfile;

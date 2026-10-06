@@ -105,8 +105,8 @@ updater below handles the cache itself.
 
 ## Install
 
-Puts every harness on your `PATH` and updates them daily at
-12:00 UTC, an hour after upstream's update. With Home Manager:
+Puts every harness on your `PATH` and updates them four times a day, at
+02:00, 08:00, 14:00 and 20:00 UTC, two hours after upstream's update. With Home Manager:
 
 ```nix
 {
