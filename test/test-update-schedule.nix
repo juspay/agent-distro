@@ -27,5 +27,6 @@ let runtime = import "${agent-distro}/lib/runtime.nix" pkgs; in
 pkgs.runCommand "update-schedule" { } ''
   ${runtime.node} ${./check-update-due.ts} ${runtime.tree}/src
   ${runtime.node} ${./check-cache-usable.ts} ${runtime.tree}/src
+  ${runtime.node} ${./check-would-compile.ts} ${runtime.tree}/src
   touch "$out"
 ''

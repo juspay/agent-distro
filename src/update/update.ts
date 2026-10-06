@@ -68,27 +68,40 @@ function changes(previous: Map<string, [string, string]> | null, next: Map<strin
   return result.join(', ') || 'no harness version changed';
 }
 
+/** What a build would do: compile `names` (empty: nothing), or `unknown` and why. */
+export type Plan = { names: string } | { unknown: string };
+
+// `nix derivation show` for a revision the cache does not hold yet runs to
+// megabytes; Node's default 1 MiB cap would kill nix and truncate it.
+const UNBOUNDED = { encoding: 'utf8', maxBuffer: Infinity } as const;
+
 /**
  * Names of the derivations a build of `target` would compile rather than
  * fetch, at most three. Derivations with allowSubstitutes = false (trivial
  * builders such as symlinkJoin and shell wrappers) are always built locally,
- * so only the substitutable ones count as misses.
+ * so only the substitutable ones count as misses. Anything that stops us
+ * reading the answer is `unknown`, never "nothing to compile".
  */
-function wouldCompile(nix: string, target: string, options: string[]): string {
-  // A failing dry run is deliberately ignored: the real build then reports
-  // the actual eval or network error.
-  const dryRun = spawnSync(nix, ['build', target, ...options, '--dry-run'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  const drvs = `${dryRun.stdout ?? ''}\n${dryRun.stderr ?? ''}`.split('\n')
+export function wouldCompile(nix: string, target: string, options: string[]): Plan {
+  const dryRun = spawnSync(nix, ['build', target, ...options, '--dry-run'], { ...UNBOUNDED, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (dryRun.error) return { unknown: `nix build --dry-run: ${dryRun.error.message}` };
+  // A dry run that nix itself fails is deliberately not a skip: the real
+  // build then reports the actual eval or network error.
+  const drvs = `${dryRun.stdout}\n${dryRun.stderr}`.split('\n')
     .filter((line) => /^ +\/nix\/store\/.*\.drv$/.test(line)).map((line) => line.trim());
-  if (!drvs.length) return '';
-  const shown = spawnSync(nix, ['derivation', 'show', ...drvs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  if (!drvs.length) return { names: '' };
+  const shown = spawnSync(nix, ['derivation', 'show', ...drvs], { ...UNBOUNDED, stdio: ['ignore', 'pipe', 'inherit'] });
+  if (shown.error) return { unknown: `nix derivation show: ${shown.error.message}` };
+  if (shown.status !== 0) return { unknown: `nix derivation show exited ${shown.status ?? shown.signal}` };
   try {
     const parsed = JSON.parse(shown.stdout);
     const derivations: Record<string, { name: string; env?: Record<string, string> }> = parsed.derivations ?? parsed;
-    return Object.values(derivations).filter((drv) => drv.env?.allowSubstitutes !== '')
-      .slice(0, 3).map((drv) => drv.name).join(',');
-  } catch {
-    return '';
+    const names = Object.values(derivations).filter((drv) => drv.env?.allowSubstitutes !== '')
+      .slice(0, 3).map((drv) => drv.name);
+    if (!names.every((name) => typeof name === 'string')) throw new Error('a derivation has no name');
+    return { names: names.join(',') };
+  } catch (error) {
+    return { unknown: `nix derivation show: ${(error as Error).message}` };
   }
 }
 
@@ -125,7 +138,7 @@ export function update(config: Config): number {
 
   // Lock once so the dry run and the build see the same revision.
   const metadata = spawnSync(nix, ['flake', 'metadata', '--refresh', '--json', config.flake],
-    { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] });
+    { ...UNBOUNDED, stdio: ['inherit', 'pipe', 'inherit'] });
   let ref = '';
   try {
     if (metadata.status === 0) ref = JSON.parse(metadata.stdout).url ?? '';
@@ -138,17 +151,21 @@ export function update(config: Config): number {
     return 1;
   }
   const target = `${ref}#${profile}`;
-  // Never compile on a cache miss.
-  const missing = wouldCompile(nix, target, options);
-  if (missing) return skip(`bundle not fully cached yet (would build ${missing})`);
+  // Never compile on a cache miss, nor when what would be built is unknown.
+  const plan = wouldCompile(nix, target, options);
+  if ('unknown' in plan) return skip(`cannot tell what the bundle would build (${plan.unknown})`);
+  if (plan.names) return skip(`bundle not fully cached yet (would build ${plan.names})`);
 
   // Read versions before nix build replaces the current out-link.
   const previous = old ? versions(old) : null;
   const build = spawnSync(nix, ['build', target, ...options, '--out-link', current], { stdio: 'inherit' });
-  if (build.error) throw build.error;
-  if (build.status !== 0) {
-    // As bash reports it: a signal's number plus 128.
-    const status = build.status ?? 128 + (constants.signals[build.signal!] ?? 0);
+  if (build.error || build.status !== 0) {
+    // As bash reports it: 127 for a nix that is gone (say, garbage-collected),
+    // 126 for one that cannot run, a signal's number plus 128.
+    const code = (build.error as NodeJS.ErrnoException | undefined)?.code;
+    const status = build.error ? (code === 'ENOENT' ? 127 : 126)
+      : build.status ?? 128 + (constants.signals[build.signal!] ?? 0);
+    if (build.error) process.stderr.write(`agent-distro: cannot run ${nix}: ${build.error.message}\n`);
     process.stderr.write(`agent-distro: ${profile} update failed (exit ${status})\n`);
     record(`failed: nix build exit ${status}`);
     return status;
