@@ -6,6 +6,7 @@
   checks = [
     { name = "codexCli"; script = import ../../test/guest-script.nix ./tests/check-cli.py; requires = [ ]; packages = [ ]; env.CODEX_SESSION_DEFAULTS = "${./session-defaults.sh}"; }
     { name = "codexKolu"; script = import ../../test/guest-script.nix ./tests/check-kolu.py; requires = [ "kolu" ]; packages = [ "koluFixture" ]; }
+    { name = "codexKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; }
     { name = "codexPlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" "upstream" ]; }
     { name = "codexStaleMarketplace"; script = import ../../test/guest-script.nix ./tests/check-stale-marketplace.py; requires = [ "plugins" ]; packages = [ "upstream" ]; }
     { name = "codexTerminal"; script = import ../../test/guest-script.nix ./tests/check-terminal.py; requires = [ ]; packages = [ ]; }

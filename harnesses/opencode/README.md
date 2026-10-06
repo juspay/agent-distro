@@ -6,6 +6,11 @@ Custom-provider models come from the launcher's `/v1/models` fetch, with a
 cached list or the profile's two aliases as fallback when unavailable.
 `AI_GATEWAY=0` omits the generated provider configuration.
 
+With `AGENT_DISTRO_PLUGINS`, each plugin's skills and server launchers are
+translated into the cache, and the launcher writes a session config (the one
+above, less the profile plugins those replace, plus theirs) to the cache by
+content and points `OPENCODE_CONFIG` at it. OpenCode v2 shares this path.
+
 OpenCode v1 uses an npins release pin bounded below v2. Its source build is
 loaded from upstream's lock, except that every nixpkgs in it is the
 distribution's shared nixpkgs. Bun alone comes from `bun.nix`, the recipe in

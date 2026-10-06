@@ -15,6 +15,14 @@ let
       descriptions = map (plugin: "${runtime.readPlugin plugin}") plugins;
     })}
   '';
+  launchPlugins = runtime.launchPlugins {
+    harness = "opencode";
+    inherit schema name;
+    bash = runtimeShell;
+    env = "${coreutils}/bin/env";
+    config = "${config}";
+    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; }) plugins;
+  };
   initialization = lib.optionalString (gateway != null) ''
     if [ "''${AI_GATEWAY:-1}" != "0" ]; then
       ${import ../../lib/gateway-key.nix { inherit gum gateway; }}
@@ -31,6 +39,10 @@ writeShellApplication {
   text = ''
     config=${config}/opencode.json
     ${initialization}
+    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
+      # This config, less the plugins AGENT_DISTRO_PLUGINS replaces, plus its own.
+      config=$(${launchPlugins} "$config")
+    fi
     if [ "''${OPENCODE_CONFIG+x}" = x ]; then
       echo 'warning: agent-distro is replacing OPENCODE_CONFIG.' >&2
     fi

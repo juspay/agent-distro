@@ -3,6 +3,9 @@
  *
  * Usage: node claude.ts OUT ARGS_JSON
  *
+ * At launch, src/plugin/launch.ts uses `adapter` to write the same root for a
+ * plugin on AGENT_DISTRO_PLUGINS into its cache.
+ *
  * Each part reads the validated description, never the plugin's own JSON, so a
  * Claude Code format change touches this file and a spec change none. Skills are
  * only the discovered ones, with only their in-root files, materialized: Claude
@@ -17,7 +20,9 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launcher } from '../plugin/launcher.ts';
+import type { Adapter, ProfileEntry, Report } from '../plugin/launch.ts';
+import { launcher, shellQuote } from '../plugin/launcher.ts';
+import type { Description } from '../plugin/read.ts';
 import { copySkills, fileName, launchable, readDescription } from '../plugin/resources.ts';
 
 const MANIFEST_FIELDS = ['name', 'version', 'description', 'author', 'homepage', 'repository', 'license', 'keywords'] as const;
@@ -27,9 +32,10 @@ type ClaudeServer =
   | { type: 'http' | 'sse'; url: string; headers?: Record<string, string> }
   | { type: 'stdio'; command: string };
 
-function main(out: string, argsPath: string) {
-  const args: { bash: string; env: string; description: string } = JSON.parse(readFileSync(argsPath, 'utf8'));
-  const description = readDescription(args.description);
+type Inputs = { bash: string; env: string };
+
+/** Write `description` as a Claude Code plugin root at `out`. */
+export function writePlugin(description: Description, out: string, { bash, env }: Inputs, report: Report) {
   mkdirSync(join(out, '.claude-plugin'), { recursive: true });
   const manifest: Record<string, unknown> = {};
   for (const key of MANIFEST_FIELDS) {
@@ -46,15 +52,15 @@ function main(out: string, argsPath: string) {
       return;
     }
     if (!launchable(description, server)) {
-      process.stderr.write(`${description.root}: mcp.json: server ${JSON.stringify(name)} skipped, `
-        + 'Claude Code adapter cannot launch a command containing "="\n');
+      report(`mcp.json: server ${JSON.stringify(name)} skipped, `
+        + 'Claude Code adapter cannot launch a command containing "="');
       return;
     }
     const script = join(out, 'mcp-launchers', `${index}-${fileName(name)}`);
     mkdirSync(join(out, 'mcp-launchers'), { recursive: true });
     // Owner bits suffice: Nix canonicalizes store files to 0555/0444 on
     // registration, so the launcher is executable by every user.
-    writeFileSync(script, launcher(description, name, server, args.bash, args.env, 'CLAUDE_PLUGIN_DATA'),
+    writeFileSync(script, launcher(description, name, server, bash, env, 'CLAUDE_PLUGIN_DATA'),
       { flag: 'wx', mode: 0o700 });
     servers[name] = { type: 'stdio', command: script };
   });
@@ -63,4 +69,25 @@ function main(out: string, argsPath: string) {
   }
 }
 
-main(process.argv[2], process.argv[3]);
+type LaunchArgs = Inputs & { profile: (ProfileEntry & { dir: string })[] };
+
+/**
+ * At launch: the `--plugin-dir` arguments for every plugin, as shell words,
+ * replacing the launcher's own. A plugin on the variable is one more
+ * session-only plugin directory.
+ */
+export const adapter: Adapter<LaunchArgs, LaunchArgs['profile'][number], Inputs> = {
+  translationInputs: ({ bash, env }) => ({ bash, env }),
+  translate: (description, out, inputs, report) => writePlugin(description, out, inputs, report),
+  launch: ({ kept, plugins }) => [
+    ...kept.map((plugin) => plugin.entry.dir),
+    ...plugins.map((plugin) => plugin.translation),
+  ].flatMap((dir) => ['--plugin-dir', shellQuote(dir)]).join(' '),
+};
+
+if (import.meta.main) {
+  const [out, argsPath] = process.argv.slice(2);
+  const args: Inputs & { description: string } = JSON.parse(readFileSync(argsPath, 'utf8'));
+  const description = readDescription(args.description);
+  writePlugin(description, out, args, (message) => process.stderr.write(`${description.root}: ${message}\n`));
+}

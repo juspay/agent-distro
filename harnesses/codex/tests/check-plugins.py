@@ -92,6 +92,23 @@ assert run('not-a-subcommand', launcher=launcher).returncode != 0
 
 assert_preserved()
 assert_skills(launcher)
+
+# AGENT_DISTRO_PLUGINS: the store fixture joins for one launch, through -c
+# overrides; config.toml never learns of it.
+fixture = os.environ['AGENT_DISTRO_TEST_PLUGIN']
+settled = config.read_bytes()
+skills = loaded_skills(launcher, plugins=fixture)
+assert 'launch-fixture:launched' in skills, skills
+assert {s for s in skills if ':' in s} == {p + ':' + s for p, names in expected.items() for s in names} | {'launch-fixture:launched'}
+# A checkout named like a profile plugin replaces it for that launch.
+name = next(p for p in expected if '.' not in p)
+skills = loaded_skills(launcher, plugins=checkout(name, 'shadowed'))
+assert {s for s in skills if s.startswith(name + ':')} == {name + ':shadowed'}, skills
+assert config.read_bytes() == settled
+assert 'launch-fixture' not in json.dumps(json.loads(upstream('plugin', 'marketplace', 'list', '--json').stdout))
+# Unset, the profile's plugins are exactly what loads.
+assert_skills(launcher)
+
 invalid = 'model = [\n'
 config.write_text(invalid)
 assert run('--version', launcher=launcher).returncode != 0

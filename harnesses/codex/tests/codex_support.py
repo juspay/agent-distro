@@ -24,8 +24,13 @@ skill.parent.mkdir(parents=True)
 skill.write_text('---\nname: personal\ndescription: Personal skill\n---\n')
 
 
-def run(*args, launcher='codex', **kwargs):
-    return subprocess.run([launcher, *args], env=env, text=True,
+def with_plugins(plugins):
+    # AGENT_DISTRO_PLUGINS for one launch only.
+    return env if plugins is None else env | {'AGENT_DISTRO_PLUGINS': plugins}
+
+
+def run(*args, launcher='codex', plugins=None, **kwargs):
+    return subprocess.run([launcher, *args], env=with_plugins(plugins), text=True,
                           capture_output=True, timeout=60, **kwargs)
 
 
@@ -44,10 +49,10 @@ def installed_plugins():
     return {p['pluginId']: p for p in installed}
 
 
-def loaded_skills(launcher='codex'):
+def loaded_skills(launcher='codex', plugins=None):
     # No thread or model request: initialize, then ask the real app server for
     # its effective skills. A timeout also catches protocol changes in updates.
-    process = subprocess.Popen([launcher, 'app-server'], env=env,
+    process = subprocess.Popen([launcher, 'app-server'], env=with_plugins(plugins),
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, text=True)
     def request(request_id, method, params):
@@ -97,3 +102,13 @@ def assert_preserved():
     assert '# personal settings' in config.read_text()
     assert auth.read_text() == '{"OPENAI_API_KEY":"test-api-key"}\n'
     assert session.read_text() == 'session sentinel\n'
+
+
+def checkout(name, skill):
+    """A plugin working copy outside the store, as a user edits one."""
+    root = home / 'checkouts' / name
+    (root / 'skills' / skill).mkdir(parents=True)
+    (root / 'plugin.json').write_text(json.dumps({
+        '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', 'name': name}))
+    (root / 'skills' / skill / 'SKILL.md').write_text(f'---\nname: {skill}\ndescription: {skill}\n---\n')
+    return str(root)

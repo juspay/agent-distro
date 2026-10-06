@@ -57,6 +57,7 @@ previews their harnesses; Enter or Tab moves to the harness pane (here with
 | `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list; also usable in scripts and non-interactive shells |
 | `AI_PROFILE` | a directory under `profiles/` | Chooses the profile, defaulting to the one `registry.nix` names; on its own, narrows the list to that profile |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
+| `AGENT_DISTRO_PLUGINS` | `:`-separated plugin directories | Loads more plugins for that launch; see [Plugins at launch](#plugins-at-launch) |
 
 Use `agent-distro <harness>` to launch directly, `agent-distro <profile> <harness>` to select
 both, or `agent-distro <profile>` to narrow the chooser. For example:
@@ -165,6 +166,55 @@ selector) takes;
 and `version` is the display version, as `--list` prints it, without the
 package's `+` revision suffix. The plain `--list` and the chooser read the
 same value, so the three cannot disagree. `--list` takes no other arguments.
+
+### Plugins at launch
+
+A profile fixes the plugins its harnesses start with. Put more [Agent
+Plugins](https://agent-plugins.org) directories on `AGENT_DISTRO_PLUGINS`, and
+every harness loads them too, in every profile, for that launch:
+
+```sh
+AGENT_DISTRO_PLUGINS=~/src/my-plugin agent-distro claude
+AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-distro juspay omp
+```
+
+- **Entries.** Directories separated by `:`, so a path containing `:` cannot
+  be given; empty components are ignored. A relative entry is resolved against
+  the directory the launcher starts in, and symlinks are followed. `~` is
+  expanded by the shell, and only where an assignment expands it: unquoted,
+  in bash or zsh, not in fish. An entry that is not a directory fails the
+  launch, naming it.
+- **Read like a profile's plugins.** Each directory goes through the same
+  reader: an invalid manifest fails the launch with a message naming the
+  field, and skipped skills, a disabled `mcp.json` or an invalid server entry
+  are reported on stderr, on every launch, while the launch goes on.
+- **Matched by name, never by version.** A plugin whose `plugin.json` `name`
+  matches one of the profile's replaces it; on the variable, the last of a
+  name wins. No `version` is compared.
+- **Translated once.** Each harness's translation of a plugin is cached under
+  `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`, which
+  must be an absolute path. A plugin under `/nix/store` is keyed by its store
+  path, as is, without reading it. Any other directory is keyed by a hash of
+  its contents (its NAR serialization, computed without Nix, leaving out a
+  top-level `.git`) and of its absolute path, so an edited checkout is
+  translated again on its next launch, and a key is particular to one machine
+  and user. That directory is hashed in full on every launch: a large tree
+  (a `node_modules`, say) costs launch time, and a FIFO or an unreadable file
+  in it fails the launch. A launch never calls Nix, and a cache it cannot
+  write fails it.
+- **Kept while in use.** Each launch marks the translations it uses. A launch
+  that translates something new removes what no launch has used for 14 days,
+  so old versions of an edited checkout and translations for an older
+  agent-distro do not pile up. With no harness running, removing
+  `~/.cache/agent-distro/plugins` is always safe.
+- **For that launch only.** Unset the variable and the harness is back to the
+  profile's plugins: Claude Code and OMP take them as arguments, OpenCode in its
+  session config, and Codex through `-c` overrides; Codex keeps an inert copy
+  in its plugin cache, removed once unused for 14 days. Pi only reads its own
+  files, so it records what a launch added and its next launch, whenever that
+  is, takes it back. Each harness's README says how.
+
+Unset or empty, the launchers behave exactly as they do without this feature.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
@@ -392,16 +442,22 @@ Harness design notes live in each directory under [harnesses/](./harnesses).
 What runs on your machine beyond the harnesses themselves (the plugin reader,
 each harness's config writer, the picker and the Home Manager updater) is
 TypeScript under [src/](./src), run by Node 24's native type stripping: no
-`package.json`, bundler or compile step. Node comes from the distribution's
+`package.json`, bundler or compile step. (The one exception is the entry for
+`AGENT_DISTRO_PLUGINS`, plain JavaScript so that it can turn on Node's compile
+cache before any TypeScript loads.) Node comes from the distribution's
 nixpkgs. Its one npm dependency, `yaml` (for OMP's config), is a tarball
 pinned in `lib/npins`, which [lib/runtime.nix](./lib/runtime.nix) links in
 as `node_modules/yaml`. The commands you run, and the shims Home Manager
 installs, stay small generated shell scripts that call into it.
 
-Every plugin is read once, harness-independently, against Agent Plugins 1.0.0.
-An invalid manifest fails the build with a message naming the field; skipped
-skills, disabled `mcp.json` files and invalid server entries are reported in
-the build log, as the spec's failure boundaries require. A bare MCP `command` is
+Every plugin is read once, harness-independently, against Agent Plugins 1.0.0:
+a profile's at build time, and one from `AGENT_DISTRO_PLUGINS` at launch, by
+the same reader and the same harness writers, into the cache described in
+[Plugins at launch](#plugins-at-launch).
+An invalid manifest fails the build (or the launch) with a message naming the
+field; skipped skills, disabled `mcp.json` files and invalid server entries are
+reported in the build log (or on stderr), as the spec's failure boundaries
+require. A bare MCP `command` is
 found on `PATH`: the profile's `packages` first, then the user's own. A `./`
 command runs from the plugin.
 
@@ -430,7 +486,7 @@ The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
 root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
 ```
 
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
@@ -449,13 +505,17 @@ Consumers run `nix flake update agent-distro`.
 For manual updates, run `bash .github/scripts/update-sources.sh`,
 `nix flake update`, and then `bash test/update-lock.sh`.
 
-Consumers can import `test/lib.nix { pkgs; launchers; profile; features; }`.
-Checks are selected by required features (`plugins`, `gateway`, `kolu`, `spec`)
+Consumers can import `test/lib.nix { pkgs; launchers; profile; features; koluPlugin ? null; }`.
+Checks are selected by required features (`plugins`, `gateway`, `kolu`, `spec`,
+and `koluLaunch`, which loads `koluPlugin` through `AGENT_DISTRO_PLUGINS`)
 from each harness's metadata; `picker` is shared. Rebuild and gateway checks
 also accept `mkLaunchers`. Select plugin rebuild checks only for nonempty skill
-plugins. The test flake covers vanilla, Juspay, and spec fixtures, plus `registry`
+plugins. The test flake covers vanilla (with kolu's plugin loaded at launch), Juspay,
+and spec fixtures, plus `registry`
 (the picker over the whole profile registry). Checks of the TypeScript alone
-run without a VM: `reader` (the plugin reader), `<harness>-adapter` (a
+run without a VM: `reader` (the plugin reader), `launch-plugins`
+(`AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence and the
+launches it fails), `<harness>-adapter` (a
 harness's `tests/check-adapter.ts`), `update-schedule` (the updater's
 schedule and cache policy), `list-json` (`--list --json` against its
 type, the chooser's menu and `--list`), and `picker-layout` (the chooser's

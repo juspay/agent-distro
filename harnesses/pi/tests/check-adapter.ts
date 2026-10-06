@@ -150,3 +150,77 @@ test('atomic preservation and validation', () => {
   assert.equal(readFileSync(settings, 'utf8'), '{');
   assert.deepEqual(readdirSync(root).filter((name) => name.startsWith('.pi-')), []);
 });
+
+test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
+  const agent = temporary();
+  const write = (name: string, fragment: unknown) => {
+    const path = join(agent, `${name}.fragment`);
+    writeFileSync(path, JSON.stringify(fragment));
+    return path;
+  };
+  const profileServer = { command: '/nix/store/x-pi-config/bin/kolu-0-kolu' };
+  const profile = write('profile', {
+    skills: ['/nix/store/x-pi-config/skills/kolu'], mcpServers: { kolu: profileServer },
+  });
+  const launchServer = { command: '/cache/kolu/bin/kolu-0-kolu' };
+  const launched = write('launch', {
+    skills: ['/cache/kolu/skills/kolu', '/cache/extra/skills/extra'],
+    mcpServers: { kolu: launchServer, remote: { url: 'https://example.test/mcp', headers: {} } },
+    launch: {
+      skills: ['/cache/kolu/skills/kolu', '/cache/extra/skills/extra'],
+      mcpServers: ['kolu', 'remote'],
+      replaces: { kolu: profileServer },
+    },
+  });
+  writeFileSync(join(agent, 'mcp.json'), JSON.stringify({ mcpServers: { personal: { command: '/personal' } } }));
+  writeFileSync(join(agent, 'settings.json'), JSON.stringify({ skills: ['/personal/skills'] }));
+  const servers = () => readJson(join(agent, 'mcp.json')).mcpServers;
+  const skills = () => readJson(join(agent, 'settings.json')).skills;
+
+  mergeState('--merge', agent, profile);
+  const steady = [servers(), skills()];
+  mergeState('--check', agent, launched);
+  assert.deepEqual([servers(), skills()], steady, '--check writes nothing');
+  assert.ok(!existsSync(join(agent, '.agent-distro-launch.json')));
+
+  mergeState('--merge', agent, launched);
+  assert.deepEqual(servers(), { personal: { command: '/personal' }, kolu: launchServer, remote: { url: 'https://example.test/mcp', headers: {} } });
+  assert.deepEqual(skills(), ['/personal/skills', '/cache/kolu/skills/kolu', '/cache/extra/skills/extra']);
+  const record = snapshot(join(agent, '.agent-distro-launch.json'));
+  mergeState('--merge', agent, launched);
+  assert.deepEqual(snapshot(join(agent, '.agent-distro-launch.json')), record, 'a steady launch rewrites nothing');
+
+  // Unset: the profile's own entries are back, and nothing of the launch remains.
+  mergeState('--merge', agent, profile);
+  assert.deepEqual([servers(), skills()], steady);
+  assert.ok(!existsSync(join(agent, '.agent-distro-launch.json')));
+
+  // A launch entry the user has since edited is theirs to keep.
+  mergeState('--merge', agent, launched);
+  const mcp = readJson(join(agent, 'mcp.json'));
+  mcp.mcpServers.remote.headers = { Authorization: 'mine' };
+  writeFileSync(join(agent, 'mcp.json'), JSON.stringify(mcp));
+  mergeState('--merge', agent, profile);
+  assert.deepEqual(servers().remote, { url: 'https://example.test/mcp', headers: { Authorization: 'mine' } });
+  assert.deepEqual(servers().kolu, profileServer);
+
+  writeFileSync(join(agent, '.agent-distro-launch.json'), '[]');
+  assert.throws(() => mergeState('--merge', agent, profile), /not a launch record|JSON object/);
+});
+
+test('a launch with plugins needs a home; one without is the profile', async () => {
+  const { adapter } = await import(join(process.argv[2], 'harness/pi.ts'));
+  const config = temporary();
+  writeFileSync(join(config, 'config.json'), JSON.stringify({ skills: [], mcpServers: {} }));
+  const launch = { args: { config, profile: [] }, kept: [], replaced: [], rest: [], cache: null, report: () => {} };
+  assert.equal(adapter.launch({ ...launch, plugins: [] }), join(config, 'config.json'));
+  const saved = { HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR };
+  delete process.env.HOME;
+  delete process.env.PI_CODING_AGENT_DIR;
+  try {
+    assert.throws(() => adapter.launch({ ...launch, cache: temporary(), plugins: [{ name: 'p' }] }),
+      /HOME and PI_CODING_AGENT_DIR are unset/);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) if (value !== undefined) process.env[name] = value;
+  }
+});

@@ -13,11 +13,24 @@ let
       descriptions = map (plugin: "${runtime.readPlugin plugin}") plugins;
     })}
   '';
+  launchPlugins = runtime.launchPlugins {
+    harness = "pi";
+    bash = runtimeShell;
+    env = "${coreutils}/bin/env";
+    config = "${config}";
+    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; }) plugins;
+  };
 in
 writeShellApplication {
   name = "pi";
   derivationArgs.version = pi.version;
   text = ''
+    fragment=${config}/config.json
+    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
+      # The profile's fragment, less the plugins AGENT_DISTRO_PLUGINS replaces,
+      # plus its own; this fails without a home to merge them into.
+      fragment=$(${launchPlugins})
+    fi
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
       agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.pi/agent}"
       gateway=()
@@ -27,8 +40,12 @@ writeShellApplication {
         fi
       ''}
       status=0
-      ${runtime.script "harness/pi.ts"} merge-state --check "$agent_dir" ${config}/config.json "''${gateway[@]}" || status=$?
+      ${runtime.script "harness/pi.ts"} merge-state --check "$agent_dir" "$fragment" "''${gateway[@]}" || status=$?
       if [ "$status" = 1 ]; then exit 1; fi
+      if [ "$status" = 2 ] && [ "$fragment" != ${config}/config.json ]; then
+        echo 'Pi: cannot load AGENT_DISTRO_PLUGINS: the agent directory cannot be written.' >&2
+        exit 1
+      fi
       if [ "$status" = 0 ]; then
         ${lib.optionalString (gateway != null) ''
           if [ "''${AI_GATEWAY:-1}" != "0" ]; then
@@ -39,7 +56,7 @@ writeShellApplication {
             gateway=("$cached")
           fi
         ''}
-        ${runtime.script "harness/pi.ts"} merge-state --merge "$agent_dir" ${config}/config.json "''${gateway[@]}"
+        ${runtime.script "harness/pi.ts"} merge-state --merge "$agent_dir" "$fragment" "''${gateway[@]}"
       fi
     else
       echo 'Pi: warning: HOME and PI_CODING_AGENT_DIR are unset; skipping config merges.' >&2

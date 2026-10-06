@@ -29,4 +29,9 @@ in
   readPlugin = plugin: pkgs.runCommand "agent-plugin.json" { } ''
     ${script "plugin/read.ts"} ${plugin} > "$out"
   '';
+  # The command a launcher runs, only when AGENT_DISTRO_PLUGINS is set, to
+  # bring the plugins named there into this launch. `args` names the adapter
+  # (`harness`) and the profile's plugins (`profile`, each with its
+  # `description`); see src/plugin/launch.ts.
+  launchPlugins = args: "${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON args)}";
 }

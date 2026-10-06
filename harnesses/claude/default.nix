@@ -16,11 +16,23 @@ let
   pluginFlags = lib.concatMapStringsSep " "
     (plugin: "--plugin-dir ${lib.escapeShellArg (toString (adaptPlugin plugin))}")
     plugins;
+  launchPlugins = runtime.launchPlugins {
+    harness = "claude";
+    bash = runtimeShell;
+    env = "${coreutils}/bin/env";
+    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${adaptPlugin plugin}"; }) plugins;
+  };
 in
 writeShellApplication {
   name = "claude";
   derivationArgs.version = claude.version;
   text = ''
+    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
+      # The profile's plugin dirs, less those AGENT_DISTRO_PLUGINS replaces, then its own.
+      plugin_dirs=$(${launchPlugins})
+      eval "set -- $plugin_dirs \"\$@\""
+      exec ${lib.getExe claude} "$@"
+    fi
     exec ${lib.getExe claude} ${pluginFlags} "$@"
   '';
 }

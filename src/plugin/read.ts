@@ -92,7 +92,7 @@ LOOPBACK.addAddress('::1', 'ipv6');
 // adding the entry, so it would vanish from the description without a word.
 const UNREPRESENTABLE = 'the name `__proto__` cannot be represented';
 
-class Fatal extends Error {}
+export class Fatal extends Error {}
 class Invalid extends Error {}
 
 const isObject = (value: unknown): value is JsonObject =>
@@ -409,6 +409,25 @@ export function readPlugin(plugin: string, report: Report = () => {}): Descripti
   return {
     root, version, manifest, skills: readSkills(root, note), mcpServers: readMcp(root, version, note), reports,
   };
+}
+
+const isStrings = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+/**
+ * Whether `value` has the shape readPlugin returns, for a description read
+ * back from somewhere that may have been altered, such as a cache.
+ */
+export function isDescription(value: unknown): value is Description {
+  if (!isObject(value as Json)) return false;
+  const { root, version, manifest, skills, mcpServers, reports } = value as JsonObject;
+  return typeof root === 'string' && root.startsWith('/')
+    && typeof version === 'string'
+    && isObject(manifest) && typeof manifest.name === 'string' && NAME.test(manifest.name)
+    && isObject(skills) && Object.values(skills).every(isStrings)
+    && isObject(mcpServers) && Object.values(mcpServers).every((server) =>
+      isObject(server) && typeof server.type === 'string' && has(SERVER_FIELDS, server.type))
+    && isStrings(reports);
 }
 
 if (import.meta.main) {
