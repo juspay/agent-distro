@@ -29,6 +29,7 @@
         gateway = null;
       };
       readPlugin = pkgs.callPackage "${agent-distro}/lib/read-plugin.nix" { };
+      runtime = import "${agent-distro}/lib/runtime.nix" pkgs;
       reserved = [ "default" ] ++ (import "${agent-distro}/lib/discover-harnesses.nix").ordered;
       named = profile: lib.mapAttrs' (check: lib.nameValuePair "${profile}-${check}");
     in
@@ -56,7 +57,7 @@
               failed = pkgs.testers.testBuildFailure
                 (readPlugin (pkgs.writeTextDir "plugin.json" ''{"name": "no-schema"}''));
             } ''
-            ${pkgs.python3.interpreter} ${./check-read-plugin.py} ${agent-distro}/lib/read-plugin.py
+            ${runtime.node} ${./check-read-plugin.ts} ${runtime.tree}/src/plugin/read.ts
             grep -F '`$schema` is missing' "$failed/testBuildFailure.log"
             touch "$out"
           '';

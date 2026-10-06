@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/juspay/agent-distro/src/plugin/description.schema.json",
+  "title": "Agent Plugin description",
+  "description": "What src/plugin/read.ts writes for one validated Agent Plugins directory; its `Description` type is the same shape.",
+  "type": "object",
+  "required": ["root", "version", "manifest", "skills", "mcpServers", "reports"],
+  "additionalProperties": false,
+  "properties": {
+    "root": { "type": "string", "description": "The plugin directory, every symlink resolved." },
+    "version": { "type": "string", "description": "The Agent Plugins version the manifest targets." },
+    "manifest": {
+      "type": "object",
+      "required": ["$schema", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": { "type": "string" },
+        "name": { "type": "string", "pattern": "^(?!.*(?:--|\\.\\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$", "maxLength": 64 },
+        "version": { "type": "string" },
+        "description": { "type": "string" },
+        "homepage": { "type": "string" },
+        "repository": { "type": "string" },
+        "license": { "type": "string" },
+        "author": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "email": { "type": "string" },
+            "url": { "type": "string" }
+          }
+        },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "extensions": { "type": "object", "additionalProperties": { "type": "object" } }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "description": "Skill name to its in-root regular files, relative to skills/<name>.",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } }
+    },
+    "mcpServers": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "command", "args", "env"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "const": "stdio" },
+              "command": { "type": "string", "minLength": 1 },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "cwd": { "type": "string" },
+              "cwdBase": { "enum": ["root", "data"] }
+            },
+            "dependentRequired": { "cwd": ["cwdBase"], "cwdBase": ["cwd"] }
+          },
+          {
+            "type": "object",
+            "required": ["type", "url", "headers"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "enum": ["streamable-http", "sse"] },
+              "url": { "type": "string", "minLength": 1 },
+              "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+            }
+          }
+        ]
+      }
+    },
+    "reports": {
+      "type": "array",
+      "description": "Everything skipped or ignored, also printed to the build log.",
+      "items": { "type": "string" }
+    }
+  }
+}
