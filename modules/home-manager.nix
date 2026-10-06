@@ -25,8 +25,8 @@ let
   # Discover commands from the bundle, keeping shims and collision checks together.
   names = bundle.commands;
   state = "state=${lib.escapeShellArg stateDirectory}";
-  update = updater.command;
-  updaterCmd = lib.escapeShellArgs update;
+  # The updater command escaped for systemd/activation: bare `command` list.
+  updaterCommand = lib.escapeShellArgs updater.command;
 in
 {
   options.services.agent-distro = {
@@ -72,7 +72,7 @@ in
       )
     '';
     home.activation.agent-distro-cache = lib.hm.dag.entryAfter [ "writeBoundary" ] (lib.optionalString (cfg.substituters != { }) ''
-      ${updaterCmd} --cache-warnings || true
+      ${updaterCommand} --cache-warnings || true
     '');
     home.activation.agent-distro-prune = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       (
@@ -92,7 +92,7 @@ in
       };
       Service = {
         Type = "oneshot";
-        ExecStart = updaterCmd;
+        ExecStart = updaterCommand;
         Restart = "on-failure";
         RestartSec = "5min";
       };
@@ -111,7 +111,7 @@ in
       config = {
         # launchd has no start-limit counter: --scheduled checks the UTC
         # boundary and bounds retries itself.
-        ProgramArguments = update ++ [ "--scheduled" ];
+        ProgramArguments = updater.command ++ [ "--scheduled" ];
         StandardOutPath = "${stateDirectory}/update.log";
         StandardErrorPath = "${stateDirectory}/update.log";
         # Hourly wake-ups avoid encoding a UTC boundary in launchd's local time.
