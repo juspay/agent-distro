@@ -106,9 +106,11 @@ While filtering, the filter line shows the query as typed and how many rows
 match; ↑/↓ still move, Backspace edits, and Enter takes the highlighted match.
 The footer lists only the keys that apply at that moment. Colour follows
 [`NO_COLOR`](https://no-color.org) and the terminal type. Small or
-unsupported terminals (no terminal on stdin, `TERM=dumb`, or fewer rows or
-columns than the box needs) get a numbered list instead, including when the
-terminal shrinks below that mid-session.
+unsupported terminals (`TERM` unset or `dumb`, no controlling terminal, or
+fewer rows or columns than the box needs) get a numbered list on stderr
+instead. A terminal that shrinks below that once the box is up shows a notice
+until it grows again, with the cursor and filter kept. Without a terminal on
+stdin, agent-distro says which variables to set instead of drawing anything.
 
 An interactive selection is remembered in
 `${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
@@ -119,26 +121,48 @@ with `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro <profile> <harness
 An unavailable state directory is silently ignored.
 
 `agent-distro --list --json` prints what the chooser draws, for programs that
-offer the same choice (such as [kolu](https://github.com/juspay/kolu)). Its
-shape is stable, typed as `Listing` in [src/listing.ts](./src/listing.ts):
+offer the same choice (such as [kolu](https://github.com/juspay/kolu)), on one
+line. Its shape is stable, typed as `Listing` in [src/listing.ts](./src/listing.ts);
+here it is pretty-printed, with each profile cut to one harness:
 
 ```json
 {
-  "default": "juspay",
   "profiles": [
-    { "name": "juspay", "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
+    {
+      "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
       "harnesses": [
-        { "name": "claude", "title": "Claude Code", "tagline": "Anthropic login · plugin dirs per session", "version": "2.1.291" }
-      ] }
+        {
+          "name": "claude",
+          "tagline": "Anthropic login · plugin dirs per session",
+          "title": "Claude Code",
+          "version": "2.1.291"
+        }
+      ],
+      "name": "juspay"
+    },
+    {
+      "description": "Upstream harnesses with your own provider",
+      "harnesses": [
+        {
+          "name": "claude",
+          "tagline": "Anthropic login · plugin dirs per session",
+          "title": "Claude Code",
+          "version": "2.1.291"
+        }
+      ],
+      "name": "vanilla"
+    }
   ]
 }
 ```
 
-`profiles` starts with the default and `harnesses` is in menu order; each
-`name` is what `AI_PROFILE` or `AI_HARNESS` (or a positional selector) takes,
+The first profile is the default, and `harnesses` is in menu order. Keys
+within an object are sorted. Each `name` is unique at its level, free of
+whitespace and `/`, and is what `AI_PROFILE` or `AI_HARNESS` (or a positional
+selector) takes;
 and `version` is the display version, as `--list` prints it, without the
 package's `+` revision suffix. The plain `--list` and the chooser read the
-same value, so the three cannot disagree.
+same value, so the three cannot disagree. `--list` takes no other arguments.
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 
@@ -348,7 +372,7 @@ The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
 root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
 ```
 
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
@@ -375,8 +399,9 @@ plugins. The test flake covers vanilla, Juspay, and spec fixtures, plus `registr
 (the picker over the whole profile registry). Checks of the TypeScript alone
 run without a VM: `reader` (the plugin reader), `<harness>-adapter` (a
 harness's `tests/check-adapter.ts`), `update-schedule` (the updater's
-schedule and cache policy), and `list-json` (`--list --json` against its
-type, the chooser's menu and `--list`).
+schedule and cache policy), `list-json` (`--list --json` against its
+type, the chooser's menu and `--list`), and `picker-layout` (the chooser's
+cell widths, truncation and box at common terminal sizes).
 
 ## Adding a harness
 
