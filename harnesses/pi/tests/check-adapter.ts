@@ -207,3 +207,20 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
   writeFileSync(join(agent, '.agent-distro-launch.json'), '[]');
   assert.throws(() => mergeState('--merge', agent, profile), /not a launch record|JSON object/);
 });
+
+test('a launch with plugins needs a home; one without is the profile', async () => {
+  const { adapter } = await import(join(process.argv[2], 'harness/pi.ts'));
+  const config = temporary();
+  writeFileSync(join(config, 'config.json'), JSON.stringify({ skills: [], mcpServers: {} }));
+  const launch = { args: { config, profile: [] }, kept: [], replaced: [], rest: [], cache: null, report: () => {} };
+  assert.equal(adapter.launch({ ...launch, plugins: [] }), join(config, 'config.json'));
+  const saved = { HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR };
+  delete process.env.HOME;
+  delete process.env.PI_CODING_AGENT_DIR;
+  try {
+    assert.throws(() => adapter.launch({ ...launch, cache: temporary(), plugins: [{ name: 'p' }] }),
+      /HOME and PI_CODING_AGENT_DIR are unset/);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) if (value !== undefined) process.env[name] = value;
+  }
+});

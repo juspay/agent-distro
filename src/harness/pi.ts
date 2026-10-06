@@ -19,7 +19,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { Gateway } from '../gateway/models.ts';
-import { LaunchError, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
+import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -68,6 +68,9 @@ export function pluginFragment(description: Description, out: string, { bash, en
   });
   return { skills: skills ? [skills] : [], mcpServers: servers };
 }
+
+const isFragment = (value: unknown): value is Fragment => isObject(value)
+  && Array.isArray(value.skills) && value.skills.every((s: unknown) => typeof s === 'string') && isObject(value.mcpServers);
 
 /** Fail on a server name two plugins declare. */
 function claim(owners: Record<string, string>, description: Description, Failure: new (message: string) => Error = Invalid) {
@@ -219,11 +222,17 @@ type LaunchArgs = Inputs & { config: string; profile: ProfileEntry[] };
  * variable's, written to the cache by content. Prints its path, which the
  * launcher hands merge-state in place of the profile's.
  */
-export const adapter: Adapter<LaunchArgs> = {
+export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
-  translate: (description, out, args, report) =>
-    writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, args, report))),
+  translate: (description, out, inputs, report) =>
+    writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
   launch: ({ args, kept, replaced, plugins, cache }) => {
+    if (!plugins.length) return join(args.config, 'config.json');
+    // Pi reads plugins only from its agent directory; without one they would
+    // be dropped without a word.
+    if (!process.env.PI_CODING_AGENT_DIR && !process.env.HOME) {
+      throw new LaunchError('Pi: cannot load AGENT_DISTRO_PLUGINS: HOME and PI_CODING_AGENT_DIR are unset');
+    }
     const base: Fragment = JSON.parse(readFileSync(join(args.config, 'config.json'), 'utf8'));
     const owners: Record<string, string> = {};
     for (const plugin of kept) claim(owners, plugin.description, LaunchError);
@@ -239,13 +248,13 @@ export const adapter: Adapter<LaunchArgs> = {
     const launch = { skills: [] as string[], mcpServers: [] as string[], replaces };
     for (const plugin of plugins) {
       claim(owners, plugin.description, LaunchError);
-      const fragment: Fragment = JSON.parse(readFileSync(join(plugin.translation, 'fragment.json'), 'utf8'));
+      const fragment = readCached(join(plugin.translation, 'fragment.json'), isFragment);
       launch.skills.push(...fragment.skills);
       launch.mcpServers.push(...Object.keys(fragment.mcpServers));
       Object.assign(base.mcpServers, fragment.mcpServers);
     }
     const fragment: Fragment = { skills: [...skills, ...launch.skills], mcpServers: base.mcpServers, launch };
-    return writeAddressed(join(cache, 'pi', 'launch'), fragment);
+    return writeAddressed(join(cache!, 'pi', 'launch'), fragment);
   },
 };
 

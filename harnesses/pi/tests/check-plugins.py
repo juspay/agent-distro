@@ -26,3 +26,11 @@ discover(plugins=checkout(name, 'shadowed'), skills=others | {'shadowed'})
 assert inventory() == (original, old_mcp)
 assert not (agent_dir / '.agent-distro-launch.json').exists()
 discover()
+
+# Without a home for Pi's files the plugins could not load: the launch fails
+# instead of starting without them.
+homeless = subprocess.run(['env', '-u', 'HOME', '-u', 'PI_CODING_AGENT_DIR', f'XDG_CACHE_HOME={Path.home()}/.cache',
+                           f'AGENT_DISTRO_PLUGINS={fixture}', 'pi', '--version'],
+                          env=env, capture_output=True, text=True, timeout=120)
+assert homeless.returncode != 0, homeless
+assert 'HOME and PI_CODING_AGENT_DIR are unset' in homeless.stderr, homeless.stderr
