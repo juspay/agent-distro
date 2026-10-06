@@ -43,6 +43,8 @@ shadowed = json.loads(run('plugin', 'list', '--json', plugins=shadow))
 assert {p['id'] for p in shadowed} == {p + '@inline' for p in expected}, shadowed
 replaced = next(p for p in shadowed if p['id'] == name + '@inline')
 assert '/agent-distro/plugins/sha256-' in replaced['installPath'], replaced
+# The profile's own root for that name is gone, not merely joined.
+assert not {p['installPath'] for p in shadowed} & {p['installPath'] for p in plugins if p['id'] == name + '@inline'}
 assert inventory(name, plugins=shadow)[0] == {'shadowed'}
 
 # Unset, the launch is the profile's again.
