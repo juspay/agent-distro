@@ -317,8 +317,10 @@ export class Menu {
         const remembered = shown !== undefined && this.isRemembered(shown.name, h.name);
         let text = pointer(selected, true) + ' ' + mark(remembered) + ' ' + paint(selected ? bold : '', pad(h.title, titleWidth));
         if (taglineWidth) text += '  ' + paint(dim, pad(fit(h.tagline, taglineWidth), taglineWidth));
+        // Slack goes before the chip, so versions keep to the right edge.
+        text += ' '.repeat(right - harnessMinimum - (taglineWidth ? 2 + taglineWidth : 0));
         if (chipWidth) text += '  ' + paint(selected ? chipSelected : chip, ' ' + h.version.padStart(versionWidth) + ' ');
-        cells.push(text + ' '.repeat(right - harnessMinimum - (taglineWidth ? 2 + taglineWidth : 0)));
+        cells.push(text);
       } else if (i === 0 && this.profile) {
         cells.push(paint(dim, pad('No matches', right)));
       } else {
@@ -418,8 +420,9 @@ export class Menu {
         } catch (error) {
           if (!(error instanceof TooSmall)) throw error;
           small = true;
-          const [width] = terminal.getWindowSize();
-          terminal.write('\x1b[?25l\x1b[H\x1b[2J' + fit('Terminal too small for agent-distro: enlarge it, or press q to quit.', width));
+          const [width, height] = terminal.getWindowSize();
+          const notice = wrap('Terminal too small for agent-distro: enlarge it, or press q to quit.', width, height);
+          terminal.write('\x1b[?25l\x1b[H\x1b[2J' + notice.join('\r\n'));
         }
       };
       // True once the menu has ended; keys already decoded are then ignored.
@@ -436,6 +439,8 @@ export class Menu {
       };
       const dispatch = (name: string | undefined) => {
         if (ended || name === undefined) return;
+        // Behind the notice the menu cannot be seen, so only quitting acts.
+        if (small) return name === 'q' ? finish(null) : undefined;
         const choice = this.press(name);
         if (choice === undefined) render();
         else finish(null, choice);
@@ -499,6 +504,9 @@ export class Menu {
         } catch {}
       };
       input.on('keypress', onKey);
+      // A terminal that goes away (its PTY hung up) quits.
+      input.once('end', () => finish(null));
+      input.once('error', () => finish(null));
       process.on('SIGWINCH', onResize);
       input.resume();
       terminal.write('\x1b[?1049h' + first);

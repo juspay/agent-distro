@@ -5,6 +5,7 @@ import os
 import pty
 import re
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -70,7 +71,8 @@ def chooser(session):
 
 def act(fd, pid, action):
     """Send keys, or ('resize', rows, columns), ('signal', number) to every
-    process, ('kill', number) to the chooser alone, ('split', first, rest)."""
+    process, ('kill', number) to the chooser alone, ('split', first, rest),
+    ('blind', keys) to type and then restore the size."""
     if not isinstance(action, tuple):
         os.write(fd, action)
     elif action[0] == 'resize':
@@ -79,6 +81,11 @@ def act(fd, pid, action):
         os.killpg(pid, action[1])
     elif action[0] == 'kill':
         os.kill(chooser(pid), action[1])
+    elif action[0] == 'blind':
+        # Keys while nothing shows them, then the terminal back to 24×80.
+        os.write(fd, action[1])
+        time.sleep(0.3)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
     elif action[0] == 'split':
         # One key in two writes, as a slow link delivers it.
         os.write(fd, action[1])
@@ -305,6 +312,29 @@ held = run(flow(b'/' + target['title'].encode() + DOWN * matches.index(target))
               (HARNESS_FOCUS, b'\r')], version(DEFAULT, target['name']))
 assert held.choice == DEFAULT + '/' + target['name'], held.choice
 assert PLAIN_PROMPT not in held.drawn, held.drawn
+# The notice fits the terminal, and behind it only q acts: Enter and text
+# typed blind change nothing, and q quits even with a filter open.
+typing = flow(b'/' + target['title'].encode() + DOWN * matches.index(target)) + [(count(len(matches)), ('resize', 8, 30))]
+blind = run(typing + [(TOO_SMALL, ('blind', b'\rx')), (HARNESS_FOCUS, b'\r')], version(DEFAULT, target['name']))
+assert blind.choice == DEFAULT + '/' + target['name'], blind.choice
+assert b'press q to quit' in blind.drawn, blind.drawn
+assert (target['title'] + 'x').encode() not in blind.drawn, blind.drawn
+assert run(typing + [(TOO_SMALL, b'q')], TOO_SMALL).choice is None
+
+# A terminal that hangs up ends the chooser as a quit: exit 0, nothing printed.
+script = open(shutil.which('agent-distro')).read()
+node, chooser_ts = re.search(r'(/nix/store/[^ ]+/bin/node) (/nix/store/[^ ]+/src/picker/choose\.ts)', script).groups()
+pid, fd = pty.fork()
+if pid == 0:
+    os.execve(node, [node, chooser_ts, json.dumps(LISTING)], dict(os.environ, TERM='xterm-256color'))
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
+output = b''
+while TOP not in ANSI.sub(b'', output):
+    assert select.select([fd], [], [], 30)[0], output
+    output += os.read(fd, 65536)
+os.close(fd)
+_, result = os.waitpid(pid, 0)
+assert os.waitstatus_to_exitcode(result) == 0, result
 
 with tempfile.TemporaryDirectory() as state:
     path = os.path.join(state, 'agent-distro', 'last-choice')

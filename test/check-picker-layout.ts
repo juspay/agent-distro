@@ -94,8 +94,14 @@ for (const count of [1, 2, 3]) {
     boxed(new Menu(listing(SHORT.slice(0, count), twelve), '', colors), columns, rows);
   }
 }
-// Two panes keep the divider in the header even at 60 columns.
-assert.match(boxed(new Menu(listing(SHORT.slice(0, 2)), '', colors), 60, 24).join('\n'), /┬/);
+// Two panes keep the divider in the header even at 60 columns, and versions
+// keep to the right edge when taglines have no room.
+const narrow = boxed(new Menu(listing(SHORT.slice(0, 2)), '', colors), 60, 24);
+assert.match(narrow.join('\n'), /┬/);
+for (const h of HARNESSES) {
+  const line = narrow.find((l) => l.includes('   ' + h.title + ' '))!;
+  assert.ok(line.endsWith(h.version + '  │'), line);
+}
 
 // One long description wraps in its pane rather than taking the taglines' room.
 const taglines = (descriptions: string[]) =>
