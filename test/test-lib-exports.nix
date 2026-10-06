@@ -68,7 +68,15 @@ let
   };
   otherPicker = import "${agent-distro}/lib/mk-picker.nix" {
     pkgs = otherPkgs;
-    profiles = { vanilla = { profile = svc; launchers = null; }; };
+    # A real profile and its real mkLaunchers set (not a null stub), so the
+    # picker actually forces the launchers it dispatches to.
+    profiles.vanilla = {
+      profile = agent-distro.profiles.vanilla;
+      launchers = agent-distro.lib.mkLaunchers {
+        pkgs = otherPkgs;
+        profile = agent-distro.profiles.vanilla;
+      };
+    };
     default = "vanilla";
   };
 
@@ -113,7 +121,25 @@ let
     { file = "mk-shims.nix"; required = [ "pkgs" "bundle" "stateDirectory" ]; }
     { file = "mk-updater.nix"; required = [ "pkgs" "bundle" "flake" "profile" "stateDirectory" "history" "nix" "substituters" ]; }
     { file = "state-directory.nix"; required = [ "xdgStateHome" "flake" "profile" ]; }
+    { file = "mk-picker.nix"; required = [ "pkgs" "profiles" "default" ]; }
   ];
+  # mkFlake's file imports with `{ nixpkgs }` and returns the builder, whose
+  # one required argument is `profile` — checked by applying the built builder.
+  mkFlakeMissingProfile = ''
+    set -e
+    if nix-instantiate --eval --expr ${lib.escapeShellArg ''
+      (import ${agent-distro}/lib/mk-flake.nix { nixpkgs = { }; })
+        (builtins.removeAttrs { profile = { }; } [ "profile" ])
+    ''} 2>err; then
+      echo "expected missing-argument error for 'profile' (mkFlake), but it evaluated" >&2
+      exit 1
+    fi
+    grep -F "without required argument 'profile'" err >/dev/null || {
+      echo "missing-argument error for 'profile' (mkFlake) not found in:" >&2
+      cat err >&2
+      exit 1
+    }
+  '';
   builderChecks = lib.concatMapStringsSep "\n" (case:
     lib.concatMapStringsSep "\n" (arg:
       let call = ''
@@ -155,14 +181,16 @@ assert otherShims.passthru.stateDirectory == stateDirectory;
 # returns (Home Manager normalises a single command line to a one-element list).
 assert lib.escapeShellArgs updater.command ==
   builtins.head configuration.systemd.user.services.agent-distro-update.Service.ExecStart;
-# mkFlake evaluates: same eight-name lib, package names include the bundle + picker.
-assert lib.all (n: lib.elem n mkFlakeLibNames) expectedLibNames;
+# mkFlake evaluates: exactly the same eight-name lib, packages include the bundle + picker.
+assert mkFlakeLibNames == expectedLibNames;
 assert lib.elem svc.profile mkFlakePackageNames;
 assert lib.elem "default" mkFlakePackageNames;
-# mkPicker with an arbitrary nixpkgs must build.
-assert otherPicker ? outPath;
+# A second nixpkgs must build the picker from a real profile and launchers
+# (named launchers dispatchers force the whole launcher set).
+assert builtins.isString otherPicker.drvPath;
 pkgs.runCommand "lib-exports" { nativeBuildInputs = [ pkgs.nix ]; } ''
   export NIX_STATE_DIR="$TMPDIR/nix-state"
   ${builderChecks}
+  ${mkFlakeMissingProfile}
   touch "$out"
 ''

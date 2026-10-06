@@ -131,9 +131,12 @@ runnable `program` (never compiling; it passes nix only `substituters`), and
 `agent-distro.lib.mkShims` keeps installed commands pointing at the updated
 bundle. The updater schedules nothing itself — it checks the UTC boundary only
 when you pass `--scheduled` (as the module's launchd does), so a non-HM consumer
-runs it on its own cadence and must also create the `stateDirectory`, prune old
-out-links when a new bundle lands, and run `--cache-warnings` once to surface an
-unusable cache. Home Manager does all of that for you.
+runs it on its own cadence and must also create the `stateDirectory` itself and
+run `--cache-warnings` once to surface an unusable cache. (The updater replaces
+`<state>/current` directly, so there is no out-link pruning for the consumer to
+do.) Home Manager does the creation and scheduling for you, and at activation its
+prune stage deletes sibling state directories left from an earlier flake/profile
+choice.
 
 The updater never compiles harnesses from source. It passes the project cache
 (`cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`)
