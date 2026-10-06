@@ -97,6 +97,12 @@
             profiles = agent-distro.profiles;
             inherit (import "${agent-distro}/profiles/registry.nix") default;
           });
+          # The bytes a `--progress` run reports, from the internal-json stderr
+          # of a real `nix build` captured on a CI machine.
+          update-progress = pkgs.runCommand "update-progress-check" { } ''
+            ${runtime.node} ${./check-update-progress.ts} ${runtime.tree}/src ${./fixtures/internal-json.log}
+            touch "$out"
+          '';
           update-schedule = import ./test-update-schedule.nix {
             inherit pkgs nixpkgs agent-distro home-manager;
           };
