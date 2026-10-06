@@ -31,6 +31,11 @@ let
     task.showResolvedModelBadge = true;
   };
 
+  launchPlugins = runtime.launchPlugins {
+    harness = "omp";
+    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${plugin}"; }) plugins;
+  };
+
   initialization = ''
     agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.omp/agent}"
     default_layers=("${alwaysDefaults}")
@@ -70,6 +75,12 @@ writeShellApplication {
   text = ''
     ${initialization}
 
+    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
+      # The profile's roots, less those AGENT_DISTRO_PLUGINS replaces, then its own.
+      extensions=$(${launchPlugins})
+      eval "set -- $extensions \"\$@\""
+      exec ${lib.getExe omp} "$@"
+    fi
     # CLI roots compose with the user's extensions; config arrays replace them.
     exec ${lib.getExe omp} ${lib.concatMapStringsSep " " (plugin: "-e ${lib.escapeShellArg "${plugin}"}") plugins} "$@"
   '';

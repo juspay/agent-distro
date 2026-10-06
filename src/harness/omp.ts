@@ -4,6 +4,10 @@
  *
  * Usage: node omp.ts CONFIG LAYER...
  *
+ * OMP loads an Agent Plugins directory itself, so `adapter`, which
+ * src/plugin/launch.ts runs for AGENT_DISTRO_PLUGINS, only validates a plugin
+ * and passes its root as one more `-e`.
+ *
  * Layers are YAML files applied in order: a later one adds only keys the
  * earlier ones (and the user) left absent, so each default has one home. The
  * config goes through yaml's Document API so comments and quoting survive. A
@@ -13,6 +17,8 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Document, isAlias, isMap, isScalar, isSeq, parse, parseDocument, type YAMLMap } from 'yaml';
+import type { Adapter, ProfileEntry } from '../plugin/launch.ts';
+import { shellQuote } from '../plugin/launcher.ts';
 import { decodeUtf8, isSystemError, realpath, writeTemporary } from '../util.ts';
 
 type Defaults = Record<string, unknown>;
@@ -108,6 +114,16 @@ export function fillDefaults(configPath: string, layers: Defaults[]) {
     rmSync(temporary, { force: true });
   }
 }
+
+/** At launch: every plugin's `-e` root, as shell words, replacing the launcher's own. */
+export const adapter: Adapter<{ profile: (ProfileEntry & { dir: string })[] }, ProfileEntry & { dir: string }> = {
+  translationInputs: () => null,
+  translate: () => {},
+  launch: ({ kept, plugins }) => [
+    ...kept.map((plugin) => plugin.entry.dir),
+    ...plugins.map((plugin) => plugin.description.root),
+  ].flatMap((dir) => ['-e', shellQuote(dir)]).join(' '),
+};
 
 if (import.meta.main) {
   const [config, ...sources] = process.argv.slice(2);

@@ -92,7 +92,7 @@ LOOPBACK.addAddress('::1', 'ipv6');
 // adding the entry, so it would vanish from the description without a word.
 const UNREPRESENTABLE = 'the name `__proto__` cannot be represented';
 
-class Fatal extends Error {}
+export class Fatal extends Error {}
 class Invalid extends Error {}
 
 const isObject = (value: unknown): value is JsonObject =>

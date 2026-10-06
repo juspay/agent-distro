@@ -26,6 +26,12 @@ let
     done
     jq -s --arg name ${lib.escapeShellArg marketplaceName} '{name: $name, plugins: .}' entries.json > "$out/.agents/plugins/marketplace.json"
   '';
+  launchPlugins = (import ../../lib/runtime.nix pkgs).launchPlugins {
+    harness = "codex";
+    codex = lib.getExe codex;
+    marketplace = marketplaceName;
+    profile = map (plugin: { description = "${readPlugin plugin}"; }) plugins;
+  };
 in
 writeShellApplication {
   name = "codex";
@@ -53,6 +59,11 @@ writeShellApplication {
       done < "$marketplace/plugin-ids"
     fi
   '' + ''
+    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
+      # Per-launch -c overrides: AGENT_DISTRO_PLUGINS enabled, the plugins it replaces disabled.
+      overrides=$(${launchPlugins})
+      eval "set -- $overrides \"\$@\""
+    fi
     exec ${lib.getExe codex} "$@"
   '';
 }

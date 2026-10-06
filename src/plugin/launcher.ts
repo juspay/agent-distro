@@ -6,7 +6,7 @@ import type { Description, StdioServer } from './read.ts';
  * are byte-identical to the ones earlier releases wrote with Python's
  * shlex.quote, whose rules these are.
  */
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   if (!value) return "''";
   if (!/[^\w@%+=:,./-]/.test(value)) return value;
   return "'" + value.replace(/'/g, `'"'"'`) + "'";
