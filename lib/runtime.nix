@@ -5,11 +5,18 @@
 # CommonJS-only), so the copy, not a symlink to the source, is what runs.
 pkgs:
 let
-  node = "${(import ./harness-pkgs.nix pkgs).nodejs-slim_24}/bin/node";
+  # Node is free, so the caller's package set has the same store path as
+  # lib/harness-pkgs.nix's, without instantiating nixpkgs again when the
+  # caller's set does not allow unfree packages.
+  node = "${pkgs.nodejs-slim_24}/bin/node";
+  # Passing pkgs makes npins fetch with pkgs.fetchzip: a fixed-output
+  # derivation fetched at build time, so evaluation never needs the registry.
+  # Its hash is Nix's of the unpacked tree, not npm's `integrity`.
+  yaml = (import ./npins).yaml { inherit pkgs; };
   tree = pkgs.runCommand "agent-distro-runtime" { } ''
     mkdir -p "$out/node_modules"
     cp -r ${../src} "$out/src"
-    ln -s ${(import ./npins).yaml} "$out/node_modules/yaml"
+    ln -s ${yaml} "$out/node_modules/yaml"
   '';
 in
 {
