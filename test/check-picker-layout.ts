@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import type { Listing } from '../src/listing.ts';
 
 const src = process.argv[2];
-const { Menu, palette, width, fit, tail, wrap } = await import(join(src, 'picker/choose.ts'));
+const { Menu, layout, render, palette, width, fit, tail, wrap } = await import(join(src, 'picker/choose.ts'));
 
 // Cells as a terminal draws them, one grapheme at a time.
 for (const [text, cells] of [
@@ -76,7 +76,7 @@ function screen(frame: string, columns: number, rows: number): string[] {
 
 /** Draw, and check the box: every line the same width, its right edge intact. */
 function boxed(menu: InstanceType<typeof Menu>, columns: number, rows: number): string[] {
-  const lines = screen(menu.frame(rows, columns), columns, rows);
+  const lines = screen(frame(menu, rows, columns), columns, rows);
   const box = lines.filter((line) => /^\s*[╭│├╰]/.test(line));
   const widths = new Set(box.map((line) => width(line)));
   assert.equal(widths.size, 1, `box lines differ in width:\n${box.join('\n')}`);
@@ -86,17 +86,30 @@ function boxed(menu: InstanceType<typeof Menu>, columns: number, rows: number): 
 }
 
 const colors = palette({ NO_COLOR: '1' });
+/** A frame as the terminal gets it: layout for the size, then render. */
+function frame(menu: InstanceType<typeof Menu>, rows: number, columns: number): string {
+  const l = layout(menu, columns, rows);
+  assert.ok(l, `no layout fits ${columns}×${rows}`);
+  return render(menu, l, colors);
+}
 // 80×24 fits one to three profiles with twelve harnesses; so do wide
 // terminals, and the box fills the terminal exactly when it must.
 const twelve = [...HARNESSES, ...HARNESSES.map((h) => ({ ...h, name: h.name + '-2' }))];
 for (const count of [1, 2, 3]) {
   for (const [columns, rows] of [[80, 24], [120, 30], [60, 24], [72, 24]]) {
-    boxed(new Menu(listing(SHORT.slice(0, count), twelve), '', colors), columns, rows);
+    boxed(new Menu(listing(SHORT.slice(0, count), twelve), ''), columns, rows);
   }
 }
+// Too small is no layout at all, the one meaning of "does not fit".
+assert.equal(layout(new Menu(listing(SHORT.slice(0, 2)), ''), 30, 8), undefined);
+// Colour follows NO_COLOR and the terminal: ANSI has eight colours, a VT100 none.
+assert.match(palette({ TERM: 'ansi' }).accent, /36/);
+assert.doesNotMatch(palette({ TERM: 'vt100' }).accent, /36/);
+assert.doesNotMatch(palette({ TERM: 'xterm-256color', NO_COLOR: '1' }).accent, /36/);
+
 // Two panes keep the divider in the header even at 60 columns, and versions
 // keep to the right edge when taglines have no room.
-const narrow = boxed(new Menu(listing(SHORT.slice(0, 2)), '', colors), 60, 24);
+const narrow = boxed(new Menu(listing(SHORT.slice(0, 2)), ''), 60, 24);
 assert.match(narrow.join('\n'), /┬/);
 for (const h of HARNESSES) {
   const line = narrow.find((l) => l.includes('   ' + h.title + ' '))!;
@@ -105,7 +118,7 @@ for (const h of HARNESSES) {
 
 // One long description wraps in its pane rather than taking the taglines' room.
 const taglines = (descriptions: string[]) =>
-  boxed(new Menu(listing(descriptions), '', colors), 80, 24).find((line) => line.includes('Codex'))!;
+  boxed(new Menu(listing(descriptions), ''), 80, 24).find((line) => line.includes('Codex'))!;
 assert.equal(
   taglines([SHORT[0], 'A much longer description of the second profile that would like a wide pane to itself', SHORT[2]]),
   taglines(SHORT),
@@ -117,19 +130,19 @@ const emoji = listing(SHORT.slice(0, 2), [
   harness('cjk', '日本語', '中文说明 · 한국어 \u{2000B}', '2.0'),
   ...HARNESSES,
 ]);
-boxed(new Menu(emoji, '', colors), 80, 24);
+boxed(new Menu(emoji, ''), 80, 24);
 
 // A long CJK query stays inside the filter line, the cursor with it.
-const query = new Menu(emoji, '', colors);
+const query = new Menu(emoji, '');
 query.press('/');
 for (const character of '日本語のとても長い検索クエリをここに入力します') query.press(character);
 const filterLine = boxed(query, 60, 24).find((line) => line.includes('no matches'))!;
 assert.ok(filterLine.includes('…'), filterLine);
-const cursor = query.frame(24, 60).match(/\x1b\[(\d+);(\d+)H\x1b\[\?25h$/)!;
+const cursor = frame(query, 24, 60).match(/\x1b\[(\d+);(\d+)H\x1b\[\?25h$/)!;
 assert.ok(Number(cursor[2]) < 60, `cursor at column ${cursor[2]}`);
 
 // Backspace removes a whole character: no lone surrogate, no half a family.
-const typed = new Menu(emoji, '', colors);
+const typed = new Menu(emoji, '');
 typed.press('/');
 for (const key of ['a', '😀', '👨', '\u200d', '👩', '\u200d', '👧']) typed.press(key);
 assert.equal(typed.query, 'a😀👨\u200d👩\u200d👧');
@@ -139,7 +152,7 @@ typed.press('backspace');
 assert.equal(typed.query, 'a');
 
 // A filtered cursor survives the filter being cleared (and so a fallback).
-const filtered = new Menu(listing(SHORT.slice(0, 1)), '', colors);
+const filtered = new Menu(listing(SHORT.slice(0, 1)), '');
 filtered.press('/');
 for (const character of 'pi') filtered.press(character);
 while (filtered.rows()[filtered.index].name !== 'pi') filtered.press('down');
@@ -148,11 +161,11 @@ filtered.clearFilter();
 assert.equal(filtered.rows()[filtered.index].name, 'pi');
 
 // The remembered choice starts the cursor; the first profile is the default.
-const remembered = new Menu(listing(SHORT.slice(0, 2)), 'vanilla/claude', colors);
+const remembered = new Menu(listing(SHORT.slice(0, 2)), 'vanilla/claude');
 assert.equal(remembered.index, 1);
 remembered.press('enter');
 assert.equal(remembered.rows()[remembered.index].name, 'claude');
-assert.equal(new Menu(listing(SHORT.slice(0, 2)), '', colors).index, 0);
+assert.equal(new Menu(listing(SHORT.slice(0, 2)), '').index, 0);
 
 // A menu that is not a Listing is an argument error, exit 2.
 const node = process.execPath;
