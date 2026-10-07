@@ -24,8 +24,12 @@ export type Spec = {
   provider?: string;
 };
 
-/** A row's auth status: the text drawn and whether it is a signed-in one. */
-export type Status = { text: string; signedIn: boolean };
+/**
+ * A row's auth status: `text` is the one-line form the fallback list prints,
+ * and `items` are the panel's lines — the gateway key first, then the provider
+ * ids. An empty list is "not signed in"; unknown is no status at all.
+ */
+export type Status = { text: string; items: string[] };
 
 /**
  * The I/O a probe reads through, injected so the unit check runs on fixtures
@@ -45,8 +49,8 @@ export const NOT_SIGNED_IN = 'not signed in';
 /** A source's content, or why there is none: missing is "not signed in", unreadable is unknown. */
 type Source<T> = { value: T } | { missing: true } | { unreadable: true };
 
-const SIGNED_OUT: Status = { text: NOT_SIGNED_IN, signedIn: false };
-const signedIn = (text: string): Status => ({ text, signedIn: true });
+const SIGNED_OUT: Status = { text: NOT_SIGNED_IN, items: [] };
+const signedIn = (items: string[]): Status => ({ text: items.join(', '), items });
 const home = (env: Env) => env.HOME ?? '';
 
 /** Nothing usable was found: an unreadable source is unknown, anything else is "not signed in". */
@@ -174,9 +178,9 @@ function anthropic(env: Env, io: Io): Status | undefined {
   const file = json(path, io);
   const account = 'value' in file ? record(record(file.value)?.oauthAccount) : undefined;
   const email = account?.emailAddress;
-  if (typeof email === 'string' && email) return signedIn(email);
+  if (typeof email === 'string' && email) return signedIn([email]);
   const variable = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'].find((name) => env[name]);
-  if (variable) return signedIn(variable);
+  if (variable) return signedIn([variable]);
   return absent(file);
 }
 
@@ -189,11 +193,11 @@ function openai(env: Env, io: Io): Status | undefined {
   const file = json(`${env.CODEX_HOME ?? `${home(env)}/.codex`}/auth.json`, io);
   if ('value' in file) {
     const auth = record(file.value);
-    if (record(auth?.tokens)) return signedIn('ChatGPT');
-    if (typeof auth?.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY) return signedIn('OPENAI_API_KEY');
+    if (record(auth?.tokens)) return signedIn(['ChatGPT']);
+    if (typeof auth?.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY) return signedIn(['OPENAI_API_KEY']);
   }
   const variable = env.OPENAI_API_KEY ? 'OPENAI_API_KEY' : undefined;
-  if (variable) return signedIn(variable);
+  if (variable) return signedIn([variable]);
   return absent(file);
 }
 
@@ -208,7 +212,7 @@ function providerIds(harness: string, env: Env, io: Io): { ids: string[]; source
 /** Every provider a gateway-capable harness has credentials for, in its own ids. */
 function provider(harness: string, env: Env, io: Io): Status | undefined {
   const { ids, source } = providerIds(harness, env, io);
-  if (ids.length) return signedIn(ids.join(', '));
+  if (ids.length) return signedIn(ids);
   return absent(source);
 }
 
@@ -224,7 +228,7 @@ function gateway(spec: Spec, env: Env, io: Io): Status | undefined {
   const { ids, source } = providerIds(spec.provider ?? '', env, io);
   const key = env[spec.keyEnv] ? spec.keyEnv : undefined;
   const list = key ? [key, ...ids] : ids;
-  return list.length ? signedIn(list.join(', ')) : absent(source);
+  return list.length ? signedIn(list) : absent(source);
 }
 
 /** `spec`'s status, or undefined for unknown; never throws. */
@@ -248,6 +252,8 @@ export function probe(spec: Spec, env: Env, io: Io): Status | undefined {
   } catch {
     return undefined;
   }
-  // Once, for every scheme: the text is drawn on the terminal as is.
-  return status && { text: sanitize(status.text), signedIn: status.signedIn };
+  // Once, for every scheme: the items are drawn on the terminal as they are.
+  if (!status) return undefined;
+  const items = status.items.map(sanitize).filter(Boolean);
+  return items.length ? signedIn(items) : SIGNED_OUT;
 }

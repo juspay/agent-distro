@@ -41,8 +41,8 @@ function reset() {
 
 const home = (values: Record<string, string> = {}) => ({ HOME: '/home/u', ...values });
 const read = (spec: Spec, env: Record<string, string | undefined> = home()) => probe(spec, env, io);
-const signed = (text: string): Status => ({ text, signedIn: true });
-const out: Status = { text: NOT_SIGNED_IN, signedIn: false };
+const signed = (...items: string[]): Status => ({ text: items.join(', '), items });
+const out: Status = { text: NOT_SIGNED_IN, items: [] };
 
 // Claude Code: the email in ~/.claude.json, or an env variable.
 reset();
@@ -93,14 +93,16 @@ assert.equal(read({ scheme: 'openai' }), undefined);
 reset();
 const gateway: Spec = { scheme: 'gateway', keyEnv: 'LITELLM_API_KEY', provider: 'omp' };
 databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
-assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY, anthropic, openai'));
+assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY', 'anthropic', 'openai'));
+// The panel lists the items one per line, so the key comes first, alone.
+assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' }))!.items, ['LITELLM_API_KEY', 'anthropic', 'openai']);
 // The key alone, with nothing in the store or the environment.
 reset();
 assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY'));
 // Providers alone, with the key unset; the environment's providers count too.
 reset();
 databases.set('/home/u/.omp/agent/agent.db', ['openai']);
-assert.deepEqual(read(gateway, home({ GEMINI_API_KEY: 'k' })), signed('google, openai'));
+assert.deepEqual(read(gateway, home({ GEMINI_API_KEY: 'k' })), signed('google', 'openai'));
 // Nothing anywhere is "not signed in"; an empty key does not count.
 reset();
 assert.deepEqual(read(gateway), out);
@@ -113,7 +115,7 @@ assert.equal(read(gateway), undefined);
 // AI_GATEWAY=0 is the harness's own providers alone; the key is ignored.
 reset();
 databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
-assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), signed('anthropic, openai'));
+assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), signed('anthropic', 'openai'));
 reset();
 assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), out);
 
@@ -121,7 +123,7 @@ assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })),
 // or XDG_DATA_HOME.
 reset();
 databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
-assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }), signed('anthropic, openai'));
+assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }), signed('anthropic', 'openai'));
 reset();
 databases.set('/agent/agent.db', ['xai']);
 assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }, home({ PI_CODING_AGENT_DIR: '/agent' })), signed('xai'));
@@ -144,14 +146,14 @@ assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }), out);
 // Pi and OpenCode: a JSON object of provider id to credential.
 reset();
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ anthropic: { type: 'api_key', key: 'k' }, openai: { type: 'oauth', access: 'a' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }), signed('anthropic, openai'));
+assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }), signed('anthropic', 'openai'));
 reset();
 files.set('/pi/auth.json', JSON.stringify({ xai: { type: 'api_key', key: 'k' } }));
 assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ PI_CODING_AGENT_DIR: '/pi' })), signed('xai'));
 reset();
 files.set('/data/opencode/auth.json', JSON.stringify({ google: { type: 'api' }, openai: { type: 'wellknown' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'opencode' }, home({ XDG_DATA_HOME: '/data' })), signed('google, openai'));
-assert.deepEqual(read({ scheme: 'provider', provider: 'opencode2' }, home({ XDG_DATA_HOME: '/data' })), signed('google, openai'));
+assert.deepEqual(read({ scheme: 'provider', provider: 'opencode' }, home({ XDG_DATA_HOME: '/data' })), signed('google', 'openai'));
+assert.deepEqual(read({ scheme: 'provider', provider: 'opencode2' }, home({ XDG_DATA_HOME: '/data' })), signed('google', 'openai'));
 reset();
 files.set('/home/u/.local/share/opencode/auth.json', JSON.stringify({ anthropic: { type: 'api' } }));
 assert.deepEqual(read({ scheme: 'provider', provider: 'opencode' }), signed('anthropic'));
@@ -169,7 +171,7 @@ assert.equal(read({ scheme: 'provider', provider: 'pi' }), undefined);
 reset();
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ openai: { type: 'api_key' } }));
 assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ ANTHROPIC_API_KEY: 'k', GEMINI_API_KEY: 'k' })),
-  signed('anthropic, google, openai'));
+  signed('anthropic', 'google', 'openai'));
 reset();
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ anthropic: { type: 'api_key' } }));
 assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ ANTHROPIC_API_KEY: 'k' })), signed('anthropic'));

@@ -5,5 +5,8 @@ result-*
 # Ignore automatically generated direnv output
 .direnv
 
+# Python bytecode from the test scripts
+__pycache__/
+
 # Claude Code
 .worktrees/
