@@ -1,6 +1,7 @@
 {
   title = "Oh My Pi";
   tagline = "gateway or own provider · extensions";
+  auth = "gateway";
   order = 0;
   releaseNotes = version: "https://github.com/can1357/oh-my-pi/releases/tag/v${builtins.head (builtins.split "\\+" version)}";
   checks = [

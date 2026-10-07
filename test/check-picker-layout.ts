@@ -1,7 +1,7 @@
 /**
  * The picker's text and layout without a VM or a terminal: cell widths,
- * truncation, wrapping, and frames that stay inside their box and the
- * terminal at the sizes users have.
+ * wrapping, and the master–detail frame that never cuts a line, at the sizes
+ * users have.
  *
  * Usage: node check-picker-layout.ts SRC
  */
@@ -9,9 +9,11 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 // Erased at run time; the modules themselves come from SRC.
+import type { Layout } from '../src/picker/choose.ts';
 import type { Listing } from '../src/listing.ts';
 
 const src = process.argv[2];
+// The module's path is the SRC argument, so it cannot be a static import.
 const { Menu, layout, render, palette, width, fit, tail, wrap } = await import(join(src, 'picker/choose.ts'));
 
 // Cells as a terminal draws them, one grapheme at a time.
@@ -38,22 +40,37 @@ assert.equal(tail('abc', 0), '');
 assert.deepEqual(wrap('see https://example.com/a/b here', 12, 9), ['see', 'https://exam', 'ple.com/a/b', 'here']);
 assert.deepEqual(wrap('one two three four', 9, 1), ['one two…']);
 
-const harness = (name: string, title: string, tagline: string, version: string) => ({ name, title, tagline, version });
+type Auth = { text: string; items: string[] };
+const harness = (name: string, title: string, tagline: string, version: string, auth?: Auth) => ({ name, title, tagline, version, auth });
+const AUTH: Record<string, Auth> = {
+  omp: { text: 'LITELLM_API_KEY, anthropic, openai', items: ['LITELLM_API_KEY', 'anthropic', 'openai'] },
+  codex: { text: 'ChatGPT', items: ['ChatGPT'] },
+  claude: { text: 'me@example.com', items: ['me@example.com'] },
+  opencode: { text: 'not signed in', items: [] },
+  pi: { text: 'LITELLM_API_KEY', items: ['LITELLM_API_KEY'] },
+};
 const HARNESSES = [
-  harness('omp', 'Oh My Pi', 'gateway or own provider · extensions', '18.6.3'),
-  harness('codex', 'Codex', 'OpenAI login · plugins via marketplace', '0.160.1'),
-  harness('claude', 'Claude Code', 'Anthropic login · plugin dirs per session', '2.1.291'),
-  harness('opencode', 'OpenCode', 'v1 · gateway or own provider', '1.18.34'),
+  harness('omp', 'Oh My Pi', 'gateway or own provider · extensions', '18.7.0', AUTH.omp),
+  harness('codex', 'Codex', 'OpenAI login · plugins via marketplace', '0.160.1', AUTH.codex),
+  harness('claude', 'Claude Code', 'Anthropic login · plugin dirs per session', '2.1.292', AUTH.claude),
+  harness('opencode', 'OpenCode', 'v1 · gateway or own provider', '1.18.35', AUTH.opencode),
   harness('opencode2', 'OpenCode v2', 'v2 preview · private server per launch', '2.0.24'),
-  harness('pi', 'Pi', "OMP's upstream · gateway via models.json", '1.0.4'),
+  harness('pi', 'Pi', "OMP's upstream · gateway via models.json", '1.0.4', AUTH.pi),
 ];
+const OTHER = [HARNESSES[1], HARNESSES[5]];
+const SHORT = ['Juspay skills + Kolu, via Juspay\'s LiteLLM gateway', 'Upstream harnesses with your own provider', 'A third profile'];
 const listing = (descriptions: string[], harnesses = HARNESSES): Listing => ({
   profiles: descriptions.map((description, i) => ({ name: ['juspay', 'vanilla', 'third'][i], description, harnesses })),
 });
-const SHORT = ['Juspay skills + Kolu, via Juspay\'s LiteLLM gateway', 'Upstream harnesses with your own provider', 'A third profile'];
+const TWO: Listing = {
+  profiles: [
+    { name: 'juspay', description: SHORT[0], harnesses: HARNESSES },
+    { name: 'vanilla', description: SHORT[1], harnesses: OTHER },
+  ],
+};
 
-/** The screen a frame draws: rows of cells, written grapheme by grapheme. */
-function screen(frame: string, columns: number, rows: number): string[] {
+/** The cells a frame draws, one string per row, exactly as written. */
+function cells(frame: string, columns: number, rows: number): string[] {
   const grid = Array.from({ length: rows }, () => Array<string>(columns).fill(' '));
   let y = 0;
   let x = 0;
@@ -71,8 +88,20 @@ function screen(frame: string, columns: number, rows: number): string[] {
       }
     }
   }
-  return grid.map((row) => row.join('').trimEnd());
+  return grid.map((row) => row.join(''));
 }
+const screen = (frame: string, columns: number, rows: number) => cells(frame, columns, rows).map((line) => line.trimEnd());
+
+const colors = palette({ NO_COLOR: '1' });
+/** A frame as the terminal gets it: layout for the size, then render. */
+function frame(menu: InstanceType<typeof Menu>, rows: number, columns: number): string {
+  const l = layout(menu, columns, rows);
+  assert.ok(l, `no layout fits ${columns}×${rows}`);
+  return render(menu, l, colors);
+}
+/** The frame's lines as rendered, escapes and all. */
+const rendered = (menu: InstanceType<typeof Menu>, columns: number, rows: number) =>
+  frame(menu, rows, columns).split(/(?=\x1b\[\d+;\d+H\x1b\[K)/).filter((line) => line.includes('\x1b[K'));
 
 /** Draw, and check the box: every line the same width, its right edge intact. */
 function boxed(menu: InstanceType<typeof Menu>, columns: number, rows: number): string[] {
@@ -85,52 +114,119 @@ function boxed(menu: InstanceType<typeof Menu>, columns: number, rows: number): 
   return lines;
 }
 
-const colors = palette({ NO_COLOR: '1' });
-/** A frame as the terminal gets it: layout for the size, then render. */
-function frame(menu: InstanceType<typeof Menu>, rows: number, columns: number): string {
-  const l = layout(menu, columns, rows);
-  assert.ok(l, `no layout fits ${columns}×${rows}`);
-  return render(menu, l, colors);
+/** The box's body, cut to the list and panel columns, so a cell can be read. */
+function body(menu: InstanceType<typeof Menu>, columns: number, rows: number): string[] {
+  const l = layout(menu, columns, rows)!;
+  const left = l.x - 1;
+  return cells(frame(menu, rows, columns), columns, rows)
+    .slice(l.y + l.profile + 1, l.y + l.profile + 1 + l.body)
+    .map((line) => line.slice(left, left + l.inner + 4));
 }
-// 80×24 fits one to three profiles with twelve harnesses; so do wide
-// terminals, and the box fills the terminal exactly when it must.
-const twelve = [...HARNESSES, ...HARNESSES.map((h) => ({ ...h, name: h.name + '-2' }))];
+/** The profile row's text, cut to the box's inner width so a wrap reads whole. */
+function profileRow(menu: InstanceType<typeof Menu>, columns: number, rows: number): string {
+  const l = layout(menu, columns, rows)!;
+  const left = l.x - 1;
+  return cells(frame(menu, rows, columns), columns, rows)
+    .slice(l.y, l.y + l.profile)
+    .map((line) => line.slice(left + 2, left + 2 + l.inner))
+    .join('\n')
+    .replace(/\s+/g, ' ');
+}
+const listCell = (line: string, l: Layout) => line.slice(2, 2 + l.list);
+const panelCell = (line: string, l: Layout) => line.slice(2 + l.list + 3, 2 + l.list + 3 + l.panel);
+/** The title a list cell shows, so a row can be found by its title alone. */
+const titleCell = (line: string, l: Layout) => listCell(line, l).slice(6, 6 + l.title).trimEnd();
+/** Panel text with its wraps undone, so a wrapped line can be looked for. */
+const panelText = (menu: InstanceType<typeof Menu>, columns: number, rows: number) => {
+  const l = layout(menu, columns, rows)!;
+  return body(menu, columns, rows).map((line) => panelCell(line, l)).join('\n').replace(/\s+/g, ' ');
+};
+
+// The box is straight at the sizes users have, with one, two and three
+// profiles; every row keeps its version on the list's right edge; nothing in
+// the body is cut; and the highlighted harness's tagline, status items and the
+// profile line are all there.
 for (const count of [1, 2, 3]) {
-  for (const [columns, rows] of [[80, 24], [120, 30], [60, 24], [72, 24]]) {
-    boxed(new Menu(listing(SHORT.slice(0, count), twelve), ''), columns, rows);
+  for (const [columns, rows] of [[80, 24], [60, 24], [120, 30]] as const) {
+    const menu = new Menu(listing(SHORT.slice(0, count)), 'juspay/claude');
+    const l = layout(menu, columns, rows)!;
+    const lines = boxed(menu, columns, rows);
+    const cellsOfBody = body(menu, columns, rows);
+    for (const h of HARNESSES) {
+      const line = cellsOfBody.find((b) => titleCell(b, l) === h.title);
+      assert.ok(line, `no row for ${h.title} at ${columns}×${rows}:\n${lines.join('\n')}`);
+      assert.ok(listCell(line, l).trimEnd().endsWith(h.version), listCell(line, l));
+      // The status mark: ✓ where signed in, blank otherwise.
+      assert.equal(listCell(line, l).slice(4, 6).trim(), h.auth?.items.length ? '✓' : '', listCell(line, l));
+    }
+    assert.ok(!cellsOfBody.join('').includes('…'), `cut in the body at ${columns}×${rows}:\n${cellsOfBody.join('\n')}`);
+    const shown = menu.current()!;
+    const panel = panelText(menu, columns, rows);
+    assert.ok(panel.includes(shown.tagline), panel);
+    for (const item of shown.auth?.items ?? []) assert.ok(panel.includes(item), panel);
+    // The profile row, under the header, names the profile and describes it.
+    const row = profileRow(menu, columns, rows);
+    assert.ok(row.includes(`${menu.active.name} · ${menu.active.description}`), row);
   }
 }
+
 // Too small is no layout at all, the one meaning of "does not fit".
 assert.equal(layout(new Menu(listing(SHORT.slice(0, 2)), ''), 30, 8), undefined);
+assert.equal(layout(new Menu(listing(SHORT.slice(0, 2)), ''), 50, 24), undefined);
 // Colour follows NO_COLOR and the terminal: ANSI has eight colours, a VT100 none.
 assert.match(palette({ TERM: 'ansi' }).accent, /36/);
 assert.doesNotMatch(palette({ TERM: 'vt100' }).accent, /36/);
 assert.doesNotMatch(palette({ TERM: 'xterm-256color', NO_COLOR: '1' }).accent, /36/);
 
-// Two panes keep the divider in the header even at 60 columns, and versions
-// keep to the right edge when taglines have no room.
-const narrow = boxed(new Menu(listing(SHORT.slice(0, 2)), ''), 60, 24);
-assert.match(narrow.join('\n'), /┬/);
-for (const h of HARNESSES) {
-  const line = narrow.find((l) => l.includes('   ' + h.title + ' '))!;
-  assert.ok(line.endsWith(h.version + '  │'), line);
+// Switching profile — →, Tab and l forward, ←, Shift-Tab and h back — changes
+// the header's accent and the list.
+for (const key of ['right', 'tab', 'l']) {
+  const menu = new Menu(TWO, '');
+  assert.equal(menu.active.name, 'juspay');
+  menu.press(key);
+  assert.equal(menu.active.name, 'vanilla');
+  assert.equal(menu.index, 0);
+  const header = rendered(menu, 80, 24)[0];
+  assert.ok(header.includes('\x1b[1mvanilla'), header);
+  assert.ok(header.includes('\x1b[2mjuspay'), header);
+  assert.ok(header.includes(' · '), header);
+  const drawn = boxed(menu, 80, 24).join('\n');
+  assert.ok(drawn.includes('Codex'), drawn);
+  assert.ok(!drawn.includes('Oh My Pi'), drawn);
 }
-
-// One long description wraps in its pane rather than taking the taglines' room.
-const taglines = (descriptions: string[]) =>
-  boxed(new Menu(listing(descriptions), ''), 80, 24).find((line) => line.includes('Codex'))!;
-assert.equal(
-  taglines([SHORT[0], 'A much longer description of the second profile that would like a wide pane to itself', SHORT[2]]),
-  taglines(SHORT),
-);
+for (const key of ['left', 'backtab', 'h']) {
+  const menu = new Menu(TWO, '');
+  menu.press('right');
+  menu.press(key);
+  assert.equal(menu.active.name, 'juspay');
+}
+// The default profile opens whatever was remembered; switching to the
+// remembered profile puts the cursor on its remembered harness, which keeps
+// its dot.
+const toVanilla = new Menu(TWO, 'vanilla/pi');
+assert.equal(toVanilla.active.name, 'juspay');
+assert.equal(toVanilla.index, 0);
+toVanilla.press('right');
+assert.equal(toVanilla.active.name, 'vanilla');
+assert.equal(toVanilla.index, 1);
+const markedL = layout(toVanilla, 80, 24)!;
+const markedBody = body(toVanilla, 80, 24);
+const dot = (title: string) => listCell(markedBody.find((b) => titleCell(b, markedL) === title)!, markedL).slice(2, 4);
+assert.equal(dot('Pi'), '• ', 'the remembered harness keeps its dot');
+assert.equal(dot('Codex'), '  ');
+// A single-profile distribution shows its one name, not as a tab.
+const one = boxed(new Menu(listing(SHORT.slice(0, 1)), ''), 80, 24).join('\n');
+assert.ok(one.includes('agent-distro · juspay'), one);
+assert.ok(!one.includes(' · vanilla'), one);
 
 // Wide and joined characters in the data keep the border straight.
 const emoji = listing(SHORT.slice(0, 2), [
-  harness('fam', '👨\u200d👩\u200d👧 Fam', '🇯🇵 flag · ❤\ufe0f heart', '1.0'),
-  harness('cjk', '日本語', '中文说明 · 한국어 \u{2000B}', '2.0'),
+  harness('fam', '👨\u200d👩\u200d👧 Fam', '🇯🇵 flag · ❤\ufe0f heart', '1.0', AUTH.claude),
+  harness('cjk', '日本語', '中文说明 · 한국어 \u{2000B}', '2.0', AUTH.omp),
   ...HARNESSES,
 ]);
 boxed(new Menu(emoji, ''), 80, 24);
+boxed(new Menu(emoji, ''), 120, 30);
 
 // A long CJK query stays inside the filter line, the cursor with it.
 const query = new Menu(emoji, '');
@@ -159,13 +255,27 @@ while (filtered.rows()[filtered.index].name !== 'pi') filtered.press('down');
 assert.ok(filtered.index > 0);
 filtered.clearFilter();
 assert.equal(filtered.rows()[filtered.index].name, 'pi');
+// The filter matches a tagline the row no longer shows.
+const byTagline = new Menu(listing(SHORT.slice(0, 1)), '');
+byTagline.press('/');
+for (const character of 'gateway') byTagline.press(character);
+assert.deepEqual(byTagline.rows().map((r) => r.name), ['omp', 'opencode', 'pi']);
+// No matches blanks the panel, and the list says so.
+const none = new Menu(listing(SHORT.slice(0, 1)), '');
+none.press('/');
+for (const character of 'nonesuch') none.press(character);
+assert.ok(boxed(none, 80, 24).join('\n').includes('No matches'));
+assert.ok(!panelText(none, 80, 24).trim(), 'the panel is blank when nothing matches');
 
-// The remembered choice starts the cursor; the first profile is the default.
+// The default profile opens whatever was remembered; the remembered profile
+// and harness still mark their dots, and switching to it moves the cursor.
 const remembered = new Menu(listing(SHORT.slice(0, 2)), 'vanilla/claude');
-assert.equal(remembered.index, 1);
-remembered.press('enter');
-assert.equal(remembered.rows()[remembered.index].name, 'claude');
-assert.equal(new Menu(listing(SHORT.slice(0, 2)), '').index, 0);
+assert.equal(remembered.active.name, 'juspay');
+assert.equal(remembered.index, 0);
+remembered.press('right');
+assert.equal(remembered.active.name, 'vanilla');
+assert.equal(remembered.index, HARNESSES.findIndex((h) => h.name === 'claude'));
+assert.equal(new Menu(listing(SHORT.slice(0, 2)), '').active.name, 'juspay');
 
 // A menu that is not a Listing is an argument error, exit 2.
 const node = process.execPath;

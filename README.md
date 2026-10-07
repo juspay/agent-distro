@@ -31,25 +31,29 @@ AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
 
 To keep the agents installed and updated daily, see [Install](#install).
 
-With several profiles, the chooser has two panes: profiles on the left, with
-the highlighted profile's description under them, and that profile's harnesses
-on the right, each with its tagline and version. Moving through profiles
-previews their harnesses; Enter or Tab moves to the harness pane (here with
-`juspay/claude` remembered from last time):
+With several profiles, the chooser is master–detail: the profiles are tabs in
+the header, the active profile's name and description take a row of their own
+under it, its harnesses are the list on the left, and the highlighted harness
+fills the panel on the right — its tagline and its auth status. `←`/`→` (or
+`Tab`) switch profile, and nothing in the box is ever cut (here with
+`vanilla/pi` remembered from last time, so the default profile opens, the
+remembered one is dotted, and switching to it lands on that harness):
 
 ```
-╭─ agent-distro ───────┬──────────────────────────────────────────── 2 profiles · 6 harnesses ─╮
-│ Profiles             │ Harnesses · juspay                                                    │
-│ ❯ • juspay           │     Oh My Pi     gateway or own provider · extensions         18.6.3  │
-│     vanilla          │     Codex        OpenAI login · plugins via marketplace      0.160.1  │
-│                      │ ❯ • Claude Code  Anthropic login · plugin dirs per session   2.1.291  │
-│ Juspay skills +      │     OpenCode     v1 · gateway or own provider                1.18.34  │
-│ Kolu, via Juspay's   │     OpenCode v2  v2 preview · private server per launch       2.0.24  │
-│ LiteLLM gateway      │     Pi           OMP's upstream · gateway via models.json      1.0.4  │
-├──────────────────────┴───────────────────────────────────────────────────────────────────────┤
-│ / filter…                                                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-↑↓ jk move   Enter launch   ← profiles   Tab switch pane   / filter   q quit
+╭─ agent-distro ───────────────────────── juspay · • vanilla ── 6 harnesses ─╮
+│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway                │
+├──────────────────────────────┬─────────────────────────────────────────────┤
+│ ❯   ✓ Oh My Pi       18.7.0  │ Oh My Pi 18.7.0                             │
+│     ✓ Codex         0.160.1  │ gateway or own provider · extensions        │
+│     ✓ Claude Code   2.1.292  │                                             │
+│     ✓ OpenCode      1.18.35  │ Signed in                                   │
+│       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
+│     ✓ Pi              1.0.4  │   anthropic                                 │
+│                              │   openai                                    │
+├──────────────────────────────┴─────────────────────────────────────────────┤
+│ / filter…                                                                  │
+╰────────────────────────────────────────────────────────────────────────────╯
+↑↓ jk move   ←→ profile   Enter launch   / filter   q quit
 ```
 
 | Variable (names unchanged for script compatibility) | Values | Effect |
@@ -76,34 +80,56 @@ names are consumed; other arguments and everything after `--` are passed to
 the harness unchanged.
 
 Narrowed to one profile (`agent-distro juspay`, `AI_PROFILE`, or a
-single-profile distribution), the chooser is the harness pane alone, under the
-profile's description. Versions reflect the packages pinned at build time,
-without revision suffixes:
+single-profile distribution), the header shows that profile's name instead of
+tabs, and the row under it is the same. Versions reflect the packages pinned at
+build time, without revision suffixes:
 
 ```
-╭─ agent-distro · juspay ───────────────────────────────── 6 harnesses ─╮
-│ Juspay skills + Kolu, via Juspay's LiteLLM gateway                    │
-│ ❯   Oh My Pi     gateway or own provider · extensions         18.6.3  │
-│     Codex        OpenAI login · plugins via marketplace      0.160.1  │
-│     Claude Code  Anthropic login · plugin dirs per session   2.1.291  │
-│     OpenCode     v1 · gateway or own provider                1.18.34  │
-│     OpenCode v2  v2 preview · private server per launch       2.0.24  │
-│     Pi           OMP's upstream · gateway via models.json      1.0.4  │
-├───────────────────────────────────────────────────────────────────────┤
-│ / filter…                                                             │
-╰───────────────────────────────────────────────────────────────────────╯
+╭─ agent-distro · juspay ────────────────────────────────────── 6 harnesses ─╮
+│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway                │
+├──────────────────────────────┬─────────────────────────────────────────────┤
+│ ❯   ✓ Oh My Pi       18.7.0  │ Oh My Pi 18.7.0                             │
+│     ✓ Codex         0.160.1  │ gateway or own provider · extensions        │
+│     ✓ Claude Code   2.1.292  │                                             │
+│     ✓ OpenCode      1.18.35  │ Signed in                                   │
+│       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
+│     ✓ Pi              1.0.4  │   anthropic                                 │
+│                              │   openai                                    │
+├──────────────────────────────┴─────────────────────────────────────────────┤
+│ / filter…                                                                  │
+╰────────────────────────────────────────────────────────────────────────────╯
 ↑↓ jk move   Enter launch   / filter   q quit
 ```
 
+The `✓` in the list marks a harness that can start without a login step, and
+the panel beside it says what it found. It is presence only: the picker
+contacts no provider and checks no token's validity or expiry. Claude Code's
+status is the `oauthAccount.emailAddress` in `$CLAUDE_CONFIG_DIR/.claude.json`
+(default `~/.claude.json`) or the name of
+`ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`; Codex reads
+`$CODEX_HOME/auth.json`, decoding the `email` claim of the OpenID token in
+`tokens.id_token` without checking its signature (`ChatGPT` when the claim is
+absent), or `OPENAI_API_KEY`; a gateway harness lists its profile's
+`gateway.keyEnv` and then the provider ids it also has credentials for, since
+the gateway and the harness's own providers are usable at once; and a harness
+using its own provider lists the ids in its store — OMP's
+`~/.omp/agent/agent.db`, Pi's `$PI_CODING_AGENT_DIR/auth.json` (default
+`~/.pi/agent/auth.json`), OpenCode's
+`${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json` — together with the
+provider API-key variables it reads from the environment. A harness with
+nothing to start from shows a dim `Not signed in` in the panel and no mark; one
+whose store cannot be read shows nothing at all, and no mark. `AI_GATEWAY=0`
+puts a gateway harness back on its own provider. This is a launch-time fact:
+`--list` and `--list --json` never carry it.
+
 | Key | Does |
 | --- | --- |
-| ↑/↓, `j`/`k` | Move |
-| Enter | On a profile, show its harnesses; on a harness, launch it |
-| Tab | Switch between the profile and harness panes (several profiles only) |
-| ←, `h`, Escape | Back to profiles from the harness pane; on the first pane, quit |
-| `/` | Filter the focused pane by title or tagline (a profile's name or description) |
+| ↑/↓, `j`/`k` | Move in the list |
+| `←`/`→`, `Tab`/`Shift-Tab`, `h`/`l` | Switch profile (several profiles only) |
+| Enter | Launch the highlighted harness |
+| `/` | Filter the list by title or tagline |
 | Escape (filtering) | Clear the filter, keeping the cursor on its row |
-| `q`, Ctrl-C | Quit without choosing |
+| Escape, `q`, Ctrl-C | Quit without choosing |
 
 While filtering, the filter line shows the query as typed and how many rows
 match; ↑/↓ still move, Backspace edits, and Enter takes the highlighted match.
@@ -116,12 +142,13 @@ until it grows again, with the cursor and filter kept. Without a terminal on
 stdin, agent-distro says which variables to set instead of drawing anything.
 
 An interactive selection is remembered in
-`${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
-the chooser starts on that profile and then on that harness, both marked with
-`•`.
-Every interactive choice updates it, including `agent-distro <profile>`. Direct selections
-with `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro <profile> <harness>` never update it.
-An unavailable state directory is silently ignored.
+`${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time the
+default profile still opens, and the remembered profile and harness are marked
+with `•`; switching to the remembered profile puts the cursor on that harness.
+Every interactive choice updates it, including `agent-distro <profile>`. Direct
+selections with `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro
+<profile> <harness>` never update it. An unavailable state directory is
+silently ignored.
 
 `agent-distro --list --json` prints what the chooser draws, for programs that
 offer the same choice (such as [kolu](https://github.com/juspay/kolu)), on one
@@ -494,7 +521,7 @@ The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
 root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
@@ -526,8 +553,9 @@ run without a VM: `reader` (the plugin reader), `launch-plugins`
 launches it fails), `<harness>-adapter` (a
 harness's `tests/check-adapter.ts`), `update-schedule` (the updater's
 schedule and cache policy), `list-json` (`--list --json` against its
-type, the chooser's menu and `--list`), and `picker-layout` (the chooser's
-cell widths, truncation and box at common terminal sizes).
+type, the chooser's menu and `--list`), `picker-layout` (the chooser's
+cell widths, truncation and box at common terminal sizes), and `picker-auth`
+(the auth probes over fixture homes and stores).
 
 ### Logo
 
@@ -537,7 +565,8 @@ keep it transparent, textless, readable at 16 px.
 ## Adding a harness
 
 Create `harnesses/<name>/` with four files: `meta.nix` (title, order,
-`releaseNotes = version: URL`, and checks), `default.nix` (the adapter accepting
+`auth = "anthropic" | "openai" | "gateway"`, `releaseNotes = version: URL`,
+and checks), `default.nix` (the adapter accepting
 `{ pkgs, plugins, gateway, package, profileName }`), `source.nix` (`{ pkgs }` to
 package), and `README.md` (design notes). Put pins in `npins/`, scripts in `tests/`, and an
 optional custom updater in `update.py`. Nothing outside this directory needs

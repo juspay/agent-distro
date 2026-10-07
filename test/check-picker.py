@@ -1,4 +1,5 @@
-"""Drive the picker over a PTY: panes, filter, shortcuts, fallback and `--list`."""
+"""Drive the picker over a PTY: profiles as tabs, filter, shortcuts, fallback and `--list`."""
+import base64
 import fcntl
 import json
 import os
@@ -7,6 +8,7 @@ import re
 import select
 import shutil
 import signal
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -23,10 +25,11 @@ HARNESSES = {profile['name']: profile['harnesses'] for profile in LISTING['profi
 ROWS = HARNESSES[DEFAULT]
 NAMES = [row['name'] for row in ROWS]
 DOWN = b'\x1b[B'
+RIGHT = b'\x1b[C'
+SHIFT_TAB = b'\x1b[Z'
 ESCAPE = b'\x1b'
-# The footer names what Enter does, so it tells which pane has focus.
-PROFILE_FOCUS = b'Enter pick profile'
-HARNESS_FOCUS = b'Enter launch'
+# The footer names what Enter does, and is there from the first frame.
+LAUNCH = b'Enter launch'
 # The numbered list's prompts, on the profile list and on a harness list.
 PLAIN_PROFILES = b'Pick a profile ['
 PLAIN_PROMPT = b'Launch ['
@@ -145,8 +148,9 @@ def run(steps, expected, overrides=None, status=0, args=None, size=(24, 80), sta
 
 
 def flow(keys, profile_index=0):
-    """Pick a profile (when there are several) by position, then send `keys`."""
-    return ([(PROFILE_FOCUS, DOWN * profile_index + b'\r')] if OTHERS else []) + [(HARNESS_FOCUS, keys)]
+    """Switch to a profile by position, then send `keys`."""
+    steps = [(LAUNCH, RIGHT * profile_index)] if profile_index else []
+    return steps + [(LAUNCH, keys)]
 
 
 def version(profile, harness):
@@ -176,34 +180,94 @@ listing = subprocess.check_output(['agent-distro', '--list']).decode().splitline
 assert listing == [f"{profile} {row['name']} {row['title']} {row['version']}"
                    for profile in PROFILES for row in HARNESSES[profile]], listing
 
-# The first screen: header counts, panes, every row of the default profile,
-# in full on a wide terminal.
+# The first screen: the profile tabs and count in the header, every harness row
+# with its version, and the highlighted harness in the panel beside it.
 first = run(flow(b'\r'), version(DEFAULT, NAMES[0]), size=(24, 120))
 drawn = first.drawn
 assert first.choice == DEFAULT + '/' + NAMES[0], first.choice
 if OTHERS:
-    assert f'{len(PROFILES)} profiles · {len(ROWS)} harnesses'.encode() in drawn, drawn
-    assert b'Profiles' in drawn and f'Harnesses · {DEFAULT}'.encode() in drawn, drawn
-    assert '← profiles'.encode() in drawn and b'Tab switch pane' in drawn, drawn
+    assert f'{len(ROWS)} harnesses'.encode() in drawn, drawn
+    assert b'\xe2\x86\x90\xe2\x86\x92 profile' in drawn, drawn  # ←→ profile
     for name in PROFILES:
         assert name.encode() in drawn, drawn
 else:
     assert f'agent-distro · {DEFAULT}'.encode() in drawn, drawn
-    assert LISTING['profiles'][0]['description'].encode() in drawn, drawn
     assert f'{len(ROWS)} harnesses'.encode() in drawn, drawn
-    assert 'Harnesses · '.encode() not in drawn and '← profiles'.encode() not in drawn, drawn
-    assert b'Tab' not in drawn, drawn
+    assert b'\xe2\x86\x90\xe2\x86\x92 profile' not in drawn, drawn
 for row in ROWS:
-    for field in ('title', 'tagline', 'version'):
+    for field in ('title', 'version'):
         assert row[field].encode() in drawn, (row, drawn)
+# The panel shows the highlighted harness in full: its tagline, its status and
+# the profile line under it.
+assert ROWS[0]['tagline'].encode() in drawn, drawn
+assert LISTING['profiles'][0]['description'][:15].encode() in drawn, drawn
 assert '╭─ agent-distro'.encode() in drawn and b'/ filter' in drawn, drawn
 assert colours(first.raw), first.raw
 first.restored()
-# 80×24 holds the same rows; taglines may be cut, never titles or versions.
+
+# 80×24 holds the same rows; the panel wraps rather than cutting anything.
 standard = run(flow(b'\r'), version(DEFAULT, NAMES[0]))
 for row in ROWS:
     for field in ('title', 'version'):
         assert row[field].encode() in standard.drawn, (row, standard.drawn)
+assert ROWS[0]['tagline'].encode() in standard.drawn, standard.drawn
+
+# The auth status: a seeded Claude account and Codex tokens are in the panel
+# when that row is highlighted, with the ✓ mark on the row; without the files,
+# the panel says "Not signed in".
+CHECK = '\u2713'.encode()
+with tempfile.TemporaryDirectory() as auth_home:
+    os.makedirs(os.path.join(auth_home, '.codex'))
+    with open(os.path.join(auth_home, '.claude.json'), 'w') as handle:
+        json.dump({'oauthAccount': {'emailAddress': 'picker@example.com'}}, handle)
+    # Codex's id_token is an OpenID JWT: its payload's `email` names the account.
+    claims = base64.urlsafe_b64encode(json.dumps({'email': 'codex@example.com'}).encode()).decode().rstrip('=')
+    with open(os.path.join(auth_home, '.codex', 'auth.json'), 'w') as handle:
+        json.dump({'tokens': {'access_token': 'x', 'id_token': 'header.' + claims + '.signature'}}, handle)
+    # The Claude row (third) is highlighted, so the panel lists its email.
+    seeded = run([(LAUNCH, DOWN * 2), (b'picker@example.com', b'\r')], version(DEFAULT, NAMES[2]),
+                 {'HOME': auth_home}, size=(24, 120))
+    assert CHECK in seeded.drawn, seeded.drawn
+    assert b'Signed in' in seeded.drawn, seeded.drawn
+    assert seeded.choice == DEFAULT + '/' + NAMES[2], seeded.choice
+    # The Codex row: the email decoded from its id_token.
+    codex = run([(LAUNCH, DOWN), (b'codex@example.com', b'\r')], version(DEFAULT, NAMES[1]), {'HOME': auth_home})
+    assert b'codex@example.com' in codex.drawn, codex.drawn
+    # The numbered fallback carries the one-line status before the version.
+    plain_steps = ([(PLAIN_PROFILES, b'\r')] if OTHERS else []) + [(PLAIN_PROMPT, b'\r')]
+    fallback = run(plain_steps, version(DEFAULT, NAMES[0]), {'HOME': auth_home}, size=(len(ROWS) + 5, 120))
+    assert b'picker@example.com' in fallback.drawn, fallback.drawn
+    assert b'codex@example.com' in fallback.drawn, fallback.drawn
+with tempfile.TemporaryDirectory() as bare_home:
+    bare = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': bare_home})
+    assert b'Not signed in' in bare.drawn, bare.drawn
+    assert CHECK not in bare.drawn, bare.drawn
+
+# OMP's own store: the panel lists one provider per line, the enabled credential
+# only, and nothing warns on stderr (a Node that warns about node:sqlite must
+# fail here rather than corrupt the picker).
+with tempfile.TemporaryDirectory() as omp_home:
+    os.makedirs(os.path.join(omp_home, '.omp', 'agent'))
+    database = sqlite3.connect(os.path.join(omp_home, '.omp', 'agent', 'agent.db'))
+    database.execute('CREATE TABLE auth_credentials (provider TEXT NOT NULL, disabled_cause TEXT)')
+    database.execute('INSERT INTO auth_credentials (provider, disabled_cause) VALUES (?, NULL)', ('anthropic',))
+    database.execute('INSERT INTO auth_credentials (provider, disabled_cause) VALUES (?, ?)', ('openai', 'revoked'))
+    database.commit()
+    database.close()
+    omp = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': omp_home, 'PI_CODING_AGENT_DIR': None}, size=(24, 120))
+    assert b'anthropic' in omp.drawn, omp.drawn
+    assert b'openai' not in omp.drawn, omp.drawn
+    assert CHECK in omp.drawn, omp.drawn
+    assert b'Warning' not in omp.drawn, omp.drawn
+# A store OMP has not written a credential to yet is "not signed in", not blank.
+with tempfile.TemporaryDirectory() as fresh_home:
+    os.makedirs(os.path.join(fresh_home, '.omp', 'agent'))
+    database = sqlite3.connect(os.path.join(fresh_home, '.omp', 'agent', 'agent.db'))
+    database.execute('CREATE TABLE other (x)')
+    database.commit()
+    database.close()
+    fresh = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': fresh_home, 'PI_CODING_AGENT_DIR': None})
+    assert b'Not signed in' in fresh.drawn, fresh.drawn
 
 for index, profile in enumerate(PROFILES):
     for row, harness in enumerate(HARNESSES[profile]):
@@ -212,11 +276,10 @@ for index, profile in enumerate(PROFILES):
         assert harness['version'].encode() in picked.drawn, picked.drawn
         assert picked.choice == profile + '/' + harness['name'], picked.choice
         run([], expected, args=[profile, harness['name'], '--version'])
-    for narrowed in (run([(HARNESS_FOCUS, b'\r')], version(profile, NAMES[0]), {'AI_PROFILE': profile}),
-                     run([(HARNESS_FOCUS, b'\r')], version(profile, NAMES[0]), args=[profile, '--version'])):
+    for narrowed in (run([(LAUNCH, b'\r')], version(profile, NAMES[0]), {'AI_PROFILE': profile}),
+                     run([(LAUNCH, b'\r')], version(profile, NAMES[0]), args=[profile, '--version'])):
         assert f'agent-distro · {profile}'.encode() in narrowed.drawn, narrowed.drawn
-        assert PROFILE_FOCUS not in narrowed.drawn, narrowed.drawn
-        assert '← profiles'.encode() not in narrowed.drawn, narrowed.drawn
+        assert b'\xe2\x86\x90\xe2\x86\x92 profile' not in narrowed.drawn, narrowed.drawn
 
 for name in NAMES:
     run([], version(DEFAULT, name), args=[name, '--version'])
@@ -241,52 +304,57 @@ run(flow(b'/' + query.encode() + b'x') + [(b'no matches', b'\x7f'), (count(len(m
     version(DEFAULT, matches[0]['name']))
 
 # Quitting chooses nothing, remembers nothing, and gives the terminal back.
-quit = run(flow(b'q'), PROFILE_FOCUS if OTHERS else HARNESS_FOCUS)
+quit = run(flow(b'q'), LAUNCH)
 assert quit.choice is None
 quit.restored()
-TOP = PROFILE_FOCUS if OTHERS else HARNESS_FOCUS
 for keys in (b'\x03', ESCAPE):
-    quit = run([(TOP, keys)], TOP)
+    quit = run([(LAUNCH, keys)], LAUNCH)
     assert quit.choice is None
     quit.restored()
 # So does a signal. SIGINT to the chooser quits like Ctrl-C, exit 0; sent to
 # the whole group it also ends the shell, as for any script.
-quit = run([(TOP, ('kill', signal.SIGINT))], TOP)
+quit = run([(LAUNCH, ('kill', signal.SIGINT))], LAUNCH)
 assert quit.choice is None
 quit.restored()
 for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-    run([(TOP, ('signal', number))], TOP, status=None).restored()
+    run([(LAUNCH, ('signal', number))], LAUNCH, status=None).restored()
 # SIGTERM to the chooser alone: its status reaches the caller.
-run([(TOP, ('kill', signal.SIGTERM))], TOP, status=143).restored()
+run([(LAUNCH, ('kill', signal.SIGTERM))], LAUNCH, status=143).restored()
 # Any failure other than quitting keeps its status (node rejects the option with 9).
 run([], b'NODE_OPTIONS', {'NODE_OPTIONS': '--no-such-option'}, status=9)
 # An arrow split across packets is still an arrow, not Escape.
-assert run(flow(('split', ESCAPE, b'[B')) + [(HARNESS_FOCUS, b'\r')],
+assert run([(LAUNCH, ('split', ESCAPE, b'[B')), (LAUNCH, b'\r')],
            version(DEFAULT, NAMES[1])).choice == DEFAULT + '/' + NAMES[1]
+# Escape quits, with or without a filter open.
+assert run([(LAUNCH, b'/zzz'), (b'no matches', ESCAPE), (LAUNCH, ESCAPE)], LAUNCH).choice is None
+
 if OTHERS:
-    assert run([(PROFILE_FOCUS, ESCAPE)], PROFILE_FOCUS).choice is None
-    assert run([(PROFILE_FOCUS, b'\r'), (HARNESS_FOCUS, b'h'), (PROFILE_FOCUS, ESCAPE)], HARNESS_FOCUS).choice is None
-    assert run([(PROFILE_FOCUS, b'\r'), (HARNESS_FOCUS, ESCAPE), (PROFILE_FOCUS, b'q')], HARNESS_FOCUS).choice is None
-    # Tab switches panes; moving the profile cursor previews its harnesses.
     last = PROFILES[-1]
-    tabbed = run([(PROFILE_FOCUS, b'\t'), (HARNESS_FOCUS, b'\t'),
-                  (PROFILE_FOCUS, DOWN * len(OTHERS)), (f'Harnesses · {last}'.encode(), b'\t'),
-                  (HARNESS_FOCUS, b'\r')], version(last, NAMES[0]))
-    assert tabbed.choice == last + '/' + NAMES[0], tabbed.choice
-    # Escape and an arrow read as one sequence are both kept: back, then down.
-    run(flow(ESCAPE + DOWN) + [(PROFILE_FOCUS, b'\r'), (HARNESS_FOCUS, b'\r')], version(PROFILES[1], NAMES[0]))
-    # The profile filter matches names and descriptions.
-    hits = [p for p in LISTING['profiles'] if last.lower() in (p['name'] + ' ' + p['description']).lower()]
-    run([(PROFILE_FOCUS, b'/' + last.encode()), (count(len(hits)), b'\r'), (HARNESS_FOCUS, b'\r')],
-        version(hits[0]['name'], NAMES[0]))
-else:
-    assert run([(HARNESS_FOCUS, ESCAPE)], HARNESS_FOCUS).choice is None
-    assert run([(HARNESS_FOCUS, b'h')], HARNESS_FOCUS).choice is None
+    # → and Tab switch profile; the panel and the list follow, and Enter launches
+    # from the profile now shown.
+    switched = run([(LAUNCH, RIGHT * len(OTHERS)), (f'{last} ·'.encode(), b'\r')], version(last, NAMES[0]))
+    assert switched.choice == last + '/' + NAMES[0], switched.choice
+    assert LISTING['profiles'][-1]['description'][:15].encode() in switched.drawn, switched.drawn
+    assert run([(LAUNCH, b'\t'), (f'{PROFILES[1]} ·'.encode(), b'\r')],
+               version(PROFILES[1], NAMES[0])).choice == PROFILES[1] + '/' + NAMES[0]
+    # l, h and Shift-Tab switch too, and the first profile wraps round.
+    assert run([(LAUNCH, b'l'), (f'{PROFILES[1]} ·'.encode(), b'\r')],
+               version(PROFILES[1], NAMES[0])).choice == PROFILES[1] + '/' + NAMES[0]
+    assert run([(LAUNCH, RIGHT), (LAUNCH, b'h'), (f'{DEFAULT} ·'.encode(), b'\r')],
+               version(DEFAULT, NAMES[0])).choice == DEFAULT + '/' + NAMES[0]
+    assert run([(LAUNCH, RIGHT), (LAUNCH, SHIFT_TAB), (f'{DEFAULT} ·'.encode(), b'\r')],
+               version(DEFAULT, NAMES[0])).choice == DEFAULT + '/' + NAMES[0]
+    assert run([(LAUNCH, b'\x1b[D'), (f'{last} ·'.encode(), b'\r')],
+               version(last, NAMES[0])).choice == last + '/' + NAMES[0]
+    # Switching profile re-renders the list for it, with the cursor on its first
+    # harness, so ↓ then Enter takes that profile's second harness.
+    assert run([(LAUNCH, RIGHT), (f'{last} ·'.encode(), DOWN + b'\r')],
+               version(last, NAMES[1])).choice == last + '/' + NAMES[1]
 
 # NO_COLOR keeps attributes (bold, dim) but drops every colour.
-plain_colours = run([(PROFILE_FOCUS if OTHERS else HARNESS_FOCUS, b'q')], b'agent-distro', {'NO_COLOR': '1'})
+plain_colours = run([(LAUNCH, b'q')], b'agent-distro', {'NO_COLOR': '1'})
 assert not colours(plain_colours.raw), plain_colours.raw
-assert not colours(run([(PROFILE_FOCUS if OTHERS else HARNESS_FOCUS, b'q')], b'agent-distro', {'TERM': 'vt100'}).raw)
+assert not colours(run([(LAUNCH, b'q')], b'agent-distro', {'TERM': 'vt100'}).raw)
 
 # Too small, or unsupported, from the start: the numbered list on stderr.
 # Input that is not a choice says so and asks again.
@@ -295,7 +363,7 @@ for overrides, size, prefix in [({}, (len(ROWS) + 5, 120), ()), ({}, (24, 20), (
                                 ({'TERM': None}, (24, 120), ()), ({}, (24, 120), ('setsid', '-w'))]:
     small = run(numbered, version(DEFAULT, NAMES[0]), overrides, size=size, prefix=prefix)
     assert '╭'.encode() not in small.drawn, small.drawn
-    assert f'1. {ROWS[0]["title"]}  {ROWS[0]["tagline"]}  {ROWS[0]["version"]}'.encode() in small.drawn, small.drawn
+    assert f'1. {ROWS[0]["title"]}  {ROWS[0]["tagline"]}  not signed in  {ROWS[0]["version"]}'.encode() in small.drawn, small.drawn
     assert small.choice == DEFAULT + '/' + NAMES[0], small.choice
     if OTHERS:
         assert f'1. {DEFAULT}  {LISTING["profiles"][0]["description"]}\r\n'.encode() in small.drawn, small.drawn
@@ -304,18 +372,18 @@ for overrides, size, prefix in [({}, (len(ROWS) + 5, 120), ()), ({}, (24, 20), (
         assert b'h profiles' not in small.drawn, small.drawn
 # Growing redraws. Shrinking below the minimum shows a notice and keeps the
 # session, filter and cursor included, until the terminal grows again.
-run(flow(('resize', 30, 100)) + [(HARNESS_FOCUS, b'\r')], version(DEFAULT, NAMES[0]))
+run(flow(('resize', 30, 100)) + [(LAUNCH, b'\r')], version(DEFAULT, NAMES[0]))
 target = ROWS[-1]
 matches = [row for row in ROWS if target['title'].lower() in (row['title'] + ' ' + row['tagline']).lower()]
 held = run(flow(b'/' + target['title'].encode() + DOWN * matches.index(target))
            + [(count(len(matches)), ('resize', 8, 30)), (TOO_SMALL, ('resize', 24, 80)),
-              (HARNESS_FOCUS, b'\r')], version(DEFAULT, target['name']))
+              (LAUNCH, b'\r')], version(DEFAULT, target['name']))
 assert held.choice == DEFAULT + '/' + target['name'], held.choice
 assert PLAIN_PROMPT not in held.drawn, held.drawn
 # The notice fits the terminal, and behind it only q acts: Enter and text
 # typed blind change nothing, and q quits even with a filter open.
 typing = flow(b'/' + target['title'].encode() + DOWN * matches.index(target)) + [(count(len(matches)), ('resize', 8, 30))]
-blind = run(typing + [(TOO_SMALL, ('blind', b'\rx')), (HARNESS_FOCUS, b'\r')], version(DEFAULT, target['name']))
+blind = run(typing + [(TOO_SMALL, ('blind', b'\rx')), (LAUNCH, b'\r')], version(DEFAULT, target['name']))
 assert blind.choice == DEFAULT + '/' + target['name'], blind.choice
 assert b'press q to quit' in blind.drawn, blind.drawn
 assert (target['title'] + 'x').encode() not in blind.drawn, blind.drawn
@@ -329,7 +397,7 @@ if pid == 0:
     os.execve(node, [node, chooser_ts, json.dumps(LISTING)], dict(os.environ, TERM='xterm-256color'))
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
 output = b''
-while TOP not in ANSI.sub(b'', output):
+while LAUNCH not in ANSI.sub(b'', output):
     assert select.select([fd], [], [], 30)[0], output
     output += os.read(fd, 65536)
 os.close(fd)
@@ -342,20 +410,30 @@ with tempfile.TemporaryDirectory() as state:
     remembered = PROFILES[-1] + '/' + NAMES[-1]
     with open(path, 'w') as handle:
         handle.write(remembered + '\n')
-    # Profiles still take focus first; the cursor starts on the remembered
-    # profile, then on its remembered harness, both marked.
-    remembered_flow = lambda keys: ([(PROFILE_FOCUS, b'\r')] if OTHERS else []) + [(HARNESS_FOCUS, keys)]
-    marked = run(remembered_flow(b'\r'), version(PROFILES[-1], NAMES[-1]), state=state)
+    # The default profile opens whatever was remembered; the remembered profile
+    # and harness keep their dots, and switching to that profile puts the cursor
+    # on the remembered harness.
+    to_last = [(LAUNCH, RIGHT * len(OTHERS))] if OTHERS else []
+    marked = run(to_last + [(LAUNCH, b'\r')], version(PROFILES[-1], NAMES[-1]), state=state)
     title = HARNESSES[PROFILES[-1]][-1]['title']
-    assert f'• {title}'.encode() in marked.drawn, marked.drawn
+    # The remembered harness keeps its dot, and the panel is on it.
+    assert b'\xe2\x80\xa2' in marked.drawn, marked.drawn
+    assert f'{title} {HARNESSES[PROFILES[-1]][-1]["version"]}'.encode() in marked.drawn, marked.drawn
     if OTHERS:
-        assert f'• {PROFILES[-1]}'.encode() in marked.drawn, marked.drawn
+        assert b'\xe2\x80\xa2 ' + PROFILES[-1].encode() in marked.drawn, marked.drawn
     assert marked.choice == remembered
     assert run([], version(DEFAULT, NAMES[0]), args=[NAMES[0], '--version'], state=state).choice == remembered
-    assert run(remembered_flow(b'k\r'), version(PROFILES[-1], NAMES[-2]), state=state).choice.endswith('/' + NAMES[-2])
+    assert run(to_last + [(LAUNCH, b'k\r')], version(PROFILES[-1], NAMES[-2]), state=state).choice.endswith('/' + NAMES[-2])
+    # A profile switch followed by a launch is remembered too: the default still
+    # opens, and switching back lands on the harness that was launched.
+    if OTHERS:
+        switched = run([(LAUNCH, RIGHT), (LAUNCH, b'\r')], version(PROFILES[1], NAMES[-2]), state=state)
+        assert switched.choice == PROFILES[1] + '/' + NAMES[-2], switched.choice
+        assert run([(LAUNCH, RIGHT), (LAUNCH, b'\r')], version(PROFILES[1], NAMES[-2]),
+                   state=state).choice == PROFILES[1] + '/' + NAMES[-2]
 
     # Narrowing still shows the chooser, so its selection must be remembered.
-    narrowed = run([(HARNESS_FOCUS, b'/no-matches'), (b'no matches', ESCAPE + b'\r')],
+    narrowed = run([(LAUNCH, b'/no-matches'), (b'no matches', ESCAPE + b'\r')],
                    version(DEFAULT, NAMES[0]), args=[DEFAULT, '--version'], state=state)
     assert narrowed.choice == DEFAULT + '/' + NAMES[0], narrowed.choice
     for args, extra in [([DEFAULT, NAMES[-1], '--version'], {}),

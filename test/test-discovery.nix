@@ -10,6 +10,7 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
   cat > source/harnesses/discovery-stub/meta.nix <<'META'
   {
     title = "Discovery Stub";
+    auth = "anthropic";
     order = 999;
     releaseNotes = version: "https://example.invalid/releases/" + version;
     checks = [

@@ -1,6 +1,7 @@
 {
   title = "Claude Code";
   tagline = "Anthropic login · plugin dirs per session";
+  auth = "anthropic";
   order = 2;
   releaseNotes = version: "https://github.com/anthropics/claude-code/releases/tag/v${builtins.head (builtins.split "\\+" version)}";
   checks = [

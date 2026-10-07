@@ -1,11 +1,13 @@
 /**
  * Draw a menu and return a choice; launching and persistence belong to agent-distro.
  *
- * Usage: node choose.ts MENU_JSON [--profile NAME] [--remembered PROFILE/HARNESS]
+ * Usage: node choose.ts MENU_JSON [--auth AUTH_JSON] [--profile NAME] [--remembered PROFILE/HARNESS]
  *
- * MENU_JSON is the `--list --json` value (src/listing.ts). Prints
- * `profile/harness` on stdout and exits 0, or prints nothing and exits 0 when
- * the user quits; argument errors exit 2. The menu is drawn on /dev/tty,
+ * MENU_JSON is the `--list --json` value (src/listing.ts). AUTH_JSON maps
+ * `profile/harness` to the probe spec (src/picker/auth.ts) whose status is
+ * drawn on that row; it is a launch-time fact, so `--list` never carries it.
+ * Prints `profile/harness` on stdout and exits 0, or prints nothing and exits
+ * 0 when the user quits; argument errors exit 2. The menu is drawn on /dev/tty,
  * since the shell captures stdout; a terminal too small or unsupported for
  * the boxed view at start gets a numbered list on stderr.
  *
@@ -13,13 +15,15 @@
  * key), layout (where things go, per terminal size) and render (one frame),
  * and the I/O around them, draw and plain.
  */
-import { openSync, writeSync } from 'node:fs';
+import { existsSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { emitKeypressEvents, createInterface, type Key } from 'node:readline';
+import { DatabaseSync } from 'node:sqlite';
 import { WriteStream } from 'node:tty';
 import { parseArgs } from 'node:util';
 import { parseListing, type Listing, type Profile } from '../listing.ts';
+import { probe, type Io, type Spec, type Status } from './auth.ts';
 
-type Row = { name: string; title: string; tagline: string; version?: string };
+type Row = { name: string; title: string; tagline: string; version?: string; auth?: Status };
 
 // Terminal cells per user-perceived character (grapheme): none for a lone
 // combining or format mark, two for East Asian wide characters, emoji
@@ -113,49 +117,49 @@ export function palette(env: NodeJS.ProcessEnv): Style {
   return { bold: '\x1b[1m', dim: '\x1b[2m', accent: color ? '\x1b[1;36m' : '\x1b[1m', version: color ? '\x1b[36;7m' : '\x1b[7m' };
 }
 const paint = (style: string, text: string) => (style && text ? style + text + RESET : text);
+/** No attributes: measuring a panel line without its escapes. */
+const PLAIN: Style = { bold: '', dim: '', accent: '', version: '' };
 
 /** What is chosen, and how keys change it; nothing about drawing. */
 export class Menu {
   readonly profiles: Profile[];
-  /** The profile pane's rows, one per profile, in the same order. */
-  readonly profileRows: Row[];
   readonly remembered: { profile: string; harness: string };
   readonly harnessCount: number;
-  /** The profile whose harnesses have focus; null while profiles have focus. */
-  profile: Profile | null = null;
-  /** Cursor within the focused pane's filtered rows. */
+  /** The profile whose harnesses the list shows. */
+  activeIndex = 0;
+  /** Cursor within the active profile's filtered harnesses. */
   index = 0;
   query = '';
   filtering = false;
 
   constructor(listing: Listing, remembered = '') {
     this.profiles = listing.profiles;
-    this.profileRows = this.profiles.map((p) => ({ name: p.name, title: p.name, tagline: p.description }));
     const [profile, harness] = remembered.includes('/') ? remembered.split(/\/(.*)/) : ['', ''];
     this.remembered = { profile, harness };
     this.harnessCount = Math.max(...this.profiles.map((p) => p.harnesses.length));
-    // A remembered choice only moves the cursor: profiles still take focus
-    // first whenever there is more than one. The first profile is the default.
-    if (this.panes) this.focus(null, this.profiles.findIndex((p) => p.name === profile));
-    else this.open(this.profiles[0]);
+    // The default profile — the first in the listing — opens, whatever was
+    // remembered: the remembered profile and harness keep their dots, and the
+    // cursor is on the remembered harness only when that profile is the
+    // default one.
+    this.activeIndex = 0;
+    this.index = this.remembered.profile === this.profiles[0].name
+      ? Math.max(0, this.profiles[0].harnesses.findIndex((h) => h.name === harness))
+      : 0;
   }
 
-  get panes() {
-    return this.profiles.length > 1;
-  }
-
-  allRows(): Row[] {
-    return this.profile ? this.profile.harnesses : this.profileRows;
+  /** The profile the list shows. */
+  get active(): Profile {
+    return this.profiles[this.activeIndex];
   }
 
   rows(): Row[] {
     const query = this.query.toLowerCase();
-    return this.allRows().filter((r) => (r.title + ' ' + r.tagline).toLowerCase().includes(query));
+    return this.active.harnesses.filter((r) => (r.title + ' ' + r.tagline).toLowerCase().includes(query));
   }
 
-  /** The profile whose harnesses the right pane shows. */
-  shown(): Profile | undefined {
-    return this.profile ?? this.profiles[this.profileRows.indexOf(this.rows()[this.index])];
+  /** The highlighted row, unless the filter leaves none. */
+  current(): Row | undefined {
+    return this.rows()[this.index];
   }
 
   /** Whether this is the remembered profile, or with `harness`, the remembered choice. */
@@ -163,50 +167,31 @@ export class Menu {
     return this.remembered.profile === profile && this.remembered.harness === harness;
   }
 
-  /** Focus a pane, a profile's harnesses or (null) the profiles, with the cursor at `index` and no filter. */
-  focus(profile: Profile | null, index: number) {
-    this.profile = profile;
-    this.index = Math.max(0, index);
+  /** Switch profile by `by` (cycling), the cursor on its remembered harness, else the first. */
+  switchProfile(by: number) {
+    this.activeIndex = (this.activeIndex + by + this.profiles.length) % this.profiles.length;
     this.query = '';
     this.filtering = false;
-  }
-
-  /** Give a profile's harnesses focus, the cursor on its remembered one. */
-  open(profile: Profile) {
-    this.focus(profile, profile.harnesses.findIndex((h) => this.isRemembered(profile.name, h.name)));
-  }
-
-  back(): boolean {
-    if (!this.profile || !this.panes) return false;
-    this.focus(null, this.profiles.indexOf(this.profile));
-    return true;
-  }
-
-  /** Enter on a row: a harness is the choice; a profile opens. */
-  enter(row: Row): string | undefined {
-    if (this.profile) return this.profile.name + '/' + row.name;
-    this.open(this.profiles[this.profileRows.indexOf(row)]);
+    this.index = Math.max(0, this.active.harnesses.findIndex((h) => this.isRemembered(this.active.name, h.name)));
   }
 
   /** Leave the filter with the cursor still on the row it was on. */
   clearFilter() {
-    const current = this.rows()[this.index];
+    const current = this.current();
     this.query = '';
     this.filtering = false;
-    this.index = Math.max(0, this.allRows().indexOf(current));
+    this.index = Math.max(0, current ? this.active.harnesses.indexOf(current) : 0);
   }
 
   counts(): string {
-    return (this.panes ? `${this.profiles.length} profiles · ` : '') + `${this.harnessCount} harnesses`;
+    return `${this.active.harnesses.length} harnesses`;
   }
 
   /** The keys that do something now, as [key, what it does]. */
   keys(): [string, string][] {
-    const enter: [string, string] = ['Enter', this.profile ? 'launch' : 'pick profile'];
-    const tab: [string, string][] = this.panes ? [['Tab', 'switch pane']] : [];
-    if (this.filtering) return [['↑↓', 'move'], enter, ...tab, ['Esc', 'clear filter']];
-    const back: [string, string][] = this.profile && this.panes ? [['←', 'profiles']] : [];
-    return [['↑↓ jk', 'move'], enter, ...back, ...tab, ['/', 'filter'], ['q', 'quit']];
+    const profiles: [string, string][] = this.profiles.length > 1 ? [['←→', 'profile']] : [];
+    if (this.filtering) return [['↑↓', 'move'], ['Enter', 'launch'], ...profiles, ['Esc', 'clear filter']];
+    return [['↑↓ jk', 'move'], ...profiles, ['Enter', 'launch'], ['/', 'filter'], ['q', 'quit']];
   }
 
   /** Apply one key; a string ends the menu (empty to quit), undefined keeps going. */
@@ -216,12 +201,13 @@ export class Menu {
     const move = (by: number) => (this.index = (this.index + by + rows.length) % Math.max(1, rows.length));
     if (key === 'escape') {
       if (this.filtering) this.clearFilter();
-      else if (!this.back()) return '';
+      else return '';
     } else if (key === 'enter') {
-      if (row) return this.enter(row);
-    } else if (key === 'tab') {
-      if (this.profile) this.back();
-      else if (row) this.enter(row);
+      if (row) return this.active.name + '/' + row.name;
+    } else if (key === 'tab' || key === 'right') {
+      this.switchProfile(1);
+    } else if (key === 'backtab' || key === 'left') {
+      this.switchProfile(-1);
     } else if (key === 'down' || (key === 'j' && !this.filtering)) {
       move(1);
     } else if (key === 'up' || (key === 'k' && !this.filtering)) {
@@ -235,79 +221,97 @@ export class Menu {
       this.index = 0;
     } else if (key === 'q') {
       return '';
-    } else if (key === 'left' || key === 'h') {
-      if (!this.back()) return '';
+    } else if (key === 'l') {
+      this.switchProfile(1);
+    } else if (key === 'h') {
+      this.switchProfile(-1);
     } else if (key === '/') {
       this.filtering = true;
     }
   }
 }
 
-// Two cells of pointer and two of remembered mark lead every row.
+// '❯ ' pointer and '• ' remembered mark, then '✓ ' for the status mark.
 const GUTTER = 4;
+const MARK = 2;
+// The panel wants PANEL_WANT cells and never gets less than PANEL_MIN while the
+// box is drawn; beyond the longest tagline the box stops growing.
+const PANEL_WANT = 30;
+const PANEL_MIN = 24;
 
-type Columns = { title: number; tagline: number; version: number };
-/** Where things go for the data and one terminal size: the box at (x, y), its panes' widths and rows. */
-type Layout = { x: number; y: number; inner: number; left: number; right: number; columns: Columns; body: number; description: number; terminal: number };
+/** Where things go for the data and one terminal size: the box at (x, y), its columns and body height. */
+export type Layout = { x: number; y: number; inner: number; list: number; panel: number; title: number; version: number; profile: number; body: number; terminal: number };
 
 /**
- * Widths come from the data: the box is as wide as its content wants and the
- * terminal allows. When it must narrow, the room descriptions were given
- * beyond the pane's base width goes first, then taglines, then the profile
- * pane down to its names.
+ * Widths come from the data: the list column is fixed by the titles and the
+ * versions alone, so nothing the probes found can widen it; the panel takes the
+ * rest. The box grows to the longest wrapped-free line — the longest tagline —
+ * and wraps the panel beyond that, so nothing inside is ever cut.
  */
 export function layout(menu: Menu, columns: number, rows: number): Layout | undefined {
-  const all = menu.profiles.flatMap((p) => p.harnesses);
+  const all: Row[] = menu.profiles.flatMap((p) => p.harnesses);
   const longest = (texts: string[]) => Math.max(0, ...texts.map(width));
   const title = longest(all.map((h) => h.title));
   const version = longest(all.map((h) => h.version));
   const tagline = longest(all.map((h) => h.tagline));
-  const names = longest(menu.profiles.map((p) => p.name));
-  const body = menu.panes ? Math.max(menu.harnessCount, menu.profiles.length + 2) : menu.harnessCount;
-  const description = body - menu.profiles.length - 1;
-  // A harness row without its tagline: pointer, mark, title and version chip.
-  const minimum = GUTTER + title + 2 + version + 2;
-  const header = width(brand(menu)) + width(menu.counts()) + 8;
+  const list = GUTTER + MARK + title + 2 + version + 2;
   const room = columns - 4;
-  const wanted = Math.max(
-    minimum + (tagline ? 2 + tagline : 0),
-    menu.panes ? width('Harnesses · ') + names : width(menu.profiles[0].description),
-  );
-  // The profile pane: never narrower than its names, nor than the brand above
-  // it (so the header has a place for the divider).
-  const narrowest = Math.max(GUTTER + names, width('agent-distro') + 1);
-  let left = 0;
-  if (menu.panes) {
-    const base = Math.max(narrowest, 20);
-    left = base;
-    while (left < 36 && menu.profiles.some((p) => wrap(p.description, left, Infinity).length > description)) left++;
-    if (left + 3 + wanted > room) left = Math.max(base, room - 3 - wanted);
-    if (left + 3 + minimum > room) left = Math.max(narrowest, room - 3 - minimum);
-  }
-  const inner = Math.min(room, Math.max(header - 4, menu.panes ? left + 3 + wanted : wanted));
-  const right = menu.panes ? inner - left - 3 : inner;
-  if (right < minimum || inner + 4 < header || rows < body + 6) return undefined;
-  // Taglines take the room left over, so version chips sit on the right edge.
-  const taglines = right - minimum - 2;
+  if (room < list + 3 + PANEL_MIN) return undefined;
+  const inner = Math.min(room, list + 3 + Math.max(PANEL_WANT, tagline + 2));
+  const panel = inner - list - 3;
+  // The profile row is as tall as the longest description needs at this width —
+  // the same count for every profile, so switching never moves the columns.
+  const profile = Math.max(...menu.profiles.map((p) => wrap(profileLine(p), inner, Infinity).length));
+  // The body is as tall as the tallest panel at this width, so switching profile
+  // never overflows it, and never shorter than the list.
+  const body = Math.max(menu.harnessCount, ...menu.profiles.flatMap((p) => p.harnesses.map((h) => panelContent(h, panel, PLAIN).length)));
+  if (rows < body + profile + 6 || inner + 4 < 8 + width(brand(menu)) + width(menu.counts()) + 1) return undefined;
   const x = columns - inner - 4 >= 2 ? 2 : 1;
-  const y = rows >= body + 7 ? 2 : 1;
-  return { x, y, inner, left, right, columns: { title, tagline: tagline && taglines >= 6 ? taglines : 0, version }, body, description, terminal: columns };
+  const y = rows >= body + profile + 7 ? 2 : 1;
+  return { x, y, inner, list, panel, title, version, profile, body, terminal: columns };
 }
 
-const brand = (menu: Menu) => 'agent-distro' + (menu.panes ? '' : ' · ' + menu.profiles[0].name);
+/** The profile row's text: the name, then its description. */
+const profileLine = (profile: Profile) => `${profile.name} · ${profile.description}`;
 
-/**
- * One row of either pane, `n` cells wide: pointer, remembered mark and title,
- * then the tagline and version where the pane gives them columns.
- */
-function listRow(row: Row, selected: boolean, focused: boolean, remembered: boolean, n: number, columns: Columns, style: Style): string {
-  let text = (selected ? paint(focused ? style.accent : style.dim, '❯') : ' ') + ' ' + (remembered ? paint(style.accent, '•') : ' ') + ' ';
-  text += paint(selected ? style.bold : '', pad(row.title, columns.title));
-  if (columns.tagline) text += '  ' + paint(style.dim, pad(fit(row.tagline, columns.tagline), columns.tagline));
-  if (row.version === undefined) return text;
-  // Slack goes before the chip, so versions keep to the right edge.
-  const used = GUTTER + columns.title + (columns.tagline ? 2 + columns.tagline : 0);
-  return text + ' '.repeat(n - used - columns.version - 4) + '  ' + paint(selected ? style.version : '', ' ' + row.version.padStart(columns.version) + ' ');
+const brand = (menu: Menu) => 'agent-distro' + (menu.profiles.length > 1 ? '' : ' · ' + menu.profiles[0].name);
+
+/** The profile tabs, in menu order: the active one in accent, the remembered one dotted. */
+function tabLine(menu: Menu, style: Style): string {
+  return menu.profiles
+    .map((p, i) => (menu.remembered.profile === p.name ? paint(style.accent, '• ') : '') + paint(i === menu.activeIndex ? style.accent : style.dim, p.name))
+    .join(paint(style.dim, ' · '));
+}
+
+/** The tabs' width as drawn, without their escapes. */
+const tabWidth = (menu: Menu) =>
+  menu.profiles.reduce((sum, p) => sum + (menu.remembered.profile === p.name ? 2 : 0) + width(p.name), 0)
+  + 3 * (menu.profiles.length - 1);
+
+/** One list row, `l.list` cells wide: pointer, remembered mark, status mark, title, version chip. */
+function listRow(row: Row, selected: boolean, remembered: boolean, l: Layout, style: Style): string {
+  const mark = row.auth?.items.length ? paint(style.accent, '✓') : ' ';
+  let text = (selected ? paint(style.accent, '❯') : ' ') + ' ' + (remembered ? paint(style.accent, '•') : ' ') + ' ' + mark + ' ';
+  text += paint(selected ? style.bold : '', pad(row.title, l.title));
+  // The chip ends the row, so the version keeps to the right edge.
+  return text + '  ' + paint(selected ? style.version : '', ' ' + row.version.padStart(l.version) + ' ');
+}
+
+/** The panel's content for `row`: the harness, then its auth status. */
+function panelContent(row: Row, panel: number, style: Style): string[] {
+  const line = (text: string, style: string) => paint(style, pad(text, panel));
+  const lines: string[] = [];
+  for (const text of wrap(`${row.title} ${row.version}`, panel, Infinity)) lines.push(line(text, style.bold));
+  for (const text of wrap(row.tagline, panel, Infinity)) lines.push(line(text, style.dim));
+  lines.push(' '.repeat(panel));
+  if (row.auth?.items.length) {
+    lines.push(line('Signed in', ''));
+    // `wrap` drops leading whitespace, so the two-cell indent is added after it.
+    for (const item of row.auth.items) for (const text of wrap(item, panel - 2, Infinity)) lines.push(line('  ' + text, ''));
+  } else if (row.auth) {
+    lines.push(line('Not signed in', style.dim));
+  }
+  return lines;
 }
 
 /** One frame for `menu` in `l`: per key, nothing re-solved. */
@@ -318,42 +322,37 @@ export function render(menu: Menu, l: Layout, style: Style): string {
   const row = (...cells: string[]) => lines.push(edge('│ ') + cells.join(edge(' │ ')) + edge(' │'));
   const blank = (n: number) => ' '.repeat(n);
 
-  // Header: brand on the left, counts on the right, the pane divider between.
+  // Header: brand, the profile tabs, the harness count; the tabs give way on a
+  // terminal too narrow for them, and the rule absorbs whatever is left.
   const name = brand(menu);
   const counts = menu.counts();
-  const fill = l.inner - 4 - width(name) - width(counts);
-  let rule = '─'.repeat(fill);
-  const divider = l.left - 1 - width(name);
-  if (menu.panes && divider < fill) rule = rule.slice(0, divider) + '┬' + rule.slice(divider + 1);
-  lines.push(edge('╭─ ') + paint(bold, 'agent-distro') + paint(dim, name.slice('agent-distro'.length)) + edge(' ' + rule + ' ') + counts + edge(' ─╮'));
+  const tabs = menu.profiles.length > 1 ? tabLine(menu, style) : '';
+  let fill = l.inner - 4 - width(name) - width(counts) - (tabs ? tabWidth(menu) + 4 : 0);
+  const shown = tabs && fill >= 1 ? tabs + edge(' ── ') : '';
+  if (!shown) fill = l.inner - 4 - width(name) - width(counts);
+  lines.push(edge('╭─ ') + paint(bold, 'agent-distro') + paint(dim, name.slice('agent-distro'.length)) + edge(' ' + '─'.repeat(fill) + ' ') + shown + counts + edge(' ─╮'));
 
-  const shown = menu.shown();
+  // The profile row, under the header and above the columns: the name in
+  // accent, then the description; every profile gets the same number of lines.
+  const profile = menu.active;
+  const profileLines = wrap(profileLine(profile), l.inner, Infinity);
+  for (let i = 0; i < l.profile; i++) {
+    const text = profileLines[i];
+    const cell = text === undefined ? blank(l.inner) : pad(text, l.inner);
+    row(cell.startsWith(profile.name) ? paint(accent, profile.name) + cell.slice(profile.name.length) : cell);
+  }
+  lines.push(edge('├' + '─'.repeat(l.list + 2) + '┬' + '─'.repeat(l.panel + 2) + '┤'));
+
+  // The list, and beside it the panel: the highlighted harness.
+  const current = menu.current();
   const filtered = menu.rows();
-  // Either pane: the focused one's rows are filtered, and it shows when nothing matches.
-  const pane = (rows: Row[], selected: number, focused: boolean, remembered: (row: Row) => boolean, n: number, columns: Columns) =>
-    rows.length || !focused
-      ? rows.map((r, i) => listRow(r, i === selected, focused, remembered(r), n, columns, style))
-      : [paint(dim, pad('No matches', n))];
-  const { profile } = menu;
-  const harnesses = pane(profile ? filtered : (shown?.harnesses ?? []), profile ? menu.index : -1, !!profile,
-    (h) => !!shown && menu.isRemembered(shown.name, h.name), l.right, l.columns);
-  let profiles: string[] = [];
-  if (menu.panes) {
-    const heading = (text: string, focused: boolean, n: number) => paint(focused ? accent : dim, pad(fit(text, n), n));
-    row(heading('Profiles', !profile, l.left), heading(shown ? 'Harnesses · ' + shown.name : 'Harnesses', !!profile, l.right));
-    profiles = pane(profile ? menu.profileRows : filtered, profile ? menu.profiles.indexOf(profile) : menu.index, !profile,
-      (p) => menu.isRemembered(p.name), l.left, { title: l.left - GUTTER, tagline: 0, version: 0 });
-    // The description sits below every profile, filtered or not, so it never moves.
-    while (profiles.length <= menu.profiles.length) profiles.push(blank(l.left));
-    for (const line of shown ? wrap(shown.description, l.left, l.description) : []) profiles.push(paint(dim, pad(line, l.left)));
-  } else {
-    row(paint(dim, pad(fit(menu.profiles[0].description, l.right), l.right)));
-  }
-  for (let i = 0; i < l.body; i++) {
-    row(...(menu.panes ? [profiles[i] ?? blank(l.left)] : []), harnesses[i] ?? blank(l.right));
-  }
+  const list = filtered.length
+    ? filtered.map((r, i) => listRow(r, i === menu.index, menu.isRemembered(profile.name, r.name), l, style))
+    : [paint(dim, pad('No matches', l.list))];
+  const content = current ? panelContent(current, l.panel, style) : [];
+  for (let i = 0; i < l.body; i++) row(list[i] ?? blank(l.list), content[i] ?? blank(l.panel));
 
-  lines.push(edge('├' + (menu.panes ? '─'.repeat(l.left + 2) + '┴' + '─'.repeat(l.right + 2) : '─'.repeat(l.inner + 2)) + '┤'));
+  lines.push(edge('├' + '─'.repeat(l.list + 2) + '┴' + '─'.repeat(l.panel + 2) + '┤'));
   // The filter line: the query as typed and how many rows it leaves.
   let cursor = '\x1b[?25l';
   if (menu.filtering) {
@@ -393,9 +392,11 @@ function keyName(sequence: string, key?: Key): string | undefined {
   if (sequence === '\x1b') return 'escape';
   if (sequence === '\r' || sequence === '\n') return 'enter';
   if (sequence === '\t') return 'tab';
+  if (sequence === '\x1b[Z') return 'backtab';
   if (sequence === '\x7f' || sequence === '\b') return 'backspace';
-  // Other escape sequences (right arrow, function keys) do nothing.
-  if (key?.code) return ['up', 'down', 'left'].includes(key.name ?? '') ? key.name : undefined;
+  // Other escape sequences (function keys) do nothing; the arrows are the ones
+  // the menu uses.
+  if (key?.code) return ['up', 'down', 'left', 'right'].includes(key.name ?? '') ? key.name : undefined;
   return sequence;
 }
 
@@ -497,41 +498,51 @@ function draw(menu: Menu, fd: number, style: Style): Promise<string | undefined>
 async function plain(menu: Menu): Promise<string> {
   const lines = createInterface({ input: process.stdin, terminal: false })[Symbol.asyncIterator]();
   const say = (text = '') => process.stderr.write(text + '\n');
+  const many = menu.profiles.length > 1;
+  // With several profiles the profile is picked first, as the boxed view's tabs are.
+  let picking = many;
   for (;;) {
-    const rows = menu.rows();
-    const back = !!menu.profile && menu.panes;
-    say('agent-distro · ' + (menu.profile ? menu.profile.name : menu.counts()));
-    say(menu.profile ? menu.profile.description : 'Profiles');
+    const rows = picking ? [] : menu.rows();
+    const count = picking ? menu.profiles.length : rows.length;
+    const at = picking ? menu.activeIndex : menu.index;
+    say('agent-distro · ' + (picking ? menu.counts() : menu.active.name));
+    say(picking ? 'Profiles' : menu.active.description);
     say();
-    rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.version].filter(Boolean).join('  ')));
-    process.stderr.write(`${menu.profile ? 'Launch' : 'Pick a profile'} [${menu.index + 1}]${back ? ', h profiles' : ''}, q quit: `);
+    if (picking) menu.profiles.forEach((p, i) => say(`${i + 1}. ` + p.name + '  ' + p.description));
+    else rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.auth?.text, row.version].filter(Boolean).join('  ')));
+    process.stderr.write(picking ? `Pick a profile [${at + 1}], q quit: ` : `Launch [${at + 1}]${many ? ', h profiles' : ''}, q quit: `);
     const line = await lines.next();
     const value = line.done ? '' : line.value.trim();
     if (line.done || value === 'q' || value === '\x1b') return '';
-    // As on the boxed view: h goes back, or quits with nowhere to go back to.
-    if (value === 'h') {
-      if (!menu.back()) return '';
+    // As on the boxed view: h returns to the profiles.
+    if (!picking && value === 'h' && many) {
+      picking = true;
       continue;
     }
-    const index = value ? Number(value) - 1 : menu.index;
-    if (!/^[0-9]*$/.test(value) || !(index >= 0 && index < rows.length)) {
-      say(`Not a choice: ${value}. Enter a number from 1 to ${rows.length}${back ? ', h' : ''} or q.`);
+    const index = value ? Number(value) - 1 : at;
+    if (!/^[0-9]*$/.test(value) || !(index >= 0 && index < count)) {
+      say(`Not a choice: ${value}. Enter a number from 1 to ${count}${!picking && many ? ', h' : ''} or q.`);
       continue;
     }
-    const choice = menu.enter(rows[index]);
-    if (choice) return choice;
+    if (picking) {
+      menu.activeIndex = index;
+      menu.index = Math.max(0, menu.active.harnesses.findIndex((h) => menu.isRemembered(menu.active.name, h.name)));
+      picking = false;
+      continue;
+    }
+    return menu.active.name + '/' + rows[index].name;
   }
 }
 
 function usage(message: string): never {
-  process.stderr.write(`choose.ts: ${message}\nusage: choose.ts MENU_JSON [--profile NAME] [--remembered PROFILE/HARNESS]\n`);
+  process.stderr.write(`choose.ts: ${message}\nusage: choose.ts MENU_JSON [--auth AUTH_JSON] [--profile NAME] [--remembered PROFILE/HARNESS]\n`);
   process.exit(2);
 }
 
 function parseArguments(args: string[]) {
   let parsed;
   try {
-    parsed = parseArgs({ args, allowPositionals: true, options: { profile: { type: 'string' }, remembered: { type: 'string' } } });
+    parsed = parseArgs({ args, allowPositionals: true, options: { auth: { type: 'string' }, profile: { type: 'string' }, remembered: { type: 'string' } } });
   } catch (error) {
     usage((error as Error).message);
   }
@@ -542,8 +553,39 @@ function parseArguments(args: string[]) {
   } catch (error) {
     usage(`MENU_JSON is not a listing: ${(error as Error).message}`);
   }
-  return { listing, profile: parsed.values.profile ?? '', remembered: parsed.values.remembered ?? '' };
+  let auth: Record<string, Spec> = {};
+  if (parsed.values.auth !== undefined) {
+    try {
+      const value = JSON.parse(parsed.values.auth);
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('not an object');
+      auth = value;
+    } catch (error) {
+      usage(`AUTH_JSON is not a probe map: ${(error as Error).message}`);
+    }
+  }
+  return { listing, auth, profile: parsed.values.profile ?? '', remembered: parsed.values.remembered ?? '' };
 }
+
+/** The real readers behind `Io`: the files a harness reads, and a read-only SQLite query. */
+const io: Io = {
+  read: (path) => {
+    try {
+      return readFileSync(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  },
+  sqlite: (path, sql) => {
+    if (!existsSync(path)) return undefined;
+    const database = new DatabaseSync(path, { readOnly: true });
+    try {
+      return database.prepare(sql).all();
+    } finally {
+      database.close();
+    }
+  },
+};
 
 /** The controlling terminal, or undefined when there is none to draw on. */
 function openTerminal(): number | undefined {
@@ -556,10 +598,19 @@ function openTerminal(): number | undefined {
 }
 
 async function main() {
-  const { listing, profile, remembered } = parseArguments(process.argv.slice(2));
+  const { listing, auth, profile, remembered } = parseArguments(process.argv.slice(2));
   if (profile) {
     listing.profiles = listing.profiles.filter((p) => p.name === profile);
     if (!listing.profiles.length) usage('unknown profile: ' + profile);
+  }
+  // Auth is a launch-time fact: probe every row once, before drawing.
+  for (const p of listing.profiles) {
+    // `Row` is the listing's harness plus the picker-only `auth`, which the listing never carries.
+    const rows: Row[] = p.harnesses;
+    for (const row of rows) {
+      const spec = auth[`${p.name}/${row.name}`];
+      if (spec) row.auth = probe(spec, process.env, io);
+    }
   }
   const menu = new Menu(listing, remembered);
   const term = process.env.TERM ?? '';
