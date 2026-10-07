@@ -30,13 +30,14 @@ export type Status = { text: string; signedIn: boolean };
 /**
  * The I/O a probe reads through, injected so the unit check runs on fixtures
  * and the picker supplies the real files. Each reader returns `undefined` when
- * its source is missing, and throws when it exists but cannot be read.
+ * its source is missing, and throws when it exists but cannot be read. The
+ * SQLite seam is generic — each harness's schema stays with its own probe.
  */
 export type Io = {
   /** A file's text. */
   read: (path: string) => string | undefined;
-  /** The `auth_credentials.provider` values of a SQLite credential store. */
-  providers: (path: string) => string[] | undefined;
+  /** The rows of `sql` in the SQLite database at `path`. */
+  sqlite: (path: string, sql: string) => unknown[] | undefined;
 };
 
 export const NOT_SIGNED_IN = 'not signed in';
@@ -47,6 +48,9 @@ type Source<T> = { value: T } | { missing: true } | { unreadable: true };
 const SIGNED_OUT: Status = { text: NOT_SIGNED_IN, signedIn: false };
 const signedIn = (text: string): Status => ({ text, signedIn: true });
 const home = (env: Env) => env.HOME ?? '';
+
+/** Nothing usable was found: an unreadable source is unknown, anything else is "not signed in". */
+const absent = (source: Source<unknown>): Status | undefined => ('unreadable' in source ? undefined : SIGNED_OUT);
 
 /**
  * Status text comes from the user's own files, so control and format
@@ -90,6 +94,10 @@ function jsonIds(path: string, io: Io): Source<string[]> {
  * directory exists (packages/utils/src/dirs.ts:366-384 and :410, reached by
  * getAgentDbPath at :911-912), else `~/.omp/agent/agent.db`. The OMP launcher
  * (harnesses/omp/default.nix:40) knows only `PI_CODING_AGENT_DIR`/`HOME`.
+ *
+ * The schema — the table, the column, the disabled filter — lives here with
+ * the rest of OMP's policy, not in the generic SQLite reader: it is what OMP's
+ * daily updates change.
  */
 function ompStore(env: Env, io: Io): Source<string[]> {
   const paths = env.PI_CODING_AGENT_DIR
@@ -101,13 +109,27 @@ function ompStore(env: Env, io: Io): Source<string[]> {
   let unreadable = false;
   for (const path of paths) {
     try {
-      const providers = io.providers(path);
-      if (providers !== undefined) return { value: providers };
-    } catch {
+      // Only credentials OMP has not disabled count, as its own active-credential
+      // reads filter `disabled_cause IS NULL` (sqlite-credential-store.ts:418).
+      const rows = io.sqlite(path, 'SELECT provider FROM auth_credentials WHERE disabled_cause IS NULL');
+      if (rows !== undefined) return { value: providerNames(rows) };
+    } catch (error) {
+      // A store OMP has not written a credential to yet is "not signed in".
+      if (error instanceof Error && error.message.includes('no such table')) return { value: [] };
       unreadable = true;
     }
   }
   return unreadable ? { unreadable: true } : { missing: true };
+}
+
+/** The `provider` column of the rows OMP's query returns. */
+function providerNames(rows: unknown[]): string[] {
+  const names: string[] = [];
+  for (const row of rows) {
+    const provider = record(row)?.provider;
+    if (typeof provider === 'string') names.push(provider);
+  }
+  return names;
 }
 
 /** Where each gateway-capable harness keeps its own credentials. */
@@ -155,7 +177,7 @@ function anthropic(env: Env, io: Io): Status | undefined {
   if (typeof email === 'string' && email) return signedIn(email);
   const variable = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'].find((name) => env[name]);
   if (variable) return signedIn(variable);
-  return 'unreadable' in file ? undefined : SIGNED_OUT;
+  return absent(file);
 }
 
 /**
@@ -172,7 +194,7 @@ function openai(env: Env, io: Io): Status | undefined {
   }
   const variable = env.OPENAI_API_KEY ? 'OPENAI_API_KEY' : undefined;
   if (variable) return signedIn(variable);
-  return 'unreadable' in file ? undefined : SIGNED_OUT;
+  return absent(file);
 }
 
 /** Every provider a gateway-capable harness has credentials for, in its own ids. */
@@ -181,7 +203,7 @@ function provider(harness: string, env: Env, io: Io): Status | undefined {
   const ids = 'value' in source ? [...source.value] : [];
   for (const [variable, id] of Object.entries(ENV_PROVIDERS)) if (env[variable] && !ids.includes(id)) ids.push(id);
   if (ids.length) return signedIn([...new Set(ids)].sort().join(', '));
-  return 'unreadable' in source ? undefined : SIGNED_OUT;
+  return absent(source);
 }
 
 /** `spec`'s status, or undefined for unknown; never throws. */

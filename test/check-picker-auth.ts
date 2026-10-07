@@ -17,22 +17,26 @@ const { probe, NOT_SIGNED_IN } = await import(join(src, 'picker/auth.ts'));
 const files = new Map<string, string>();
 const databases = new Map<string, string[]>();
 const unreadable = new Set<string>();
+const tableless = new Set<string>();
 const io: Io = {
   read: (path) => {
     if (unreadable.has(path)) throw new Error(`EACCES: ${path}`);
     return files.get(path);
   },
-  providers: (path) => {
+  sqlite: (path) => {
     if (unreadable.has(path)) throw new Error(`EACCES: ${path}`);
-    return databases.get(path);
+    // A database OMP has not written a credential to yet.
+    if (tableless.has(path)) throw new Error('no such table: auth_credentials');
+    return databases.get(path)?.map((provider) => ({ provider }));
   },
 };
 
-/** A fresh fixture per case: files, sqlite stores and unreadable paths. */
+/** A fresh fixture per case: files, sqlite stores, unreadable and tableless paths. */
 function reset() {
   files.clear();
   databases.clear();
   unreadable.clear();
+  tableless.clear();
 }
 
 const home = (values: Record<string, string> = {}) => ({ HOME: '/home/u', ...values });
@@ -115,6 +119,10 @@ assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }, home({ HOME: '/el
 reset();
 unreadable.add('/home/u/.omp/agent/agent.db');
 assert.equal(read({ scheme: 'provider', provider: 'omp' }), undefined);
+// A store with no credential table yet is "not signed in", not blank.
+reset();
+tableless.add('/home/u/.omp/agent/agent.db');
+assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }), out);
 
 // Pi and OpenCode: a JSON object of provider id to credential.
 reset();

@@ -249,11 +249,11 @@ export class Menu {
 
 // Two cells of pointer and two of remembered mark lead every row.
 const GUTTER = 4;
-// Cells the tagline and the status each keep before giving way: the status
-// shrinks — it is drawn through `fit`, so it ends in `…` — to its floor, then
-// is dropped; the tagline keeps its floor while the status is shown.
+// Cells the tagline and the auth column each keep before giving way: the
+// column shrinks — it is drawn through `fit`, so it ends in `…` — to its floor,
+// then is dropped; the tagline keeps its floor while the column is shown.
 const TAGLINE_FLOOR = 16;
-const STATUS_FLOOR = 7;
+const AUTH_FLOOR = 7;
 
 type Columns = { title: number; tagline: number; auth: number; version: number };
 /** Where things go for the data and one terminal size: the box at (x, y), its panes' widths and rows. */
@@ -263,7 +263,7 @@ type Layout = { x: number; y: number; inner: number; left: number; right: number
  * Widths come from the data: the box is as wide as its content wants and the
  * terminal allows. When it must narrow, the room descriptions were given
  * beyond the pane's base width goes first, then the tagline down to its floor,
- * then the status down to its floor and away; the title and version stay.
+ * then the auth column down to its floor and away; the title and version stay.
  */
 export function layout(menu: Menu, columns: number, rows: number): Layout | undefined {
   const all: Row[] = menu.profiles.flatMap((p) => p.harnesses);
@@ -271,20 +271,21 @@ export function layout(menu: Menu, columns: number, rows: number): Layout | unde
   const title = longest(all.map((h) => h.title));
   const version = longest(all.map((h) => h.version ?? ''));
   const tagline = longest(all.map((h) => h.tagline));
-  // The auth column is as wide as the longest status, capped so one long email
-  // cannot push the taglines and versions off the row.
-  const auth = Math.min(24, longest(all.map((h) => h.auth?.text ?? '')));
+  // The auth column wants to be as wide as the longest status, capped so one
+  // long email cannot push the taglines and versions off the row.
+  const authWanted = Math.min(24, longest(all.map((h) => h.auth?.text ?? '')));
   const names = longest(menu.profiles.map((p) => p.name));
   const body = menu.panes ? Math.max(menu.harnessCount, menu.profiles.length + 2) : menu.harnessCount;
   const description = body - menu.profiles.length - 1;
   // A harness row without its tagline: pointer, mark, title, auth and version
-  // chip; `minimum` adds the auth column, `bare` is what a row keeps without it.
+  // chip; `full` is the row with the auth column at its wanted width, `bare` is
+  // what it keeps without it.
   const bare = GUTTER + title + 2 + version + 2;
-  const minimum = bare + (auth ? 2 + auth : 0);
+  const full = bare + (authWanted ? 2 + authWanted : 0);
   const header = width(brand(menu)) + width(menu.counts()) + 8;
   const room = columns - 4;
   const wanted = Math.max(
-    minimum + (tagline ? 2 + tagline : 0),
+    full + (tagline ? 2 + tagline : 0),
     menu.panes ? width('Harnesses · ') + names : width(menu.profiles[0].description),
   );
   // The profile pane: never narrower than its names, nor than the brand above
@@ -296,20 +297,20 @@ export function layout(menu: Menu, columns: number, rows: number): Layout | unde
     left = base;
     while (left < 36 && menu.profiles.some((p) => wrap(p.description, left, Infinity).length > description)) left++;
     if (left + 3 + wanted > room) left = Math.max(base, room - 3 - wanted);
-    if (left + 3 + minimum > room) left = Math.max(narrowest, room - 3 - minimum);
+    if (left + 3 + full > room) left = Math.max(narrowest, room - 3 - full);
   }
   const inner = Math.min(room, Math.max(header - 4, menu.panes ? left + 3 + wanted : wanted));
   const right = menu.panes ? inner - left - 3 : inner;
   if (right < bare || inner + 4 < header || rows < body + 6) return undefined;
-  // The tagline keeps its floor before the status takes room; the status then
-  // shrinks to its own floor before it is dropped, leaving the tagline the
+  // The tagline keeps its floor before the auth column takes room; the column
+  // then shrinks to its own floor before it is dropped, leaving the tagline the
   // room. At 80×24 with two panes a row has 23 cells for both, hence 16 + 7.
-  const statusRoom = right - bare - 2 - (tagline ? 2 + TAGLINE_FLOOR : 0);
-  const status = auth > 0 && statusRoom >= STATUS_FLOOR ? Math.min(auth, statusRoom) : 0;
-  const taglines = right - bare - 2 - (status ? 2 + status : 0);
+  const authRoom = right - bare - 2 - (tagline ? 2 + TAGLINE_FLOOR : 0);
+  const auth = authWanted > 0 && authRoom >= AUTH_FLOOR ? Math.min(authWanted, authRoom) : 0;
+  const taglines = right - bare - 2 - (auth ? 2 + auth : 0);
   const x = columns - inner - 4 >= 2 ? 2 : 1;
   const y = rows >= body + 7 ? 2 : 1;
-  return { x, y, inner, left, right, columns: { title, tagline: tagline && taglines >= 6 ? taglines : 0, auth: status, version }, body, description, terminal: columns };
+  return { x, y, inner, left, right, columns: { title, tagline: tagline && taglines >= 6 ? taglines : 0, auth, version }, body, description, terminal: columns };
 }
 
 const brand = (menu: Menu) => 'agent-distro' + (menu.panes ? '' : ' · ' + menu.profiles[0].name);
@@ -577,7 +578,7 @@ function parseArguments(args: string[]) {
   return { listing, auth, profile: parsed.values.profile ?? '', remembered: parsed.values.remembered ?? '' };
 }
 
-/** The real readers behind `Io`: the files a harness reads, and OMP's SQLite store. */
+/** The real readers behind `Io`: the files a harness reads, and a read-only SQLite query. */
 const io: Io = {
   read: (path) => {
     try {
@@ -587,18 +588,11 @@ const io: Io = {
       throw error;
     }
   },
-  providers: (path) => {
+  sqlite: (path, sql) => {
     if (!existsSync(path)) return undefined;
     const database = new DatabaseSync(path, { readOnly: true });
     try {
-      // OMP counts only credentials it has not disabled: its own active-credential
-      // reads filter `disabled_cause IS NULL` (sqlite-credential-store.ts:418).
-      return database.prepare('SELECT provider FROM auth_credentials WHERE disabled_cause IS NULL').all().map((row) =>
-        typeof row === 'object' && row !== null && 'provider' in row ? String(row.provider) : '');
-    } catch (error) {
-      // A store OMP has not written a credential to yet is "not signed in".
-      if (error instanceof Error && error.message.includes('no such table')) return [];
-      throw error;
+      return database.prepare(sql).all();
     } finally {
       database.close();
     }
