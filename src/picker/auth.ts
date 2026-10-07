@@ -9,8 +9,8 @@
  * is read here, at launch, so a gateway-capable harness falls back to its own
  * provider when the gateway is disabled.
  *
- * Checked against the pinned sources: Claude Code 2.1.291, Codex 0.160.1,
- * oh-my-pi 18.6.3, Pi 1.0.4, OpenCode 1.18.34 and OpenCode v2 2.0.24.
+ * Checked against the pinned sources: Claude Code 2.1.292, Codex 0.160.1,
+ * oh-my-pi 18.7.0, Pi 1.0.4, OpenCode 1.18.35 and OpenCode v2 2.0.24.
  */
 
 export type Env = NodeJS.ProcessEnv;
@@ -197,13 +197,34 @@ function openai(env: Env, io: Io): Status | undefined {
   return absent(file);
 }
 
-/** Every provider a gateway-capable harness has credentials for, in its own ids. */
-function provider(harness: string, env: Env, io: Io): Status | undefined {
+/** The provider ids a gateway-capable harness has credentials for, and the store they came from. */
+function providerIds(harness: string, env: Env, io: Io): { ids: string[]; source: Source<string[]> } {
   const source = STORES[harness]?.(env, io) ?? { missing: true };
   const ids = 'value' in source ? [...source.value] : [];
   for (const [variable, id] of Object.entries(ENV_PROVIDERS)) if (env[variable] && !ids.includes(id)) ids.push(id);
-  if (ids.length) return signedIn([...new Set(ids)].sort().join(', '));
+  return { ids: [...new Set(ids)].sort(), source };
+}
+
+/** Every provider a gateway-capable harness has credentials for, in its own ids. */
+function provider(harness: string, env: Env, io: Io): Status | undefined {
+  const { ids, source } = providerIds(harness, env, io);
+  if (ids.length) return signedIn(ids.join(', '));
   return absent(source);
+}
+
+/**
+ * A gateway profile: the harness can use the gateway and its own providers at
+ * once, so the status lists the key first (when set and non-empty) and then
+ * every provider it also has credentials for. `AI_GATEWAY=0` is the harness's
+ * own providers alone.
+ */
+function gateway(spec: Spec, env: Env, io: Io): Status | undefined {
+  if (env.AI_GATEWAY === '0') return spec.provider ? provider(spec.provider, env, io) : undefined;
+  if (!spec.keyEnv) return undefined;
+  const { ids, source } = providerIds(spec.provider ?? '', env, io);
+  const key = env[spec.keyEnv] ? spec.keyEnv : undefined;
+  const list = key ? [key, ...ids] : ids;
+  return list.length ? signedIn(list.join(', ')) : absent(source);
 }
 
 /** `spec`'s status, or undefined for unknown; never throws. */
@@ -218,9 +239,7 @@ export function probe(spec: Spec, env: Env, io: Io): Status | undefined {
         status = openai(env, io);
         break;
       case 'gateway':
-        status = env.AI_GATEWAY === '0' && spec.provider ? provider(spec.provider, env, io)
-          : spec.keyEnv ? (env[spec.keyEnv] ? signedIn(spec.keyEnv) : SIGNED_OUT)
-            : undefined;
+        status = gateway(spec, env, io);
         break;
       case 'provider':
         status = spec.provider ? provider(spec.provider, env, io) : undefined;

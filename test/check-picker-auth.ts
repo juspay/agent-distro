@@ -88,17 +88,34 @@ reset();
 files.set('/home/u/.codex/auth.json', 'nonsense');
 assert.equal(read({ scheme: 'openai' }), undefined);
 
-// A gateway profile: the keyEnv variable, present and non-empty.
+// A gateway profile: the key and the harness's own providers are usable at
+// once, so the status lists the key first and then the providers, sorted.
 reset();
 const gateway: Spec = { scheme: 'gateway', keyEnv: 'LITELLM_API_KEY', provider: 'omp' };
+databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
+assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY, anthropic, openai'));
+// The key alone, with nothing in the store or the environment.
+reset();
 assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY'));
-assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: '' })), out);
+// Providers alone, with the key unset; the environment's providers count too.
+reset();
+databases.set('/home/u/.omp/agent/agent.db', ['openai']);
+assert.deepEqual(read(gateway, home({ GEMINI_API_KEY: 'k' })), signed('google, openai'));
+// Nothing anywhere is "not signed in"; an empty key does not count.
+reset();
 assert.deepEqual(read(gateway), out);
-// AI_GATEWAY=0 falls back to the harness's own provider, ignoring keyEnv.
-databases.set('/home/u/.omp/agent/agent.db', ['anthropic', 'openai']);
-assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), signed('anthropic, openai'));
-// Without the fallback, the database is not consulted.
+assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: '' })), out);
+// An unreadable store still leaves the key; without the key it is unknown.
+reset();
+unreadable.add('/home/u/.omp/agent/agent.db');
 assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY'));
+assert.equal(read(gateway), undefined);
+// AI_GATEWAY=0 is the harness's own providers alone; the key is ignored.
+reset();
+databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
+assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), signed('anthropic, openai'));
+reset();
+assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), out);
 
 // OMP's providers come from the SQLite store, relocated by PI_CODING_AGENT_DIR
 // or XDG_DATA_HOME.
