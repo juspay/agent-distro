@@ -137,10 +137,14 @@ export class Menu {
     const [profile, harness] = remembered.includes('/') ? remembered.split(/\/(.*)/) : ['', ''];
     this.remembered = { profile, harness };
     this.harnessCount = Math.max(...this.profiles.map((p) => p.harnesses.length));
-    // A remembered choice only moves the cursor: the remembered profile is
-    // active, with the cursor on its remembered harness, else the first of each.
-    this.activeIndex = Math.max(0, this.profiles.findIndex((p) => p.name === profile));
-    this.index = Math.max(0, this.active.harnesses.findIndex((h) => h.name === harness));
+    // The default profile — the first in the listing — opens, whatever was
+    // remembered: the remembered profile and harness keep their dots, and the
+    // cursor is on the remembered harness only when that profile is the
+    // default one.
+    this.activeIndex = 0;
+    this.index = this.remembered.profile === this.profiles[0].name
+      ? Math.max(0, this.profiles[0].harnesses.findIndex((h) => h.name === harness))
+      : 0;
   }
 
   /** The profile the list shows. */

@@ -141,12 +141,13 @@ until it grows again, with the cursor and filter kept. Without a terminal on
 stdin, agent-distro says which variables to set instead of drawing anything.
 
 An interactive selection is remembered in
-`${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time,
-the chooser starts on that profile and then on that harness, both marked with
-`•`.
-Every interactive choice updates it, including `agent-distro <profile>`. Direct selections
-with `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro <profile> <harness>` never update it.
-An unavailable state directory is silently ignored.
+`${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`. Next time the
+default profile still opens, and the remembered profile and harness are marked
+with `•`; switching to the remembered profile puts the cursor on that harness.
+Every interactive choice updates it, including `agent-distro <profile>`. Direct
+selections with `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro
+<profile> <harness>` never update it. An unavailable state directory is
+silently ignored.
 
 `agent-distro --list --json` prints what the chooser draws, for programs that
 offer the same choice (such as [kolu](https://github.com/juspay/kolu)), on one

@@ -407,8 +407,11 @@ with tempfile.TemporaryDirectory() as state:
     remembered = PROFILES[-1] + '/' + NAMES[-1]
     with open(path, 'w') as handle:
         handle.write(remembered + '\n')
-    # The remembered profile opens, its harness marked, with the cursor on it.
-    marked = run([(LAUNCH, b'\r')], version(PROFILES[-1], NAMES[-1]), state=state)
+    # The default profile opens whatever was remembered; the remembered profile
+    # and harness keep their dots, and switching to that profile puts the cursor
+    # on the remembered harness.
+    to_last = [(LAUNCH, RIGHT * len(OTHERS))] if OTHERS else []
+    marked = run(to_last + [(LAUNCH, b'\r')], version(PROFILES[-1], NAMES[-1]), state=state)
     title = HARNESSES[PROFILES[-1]][-1]['title']
     # The remembered harness keeps its dot, and the panel is on it.
     assert b'\xe2\x80\xa2' in marked.drawn, marked.drawn
@@ -417,12 +420,14 @@ with tempfile.TemporaryDirectory() as state:
         assert b'\xe2\x80\xa2 ' + PROFILES[-1].encode() in marked.drawn, marked.drawn
     assert marked.choice == remembered
     assert run([], version(DEFAULT, NAMES[0]), args=[NAMES[0], '--version'], state=state).choice == remembered
-    assert run([(LAUNCH, b'k\r')], version(PROFILES[-1], NAMES[-2]), state=state).choice.endswith('/' + NAMES[-2])
-    # A profile switch followed by a launch is remembered too.
+    assert run(to_last + [(LAUNCH, b'k\r')], version(PROFILES[-1], NAMES[-2]), state=state).choice.endswith('/' + NAMES[-2])
+    # A profile switch followed by a launch is remembered too: the default still
+    # opens, and switching back lands on the harness that was launched.
     if OTHERS:
-        switched = run([(LAUNCH, RIGHT), (f'{DEFAULT} ·'.encode(), b'\r')], version(DEFAULT, NAMES[0]), state=state)
-        assert switched.choice == DEFAULT + '/' + NAMES[0], switched.choice
-        assert run([(LAUNCH, b'\r')], version(DEFAULT, NAMES[0]), state=state).choice == DEFAULT + '/' + NAMES[0]
+        switched = run([(LAUNCH, RIGHT), (LAUNCH, b'\r')], version(PROFILES[1], NAMES[-2]), state=state)
+        assert switched.choice == PROFILES[1] + '/' + NAMES[-2], switched.choice
+        assert run([(LAUNCH, RIGHT), (LAUNCH, b'\r')], version(PROFILES[1], NAMES[-2]),
+                   state=state).choice == PROFILES[1] + '/' + NAMES[-2]
 
     # Narrowing still shows the chooser, so its selection must be remembered.
     narrowed = run([(LAUNCH, b'/no-matches'), (b'no matches', ESCAPE + b'\r')],

@@ -200,9 +200,13 @@ for (const key of ['left', 'backtab', 'h']) {
   menu.press(key);
   assert.equal(menu.active.name, 'juspay');
 }
-// The remembered harness is where the cursor lands when its profile opens, and
-// it keeps its dot; the other rows have none.
+// The default profile opens whatever was remembered; switching to the
+// remembered profile puts the cursor on its remembered harness, which keeps
+// its dot.
 const toVanilla = new Menu(TWO, 'vanilla/pi');
+assert.equal(toVanilla.active.name, 'juspay');
+assert.equal(toVanilla.index, 0);
+toVanilla.press('right');
 assert.equal(toVanilla.active.name, 'vanilla');
 assert.equal(toVanilla.index, 1);
 const markedL = layout(toVanilla, 80, 24)!;
@@ -263,8 +267,12 @@ for (const character of 'nonesuch') none.press(character);
 assert.ok(boxed(none, 80, 24).join('\n').includes('No matches'));
 assert.ok(!panelText(none, 80, 24).trim(), 'the panel is blank when nothing matches');
 
-// The remembered choice starts the cursor; the first profile is the default.
+// The default profile opens whatever was remembered; the remembered profile
+// and harness still mark their dots, and switching to it moves the cursor.
 const remembered = new Menu(listing(SHORT.slice(0, 2)), 'vanilla/claude');
+assert.equal(remembered.active.name, 'juspay');
+assert.equal(remembered.index, 0);
+remembered.press('right');
 assert.equal(remembered.active.name, 'vanilla');
 assert.equal(remembered.index, HARNESSES.findIndex((h) => h.name === 'claude'));
 assert.equal(new Menu(listing(SHORT.slice(0, 2)), '').active.name, 'juspay');
