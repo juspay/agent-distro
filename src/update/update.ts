@@ -152,8 +152,11 @@ const UNBOUNDED = { encoding: 'utf8', maxBuffer: Infinity } as const;
  * Names of the derivations a build of `target` would compile rather than
  * fetch, at most three. Derivations with allowSubstitutes = false (trivial
  * builders such as symlinkJoin and shell wrappers) are always built locally,
- * so only the substitutable ones count as misses. Anything that stops us
- * reading the answer is `unknown`, never "nothing to compile".
+ * so only the substitutable ones count as misses. `nix derivation show` puts
+ * that flag in `env` for a plain derivation and in `structuredAttrs` when the
+ * builder sets `__structuredAttrs` (writeText, runCommand, …), so look in
+ * both. Anything that stops us reading the answer is `unknown`, never
+ * "nothing to compile".
  */
 export function wouldCompile(nix: string, target: string, options: string[]): Plan {
   const dryRun = spawnSync(nix, ['build', target, ...options, '--dry-run'], { ...UNBOUNDED, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -166,7 +169,11 @@ export function wouldCompile(nix: string, target: string, options: string[]): Pl
   const shown = spawnSync(nix, ['derivation', 'show', ...drvs], { ...UNBOUNDED, stdio: ['ignore', 'pipe', 'inherit'] });
   if (shown.error) return { unknown: `nix derivation show: ${shown.error.message}` };
   if (shown.status !== 0) return { unknown: `nix derivation show exited ${shown.status ?? shown.signal}` };
-  type Derivation = { name: string; env?: Record<string, string> };
+  type Derivation = {
+    name: string;
+    env?: Record<string, string>;
+    structuredAttrs?: Record<string, unknown>;
+  };
   let derivations: Record<string, unknown>;
   try {
     const parsed = JSON.parse(shown.stdout);
@@ -186,7 +193,9 @@ export function wouldCompile(nix: string, target: string, options: string[]): Pl
     return typeof answer !== 'object' || answer === null || typeof answer.name !== 'string';
   });
   if (missing) return { unknown: `nix derivation show did not describe ${missing}` };
-  const names = (answers as Derivation[]).filter((drv) => drv.env?.allowSubstitutes !== '').map((drv) => drv.name);
+  const names = (answers as Derivation[])
+    .filter((drv) => drv.env?.allowSubstitutes !== '' && drv.structuredAttrs?.allowSubstitutes !== false)
+    .map((drv) => drv.name);
   return { names: names.slice(0, 3).join(',') };
 }
 

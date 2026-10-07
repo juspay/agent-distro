@@ -20,10 +20,16 @@ type Fake = {
   fetched?: number;
   /** `json`: a full answer; `truncated`; `fail`; or a literal JSON answer. */
   show?: 'json' | 'truncated' | 'fail' | { raw: string };
+  /**
+   * How each derivation carries allowSubstitutes: `env` (the default for the
+   * first, as a plain derivation does), `structuredAttrs` (under
+   * `__structuredAttrs`), or `plain` (nowhere: a real cache miss).
+   */
+  shapes?: ('env' | 'structuredAttrs' | 'plain')[];
 };
 
 /** A nix answering per `fake`; every call is logged, so a test can tell whether a real build ran. */
-function fakeNix(name: string, { drvs, fetched = 0, show = 'json' }: Fake): string {
+function fakeNix(name: string, { drvs, fetched = 0, show = 'json', shapes = [] }: Fake): string {
   const path = join(work, name);
   writeFileSync(path, `#!${process.execPath}
 const fs = require('node:fs');
@@ -45,9 +51,17 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
   if (typeof show === 'object') process.stdout.write(show.raw);
   else {
     const derivations = {};
+    const shapes = ${JSON.stringify(shapes)};
     // Padding stands in for the inputs and env a real derivation carries.
     for (const [i, path] of args.slice(2).entries()) {
-      derivations[path] = { name: 'pkg-' + i, env: i === 0 ? { allowSubstitutes: '' } : { pad: 'x'.repeat(3000) } };
+      const shape = shapes[i] || (i === 0 ? 'env' : 'plain');
+      const drv = { name: 'pkg-' + i };
+      if (shape === 'env') drv.env = { allowSubstitutes: '' };
+      else if (shape === 'structuredAttrs') {
+        drv.env = { out: '/nix/store/' + '0'.repeat(32) + '-out' };
+        drv.structuredAttrs = { allowSubstitutes: false, exports: {} };
+      } else drv.env = { pad: 'x'.repeat(3000) };
+      derivations[path] = drv;
     }
     const text = JSON.stringify({ derivations });
     process.stdout.write(show === 'truncated' ? text.slice(0, text.length / 2) : text);
@@ -92,6 +106,13 @@ test('a dry run over 1 MiB is read whole', () => {
 
 test('nothing to build is nothing to compile', () => {
   assert.deepEqual(wouldCompile(fakeNix('none', { drvs: 0 }), 'path:/fixture#p', []), { names: '' });
+});
+
+// allowSubstitutes lives in `env` before structured attrs and in
+// `structuredAttrs` under them; a derivation with it nowhere is a real miss.
+test('either shape is not a miss, and neither flag is a build', () => {
+  const nix = fakeNix('shapes', { drvs: 3, shapes: ['env', 'structuredAttrs', 'plain'] });
+  assert.deepEqual(wouldCompile(nix, 'path:/fixture#p', []), { names: 'pkg-2' });
 });
 
 for (const show of ['truncated', 'fail'] as const) {
