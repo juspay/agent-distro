@@ -11,10 +11,10 @@
       "version_upper_bound": "2",
       "release_prefix": null,
       "submodules": false,
-      "version": "v1.18.34",
-      "revision": "aec0b9a6d8898f68f923aaf08b7306d931fd9d76",
-      "url": "https://api.github.com/repos/anomalyco/opencode/tarball/refs/tags/v1.18.34",
-      "hash": "sha256-ygTBG79utH0A1Dmg+tjEeTA633bLO0OfDdi6AwwQnZw="
+      "version": "v1.18.35",
+      "revision": "53d1eabb61e21162157817bf677da0a4ad3332e3",
+      "url": "https://api.github.com/repos/anomalyco/opencode/tarball/refs/tags/v1.18.35",
+      "hash": "sha256-NM5AbX99hDW+oIojiHSRA+QDz27d8L/v42bwZY+6Imk="
     }
   },
   "version": 8
