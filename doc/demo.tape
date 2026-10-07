@@ -1,4 +1,4 @@
-# The README's demo: pick a profile, filter to a harness, land in it.
+# The README's demo: switch profile, filter to a harness, land in it.
 # Re-record with `just demo`, which assembles doc/demo.gif from the frames
 # this writes.
 Output "doc/frames/"
@@ -21,15 +21,12 @@ Show
 Type "XDG_STATE_HOME=$(mktemp -d) nix run github:juspay/agent-distro -- --version"
 Sleep 500ms
 Enter
-Wait+Screen /pick profile/
-Sleep 1500ms
-Down
-Sleep 1200ms
-Up
-Sleep 800ms
-Enter
 Wait+Screen /Enter launch/
-Sleep 1s
+Sleep 1500ms
+Right
+Sleep 1200ms
+Left
+Sleep 800ms
 Type "/"
 Sleep 400ms
 Type@150ms "claude"
