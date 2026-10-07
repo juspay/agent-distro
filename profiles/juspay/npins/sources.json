@@ -9,9 +9,9 @@
       },
       "branch": "master",
       "submodules": false,
-      "revision": "0854ea34af0d9db3c262ead1226edb0bdd8ef33b",
-      "url": "https://github.com/juspay/kolu/archive/0854ea34af0d9db3c262ead1226edb0bdd8ef33b.tar.gz",
-      "hash": "sha256-4+WROBm0SamIzN7aJH8CSG6XDUKPvRZwn35nrnYmZnM="
+      "revision": "0197e0a03c9d02836f77aa841c150244d95392c7",
+      "url": "https://github.com/juspay/kolu/archive/0197e0a03c9d02836f77aa841c150244d95392c7.tar.gz",
+      "hash": "sha256-gBU8Tn+wQjMYVlCcQA7LHEWxzd07/ylQG4lIskLiP0c="
     },
     "mcp-nixos": {
       "type": "GitRelease",
@@ -38,9 +38,9 @@
       },
       "branch": "main",
       "submodules": false,
-      "revision": "c93f5a0cd9310ffc4d9950e0f6cdecbb8fbd69f6",
-      "url": "https://github.com/juspay/skills/archive/c93f5a0cd9310ffc4d9950e0f6cdecbb8fbd69f6.tar.gz",
-      "hash": "sha256-Rp8E3LztfXoAUzDriCaIRBdI2cLkDHapd5qxOHFedLA="
+      "revision": "33c9ed3dc79c04eb016457eead9a26bcedbe1bea",
+      "url": "https://github.com/juspay/skills/archive/33c9ed3dc79c04eb016457eead9a26bcedbe1bea.tar.gz",
+      "hash": "sha256-1lBTHOFD/YBqio1IybdGti9/vlKsbZ5iJHe1vnXkyNA="
     }
   },
   "version": 8

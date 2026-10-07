@@ -274,6 +274,13 @@ do.) Home Manager does the creation and scheduling for you, and at activation it
 prune stage deletes sibling state directories left from an earlier flake/profile
 choice.
 
+Append `--progress` to `command` to drive the same update from a program that
+wants to show the download: stdout is then one JSON object per line —
+`{"progress":{"done":<bytes>,"total":<bytes>}}` while nix fetches, then
+`{"result":"updated","bundle":"/nix/store/…"}` (or `unchanged`, or `skipped`/
+`failed` with a `reason`) — and every human message moves to stderr. Exit codes
+and the history log are the same as without it.
+
 The updater never compiles harnesses from source. It passes the project cache
 (`cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`)
 to every update, and needs nothing more when you are a trusted Nix user or run
@@ -357,7 +364,8 @@ agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; histo
 # → { config = <the generated JSON file>; command = [ node update.ts config ];
 #   program = <a writeShellApplication running `command "$@"`>; }. The Home
 #   Manager module's systemd ExecStart, launchd ProgramArguments (`++ ["--scheduled"]`)
-#   and activation `--cache-warnings` all come from this. `bundle` must be a
+#   and activation `--cache-warnings` all come from this; `command ++ [ "--progress" ]`
+#   is the same update with JSON progress on stdout. `bundle` must be a
 #   `mkLaunchers` bundle with a `runtime` (post-#59 ones do); the period/offset
 #   come from `lib.schedule` and are not overridable here; the updater never
 #   compiles, handing nix only `substituters`.

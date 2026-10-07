@@ -20,10 +20,16 @@ type Fake = {
   fetched?: number;
   /** `json`: a full answer; `truncated`; `fail`; or a literal JSON answer. */
   show?: 'json' | 'truncated' | 'fail' | { raw: string };
+  /**
+   * How each derivation carries allowSubstitutes: `env` (the default for the
+   * first, as a plain derivation does), `structuredAttrs` (under
+   * `__structuredAttrs`), or `plain` (nowhere: a real cache miss).
+   */
+  shapes?: ('env' | 'structuredAttrs' | 'plain')[];
 };
 
 /** A nix answering per `fake`; every call is logged, so a test can tell whether a real build ran. */
-function fakeNix(name: string, { drvs, fetched = 0, show = 'json' }: Fake): string {
+function fakeNix(name: string, { drvs, fetched = 0, show = 'json', shapes = [] }: Fake): string {
   const path = join(work, name);
   writeFileSync(path, `#!${process.execPath}
 const fs = require('node:fs');
@@ -45,9 +51,17 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
   if (typeof show === 'object') process.stdout.write(show.raw);
   else {
     const derivations = {};
+    const shapes = ${JSON.stringify(shapes)};
     // Padding stands in for the inputs and env a real derivation carries.
     for (const [i, path] of args.slice(2).entries()) {
-      derivations[path] = { name: 'pkg-' + i, env: i === 0 ? { allowSubstitutes: '' } : { pad: 'x'.repeat(3000) } };
+      const shape = shapes[i] || (i === 0 ? 'env' : 'plain');
+      const drv = { name: 'pkg-' + i };
+      if (shape === 'env') drv.env = { allowSubstitutes: '' };
+      else if (shape === 'structuredAttrs') {
+        drv.env = { out: '/nix/store/' + '0'.repeat(32) + '-out' };
+        drv.structuredAttrs = { allowSubstitutes: false, exports: {} };
+      } else drv.env = { pad: 'x'.repeat(3000) };
+      derivations[path] = drv;
     }
     const text = JSON.stringify({ derivations });
     process.stdout.write(show === 'truncated' ? text.slice(0, text.length / 2) : text);
@@ -66,10 +80,10 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
   return path;
 }
 
-function run(nix: string) {
+async function run(nix: string) {
   const state = join(work, `${nix}-state`);
   const history = join(work, `${nix}-history.log`);
-  const status = update({
+  const status = await update({
     profile: 'p', flake: 'path:/fixture', state, history, nix,
     substituters: {}, periodSeconds: 21600, offsetSeconds: 7200,
   });
@@ -94,6 +108,13 @@ test('nothing to build is nothing to compile', () => {
   assert.deepEqual(wouldCompile(fakeNix('none', { drvs: 0 }), 'path:/fixture#p', []), { names: '' });
 });
 
+// allowSubstitutes lives in `env` before structured attrs and in
+// `structuredAttrs` under them; a derivation with it nowhere is a real miss.
+test('either shape is not a miss, and neither flag is a build', () => {
+  const nix = fakeNix('shapes', { drvs: 3, shapes: ['env', 'structuredAttrs', 'plain'] });
+  assert.deepEqual(wouldCompile(nix, 'path:/fixture#p', []), { names: 'pkg-2' });
+});
+
 for (const show of ['truncated', 'fail'] as const) {
   test(`a ${show} derivation show is unknown, not nothing`, () => {
     assert.ok('unknown' in wouldCompile(fakeNix(show, { drvs: 5, show }), 'path:/fixture#p', []));
@@ -109,16 +130,16 @@ for (const raw of ['{}', '[]', '42', 'true', 'null', '{"derivations":{}}',
   });
 }
 
-test('an update that cannot tell skips without building', () => {
-  const result = run(fakeNix('unknown', { drvs: 1400, show: { raw: '{}' } }));
+test('an update that cannot tell skips without building', async () => {
+  const result = await run(fakeNix('unknown', { drvs: 1400, show: { raw: '{}' } }));
   assert.equal(result.status, 0);
   assert.deepEqual(result.builds, []);
   assert.match(result.history, / p skipped: cannot tell what the bundle would build /);
   assert.ok(!result.stamped);
 });
 
-test('an update with nothing to compile builds', () => {
-  const result = run(fakeNix('cached', { drvs: 0 }));
+test('an update with nothing to compile builds', async () => {
+  const result = await run(fakeNix('cached', { drvs: 0 }));
   assert.equal(result.status, 0);
   assert.equal(result.builds.length, 1);
   assert.match(result.history, / p updated: Pi 1\.0\n$/);

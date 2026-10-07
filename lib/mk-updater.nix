@@ -4,6 +4,12 @@
 # process that only wants one executable. The schedule (update period and
 # phase) comes from lib/schedule.nix, the same numbers the module and every
 # other consumer read.
+#
+# A consumer that wants to show the download live appends `--progress` to
+# `command` (`command ++ [ "--progress" ]`): the same update, with stdout
+# machine-readable — one JSON object per line, `{"progress":{"done":…,"total":…}}`
+# while nix fetches and then one `{"result":…}` — and every human message on
+# stderr. Nothing else changes; the history log and the exit codes are the same.
 { pkgs, bundle, flake, profile, stateDirectory, history, nix, substituters }:
 let
   inherit (pkgs) lib;
