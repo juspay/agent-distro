@@ -4,7 +4,7 @@
  * Usage: node check-adapter.ts SRC HARNESS_DIR
  */
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -14,8 +14,15 @@ const { writeConfig, mergeState } = await import(join(process.argv[2], 'harness/
 const temporary = () => mkdtempSync(join(tmpdir(), 'pi-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 const snapshot = (path: string) => {
-  const stat = statSync(path, { bigint: true });
-  return [readFileSync(path, 'utf8'), stat.ino, stat.mtimeNs];
+  // One access: an open that hands back the descriptor every later step uses,
+  // so the content and the inode it is compared with cannot race apart.
+  const fd = openSync(path, 'r');
+  try {
+    const stat = fstatSync(fd, { bigint: true });
+    return [readFileSync(fd, 'utf8'), stat.ino, stat.mtimeNs] as const;
+  } finally {
+    closeSync(fd);
+  }
 };
 
 function captureStderr(action: () => void): string {
@@ -143,10 +150,10 @@ test('atomic preservation and validation', () => {
   const inode = statSync(mcp).ino;
   mergeState('--merge', root, fragment);
   assert.equal(statSync(mcp).ino, inode);
-  const content = readFileSync(mcp, 'utf8');
+  const content = snapshot(mcp)[0];
   writeFileSync(settings, '{');
   assert.throws(() => mergeState('--merge', root, fragment));
-  assert.equal(readFileSync(mcp, 'utf8'), content);
+  assert.equal(snapshot(mcp)[0], content);
   assert.equal(readFileSync(settings, 'utf8'), '{');
   assert.deepEqual(readdirSync(root).filter((name) => name.startsWith('.pi-')), []);
 });

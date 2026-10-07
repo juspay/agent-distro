@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -108,8 +108,14 @@ test('mode and symlink are kept; no temporary file is left', () => {
   symlinkSync('real.yml', join(directory, 'config.yml'));
   assert.equal(fill(join(directory, 'config.yml'), [always]).status, 0);
   assert.ok(lstatSync(join(directory, 'config.yml')).isSymbolicLink());
-  assert.equal(statSync(real).mode & 0o777, 0o640);
-  assert.equal(readFileSync(real, 'utf8'), 'setupVersion: 2\nhideThinkingBlock: true\n');
+  // One access: the descriptor both the content and the mode come from.
+  const fd = openSync(real, 'r');
+  try {
+    assert.equal(fstatSync(fd).mode & 0o777, 0o640);
+    assert.equal(readFileSync(fd, 'utf8'), 'setupVersion: 2\nhideThinkingBlock: true\n');
+  } finally {
+    closeSync(fd);
+  }
   assert.deepEqual(readdirSync(directory).sort(), ['config.yml', 'real.yml']);
 });
 
