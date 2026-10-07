@@ -2,21 +2,28 @@
  * Refresh one installed agent-distro profile from its flake, never compiling.
  *
  * Usage: node update.ts CONFIG_JSON                   one update (systemd)
+ *        node update.ts CONFIG_JSON --progress        one update, JSON on stdout (a consumer)
  *        node update.ts CONFIG_JSON --scheduled       when due, up to 3 attempts (launchd)
  *        node update.ts CONFIG_JSON --cache-warnings  warn about unusable caches (activation)
  *
  * CONFIG_JSON is written by modules/home-manager.nix. Each run builds the
  * profile's bundle into `<state>/current`, which the shims prefer, and appends
  * what changed to the history log.
+ *
+ * `--progress` is the same update for a machine rather than a person: stdout
+ * carries one JSON object per line — `{"progress":{"done":…,"total":…}}` while
+ * the bundle downloads, then one result — and every human line goes to stderr.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { basename, join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { realpath } from '../util.ts';
 import { checkCaches } from './cache.ts';
 import { updateDue } from './due.ts';
+import { NixLog } from './progress.ts';
 
 type Config = {
   profile: string;
@@ -71,6 +78,72 @@ function changes(previous: Map<string, [string, string]> | null, next: Map<strin
 /** What a build would do: compile `names` (empty: nothing), or `unknown` and why. */
 export type Plan = { names: string } | { unknown: string };
 
+/** What a run ends with: the bundle it settled on, or why it did not. */
+export type Result =
+  | { result: 'updated' | 'unchanged'; bundle: string }
+  | { result: 'skipped' | 'failed'; reason: string };
+
+/**
+ * How one run reports. Plain mode prints for a person; `--progress` puts the
+ * machine-readable result and progress on stdout as one JSON object per line,
+ * and every human line on stderr, so stdout stays parseable.
+ */
+export type Report = {
+  /** The success summary: stdout in plain mode, stderr under --progress. */
+  summary(line: string): void;
+  /** A warning or a failure: stderr in either mode. */
+  note(line: string): void;
+  /** The final result: a JSON line on stdout under --progress, nothing in plain mode. */
+  result(result: Result): void;
+  /** The bytes fetched so far: a JSON line on stdout under --progress, nothing in plain mode. */
+  progress(done: number, total: number): void;
+};
+
+const plain: Report = {
+  summary: (line) => void process.stdout.write(line),
+  note: (line) => void process.stderr.write(line),
+  result: () => { },
+  progress: () => { },
+};
+
+/** The consumer's mode: JSON on stdout, every human line on stderr. */
+function jsonReport(): Report {
+  const object = (value: object) => void process.stdout.write(`${JSON.stringify(value)}\n`);
+  return {
+    summary: (line) => void process.stderr.write(line),
+    note: (line) => void process.stderr.write(line),
+    result: object,
+    progress: (done, total) => object({ progress: { done, total } }),
+  };
+}
+
+/** What a build step exited with, however it was spawned. */
+type Build = { status: number | null; signal: NodeJS.Signals | null; error?: Error };
+
+/**
+ * The build step under `--progress`. Nix's internal-json stderr is read for the
+ * bytes it fetches; everything else nix says is re-emitted, so its errors still
+ * reach the user.
+ */
+function loggedBuild(nix: string, args: string[], log: NixLog, report: Report): Promise<Build> {
+  const { promise, resolve } = Promise.withResolvers<Build>();
+  const build = spawn(nix, [...args, '--log-format', 'internal-json'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const lines = build.stderr && createInterface({ input: build.stderr, crlfDelay: Infinity });
+  lines?.on('line', (line) => {
+    const event = log.line(line);
+    if (event === null) return;
+    if ('text' in event) process.stderr.write(event.text);
+    else report.progress(event.progress.done, event.progress.total);
+  });
+  build.on('error', (error) => resolve({ status: null, signal: null, error }));
+  build.on('close', (status, signal) => {
+    const held = log.flush();
+    if (held) report.progress(held.done, held.total);
+    resolve({ status, signal });
+  });
+  return promise;
+}
+
 // `nix derivation show` for a revision the cache does not hold yet runs to
 // megabytes; Node's default 1 MiB cap would kill nix and truncate it.
 const UNBOUNDED = { encoding: 'utf8', maxBuffer: Infinity } as const;
@@ -117,8 +190,11 @@ export function wouldCompile(nix: string, target: string, options: string[]): Pl
   return { names: names.slice(0, 3).join(',') };
 }
 
-/** One update; the exit status. A skip is not a failure. */
-export function update(config: Config): number {
+/**
+ * One update; the exit status. A skip is not a failure. `log` reads the bytes
+ * of the build's stderr, which only a `--progress` run asks nix to write.
+ */
+export async function update(config: Config, report: Report = plain, log?: NixLog): Promise<number> {
   const { profile, state, history, nix } = config;
   mkdirSync(state, { recursive: true });
   const current = join(state, 'current');
@@ -129,7 +205,8 @@ export function update(config: Config): number {
   // loop, and last-success stays untouched so launchd tries again next hour.
   // Repeats of the same reason are logged once.
   const skip = (reason: string) => {
-    process.stderr.write(`agent-distro: ${profile} update skipped: ${reason}\n`);
+    report.note(`agent-distro: ${profile} update skipped: ${reason}\n`);
+    report.result({ result: 'skipped', reason });
     const lines = existsSync(history) ? readFileSync(history, 'utf8').split('\n') : [];
     if (lines.at(-1) === '') lines.pop();
     if ((lines.at(-1) ?? '').split(' ').slice(2).join(' ') !== `skipped: ${reason}`) record(`skipped: ${reason}`);
@@ -158,8 +235,9 @@ export function update(config: Config): number {
     ref = '';
   }
   if (typeof ref !== 'string' || !ref) {
-    process.stderr.write(`agent-distro: ${profile} update failed (cannot resolve ${config.flake})\n`);
+    report.note(`agent-distro: ${profile} update failed (cannot resolve ${config.flake})\n`);
     record('failed: cannot resolve flake');
+    report.result({ result: 'failed', reason: 'cannot resolve flake' });
     return 1;
   }
   const target = `${ref}#${profile}`;
@@ -170,26 +248,32 @@ export function update(config: Config): number {
 
   // Read versions before nix build replaces the current out-link.
   const previous = old ? versions(old) : null;
-  const build = spawnSync(nix, ['build', target, ...options, '--out-link', current], { stdio: 'inherit' });
+  const args = ['build', target, ...options, '--out-link', current];
+  const build: Build = log
+    ? await loggedBuild(nix, args, log, report)
+    : spawnSync(nix, args, { stdio: 'inherit' });
   if (build.error || build.status !== 0) {
     // As bash reports it: 127 for a nix that is gone (say, garbage-collected),
     // 126 for one that cannot run, a signal's number plus 128.
     const code = (build.error as NodeJS.ErrnoException | undefined)?.code;
     const status = build.error ? (code === 'ENOENT' ? 127 : 126)
       : build.status ?? 128 + (constants.signals[build.signal!] ?? 0);
-    if (build.error) process.stderr.write(`agent-distro: cannot run ${nix}: ${build.error.message}\n`);
-    process.stderr.write(`agent-distro: ${profile} update failed (exit ${status})\n`);
+    if (build.error) report.note(`agent-distro: cannot run ${nix}: ${build.error.message}\n`);
+    report.note(`agent-distro: ${profile} update failed (exit ${status})\n`);
     record(`failed: nix build exit ${status}`);
+    report.result({ result: 'failed', reason: `nix build exit ${status}` });
     return status;
   }
   const next = realpath(current);
   writeFileSync(join(state, 'last-success.tmp'), `${Math.floor(Date.now() / 1000)}\n`);
   renameSync(join(state, 'last-success.tmp'), join(state, 'last-success'));
   if (next === old) {
-    process.stdout.write(`agent-distro: ${profile} unchanged (${next})\n`);
+    report.summary(`agent-distro: ${profile} unchanged (${next})\n`);
+    report.result({ result: 'unchanged', bundle: next });
   } else {
     record(`updated: ${changes(previous, versions(next))}`);
-    process.stdout.write(`agent-distro: ${profile} updated ${old || 'nothing'} -> ${next}\n`);
+    report.summary(`agent-distro: ${profile} updated ${old || 'nothing'} -> ${next}\n`);
+    report.result({ result: 'updated', bundle: next });
   }
   return 0;
 }
@@ -208,7 +292,7 @@ async function scheduled(config: Config): Promise<number> {
   for (let attempt = 1; ; attempt++) {
     let status: number;
     try {
-      status = update(config);
+      status = await update(config);
     } catch (error) {
       process.stderr.write(`agent-distro: ${(error as Error).stack ?? error}\n`);
       status = 1;
@@ -232,7 +316,8 @@ function cacheWarnings(config: Config): number {
 if (import.meta.main) {
   const [path, mode] = process.argv.slice(2);
   const config: Config = JSON.parse(readFileSync(path, 'utf8'));
-  if (mode === undefined) process.exitCode = update(config);
+  if (mode === undefined) process.exitCode = await update(config);
+  else if (mode === '--progress') process.exitCode = await update(config, jsonReport(), new NixLog());
   else if (mode === '--scheduled') process.exitCode = await scheduled(config);
   else if (mode === '--cache-warnings') process.exitCode = cacheWarnings(config);
   else throw new Error(`unknown mode: ${mode}`);

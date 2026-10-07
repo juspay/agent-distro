@@ -66,10 +66,10 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
   return path;
 }
 
-function run(nix: string) {
+async function run(nix: string) {
   const state = join(work, `${nix}-state`);
   const history = join(work, `${nix}-history.log`);
-  const status = update({
+  const status = await update({
     profile: 'p', flake: 'path:/fixture', state, history, nix,
     substituters: {}, periodSeconds: 21600, offsetSeconds: 7200,
   });
@@ -109,16 +109,16 @@ for (const raw of ['{}', '[]', '42', 'true', 'null', '{"derivations":{}}',
   });
 }
 
-test('an update that cannot tell skips without building', () => {
-  const result = run(fakeNix('unknown', { drvs: 1400, show: { raw: '{}' } }));
+test('an update that cannot tell skips without building', async () => {
+  const result = await run(fakeNix('unknown', { drvs: 1400, show: { raw: '{}' } }));
   assert.equal(result.status, 0);
   assert.deepEqual(result.builds, []);
   assert.match(result.history, / p skipped: cannot tell what the bundle would build /);
   assert.ok(!result.stamped);
 });
 
-test('an update with nothing to compile builds', () => {
-  const result = run(fakeNix('cached', { drvs: 0 }));
+test('an update with nothing to compile builds', async () => {
+  const result = await run(fakeNix('cached', { drvs: 0 }));
   assert.equal(result.status, 0);
   assert.equal(result.builds.length, 1);
   assert.match(result.history, / p updated: Pi 1\.0\n$/);
