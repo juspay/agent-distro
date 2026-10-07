@@ -236,7 +236,7 @@ const PANEL_WANT = 30;
 const PANEL_MIN = 24;
 
 /** Where things go for the data and one terminal size: the box at (x, y), its columns and body height. */
-export type Layout = { x: number; y: number; inner: number; list: number; panel: number; title: number; version: number; body: number; terminal: number };
+export type Layout = { x: number; y: number; inner: number; list: number; panel: number; title: number; version: number; profile: number; body: number; terminal: number };
 
 /**
  * Widths come from the data: the list column is fixed by the titles and the
@@ -255,14 +255,20 @@ export function layout(menu: Menu, columns: number, rows: number): Layout | unde
   if (room < list + 3 + PANEL_MIN) return undefined;
   const inner = Math.min(room, list + 3 + Math.max(PANEL_WANT, tagline + 2));
   const panel = inner - list - 3;
+  // The profile row is as tall as the longest description needs at this width —
+  // the same count for every profile, so switching never moves the columns.
+  const profile = Math.max(...menu.profiles.map((p) => wrap(profileLine(p), inner, Infinity).length));
   // The body is as tall as the tallest panel at this width, so switching profile
   // never overflows it, and never shorter than the list.
-  const body = Math.max(menu.harnessCount, ...menu.profiles.flatMap((p) => p.harnesses.map((h) => panelHeight(p, h, panel))));
-  if (rows < body + 6 || inner + 4 < 8 + width(brand(menu)) + width(menu.counts()) + 1) return undefined;
+  const body = Math.max(menu.harnessCount, ...menu.profiles.flatMap((p) => p.harnesses.map((h) => panelContent(h, panel, PLAIN).length)));
+  if (rows < body + profile + 6 || inner + 4 < 8 + width(brand(menu)) + width(menu.counts()) + 1) return undefined;
   const x = columns - inner - 4 >= 2 ? 2 : 1;
-  const y = rows >= body + 7 ? 2 : 1;
-  return { x, y, inner, list, panel, title, version, body, terminal: columns };
+  const y = rows >= body + profile + 7 ? 2 : 1;
+  return { x, y, inner, list, panel, title, version, profile, body, terminal: columns };
 }
+
+/** The profile row's text: the name, then its description. */
+const profileLine = (profile: Profile) => `${profile.name} · ${profile.description}`;
 
 const brand = (menu: Menu) => 'agent-distro' + (menu.profiles.length > 1 ? '' : ' · ' + menu.profiles[0].name);
 
@@ -287,8 +293,8 @@ function listRow(row: Row, selected: boolean, remembered: boolean, l: Layout, st
   return text + '  ' + paint(selected ? style.version : '', ' ' + row.version.padStart(l.version) + ' ');
 }
 
-/** The panel's content for `row` in `profile`: the harness, then its auth status. */
-function panelContent(profile: Profile, row: Row, panel: number, style: Style): string[] {
+/** The panel's content for `row`: the harness, then its auth status. */
+function panelContent(row: Row, panel: number, style: Style): string[] {
   const line = (text: string, style: string) => paint(style, pad(text, panel));
   const lines: string[] = [];
   for (const text of wrap(`${row.title} ${row.version}`, panel, Infinity)) lines.push(line(text, style.bold));
@@ -296,20 +302,13 @@ function panelContent(profile: Profile, row: Row, panel: number, style: Style): 
   lines.push(' '.repeat(panel));
   if (row.auth?.items.length) {
     lines.push(line('Signed in', ''));
-    for (const item of row.auth.items) for (const text of wrap('  ' + item, panel, Infinity)) lines.push(line(text, ''));
+    // `wrap` drops leading whitespace, so the two-cell indent is added after it.
+    for (const item of row.auth.items) for (const text of wrap(item, panel - 2, Infinity)) lines.push(line('  ' + text, ''));
   } else if (row.auth) {
     lines.push(line('Not signed in', style.dim));
   }
   return lines;
 }
-
-/** The profile line the panel keeps at its bottom. */
-const panelDescription = (profile: Profile, panel: number, style: Style) =>
-  wrap(`${profile.name} · ${profile.description}`, panel, Infinity).map((text) => paint(style.dim, pad(text, panel)));
-
-/** How many lines `row`'s panel needs at `panel` cells: its content, a blank, and the profile line. */
-const panelHeight = (profile: Profile, row: Row, panel: number) =>
-  panelContent(profile, row, panel, PLAIN).length + 1 + panelDescription(profile, panel, PLAIN).length;
 
 /** One frame for `menu` in `l`: per key, nothing re-solved. */
 export function render(menu: Menu, l: Layout, style: Style): string {
@@ -329,22 +328,25 @@ export function render(menu: Menu, l: Layout, style: Style): string {
   if (!shown) fill = l.inner - 4 - width(name) - width(counts);
   lines.push(edge('╭─ ') + paint(bold, 'agent-distro') + paint(dim, name.slice('agent-distro'.length)) + edge(' ' + '─'.repeat(fill) + ' ') + shown + counts + edge(' ─╮'));
 
-  // The list, and beside it the panel: the highlighted harness, then the
-  // profile line kept at the panel's bottom.
+  // The profile row, under the header and above the columns: the name in
+  // accent, then the description; every profile gets the same number of lines.
   const profile = menu.active;
+  const profileLines = wrap(profileLine(profile), l.inner, Infinity);
+  for (let i = 0; i < l.profile; i++) {
+    const text = profileLines[i];
+    const cell = text === undefined ? blank(l.inner) : pad(text, l.inner);
+    row(cell.startsWith(profile.name) ? paint(accent, profile.name) + cell.slice(profile.name.length) : cell);
+  }
+  lines.push(edge('├' + '─'.repeat(l.list + 2) + '┬' + '─'.repeat(l.panel + 2) + '┤'));
+
+  // The list, and beside it the panel: the highlighted harness.
   const current = menu.current();
   const filtered = menu.rows();
   const list = filtered.length
     ? filtered.map((r, i) => listRow(r, i === menu.index, menu.isRemembered(profile.name, r.name), l, style))
     : [paint(dim, pad('No matches', l.list))];
-  const content = current ? panelContent(profile, current, l.panel, style) : [];
-  // With no match there is nothing to describe, so the panel is blank.
-  const description = current ? panelDescription(profile, l.panel, style) : [];
-  const descriptionAt = l.body - description.length;
-  for (let i = 0; i < l.body; i++) {
-    const panel = i < content.length ? content[i] : i >= descriptionAt ? description[i - descriptionAt] : blank(l.panel);
-    row(list[i] ?? blank(l.list), panel);
-  }
+  const content = current ? panelContent(current, l.panel, style) : [];
+  for (let i = 0; i < l.body; i++) row(list[i] ?? blank(l.list), content[i] ?? blank(l.panel));
 
   lines.push(edge('├' + '─'.repeat(l.list + 2) + '┴' + '─'.repeat(l.panel + 2) + '┤'));
   // The filter line: the query as typed and how many rows it leaves.

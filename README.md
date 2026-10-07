@@ -32,24 +32,24 @@ AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
 To keep the agents installed and updated daily, see [Install](#install).
 
 With several profiles, the chooser is master–detail: the profiles are tabs in
-the header, the harnesses of the active one are the list on the left, and the
-highlighted harness fills the panel on the right — its tagline, its auth
-status, and the profile's description at the bottom. `←`/`→` (or `Tab`) switch
-profile, and nothing in the box is ever cut (here with `juspay/claude`
-remembered from last time):
+the header, the active profile's name and description take a row of their own
+under it, its harnesses are the list on the left, and the highlighted harness
+fills the panel on the right — its tagline and its auth status. `←`/`→` (or
+`Tab`) switch profile, and nothing in the box is ever cut (here with
+`vanilla/pi` remembered from last time, so the default profile opens, the
+remembered one is dotted, and switching to it lands on that harness):
 
 ```
-╭─ agent-distro ───────────────────────── • juspay · vanilla ── 6 harnesses ─╮
-│     ✓ Oh My Pi       18.7.0  │ Claude Code 2.1.292                         │
-│     ✓ Codex         0.160.1  │ Anthropic login · plugin dirs per session   │
-│ ❯ • ✓ Claude Code   2.1.292  │                                             │
+╭─ agent-distro ───────────────────────── juspay · • vanilla ── 6 harnesses ─╮
+│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway                │
+├──────────────────────────────┬─────────────────────────────────────────────┤
+│ ❯   ✓ Oh My Pi       18.7.0  │ Oh My Pi 18.7.0                             │
+│     ✓ Codex         0.160.1  │ gateway or own provider · extensions        │
+│     ✓ Claude Code   2.1.292  │                                             │
 │     ✓ OpenCode      1.18.35  │ Signed in                                   │
-│       OpenCode v2    2.0.24  │ me@example.com                              │
-│     ✓ Pi              1.0.4  │                                             │
-│                              │                                             │
-│                              │                                             │
-│                              │ juspay · Juspay skills + Kolu, via Juspay's │
-│                              │ LiteLLM gateway                             │
+│       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
+│     ✓ Pi              1.0.4  │   anthropic                                 │
+│                              │   openai                                    │
 ├──────────────────────────────┴─────────────────────────────────────────────┤
 │ / filter…                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────╯
@@ -81,21 +81,20 @@ the harness unchanged.
 
 Narrowed to one profile (`agent-distro juspay`, `AI_PROFILE`, or a
 single-profile distribution), the header shows that profile's name instead of
-tabs. Versions reflect the packages pinned at build time, without revision
-suffixes:
+tabs, and the row under it is the same. Versions reflect the packages pinned at
+build time, without revision suffixes:
 
 ```
 ╭─ agent-distro · juspay ────────────────────────────────────── 6 harnesses ─╮
+│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway                │
+├──────────────────────────────┬─────────────────────────────────────────────┤
 │ ❯   ✓ Oh My Pi       18.7.0  │ Oh My Pi 18.7.0                             │
 │     ✓ Codex         0.160.1  │ gateway or own provider · extensions        │
 │     ✓ Claude Code   2.1.292  │                                             │
 │     ✓ OpenCode      1.18.35  │ Signed in                                   │
-│       OpenCode v2    2.0.24  │ LITELLM_API_KEY                             │
-│     ✓ Pi              1.0.4  │ anthropic                                   │
-│                              │ openai                                      │
-│                              │                                             │
-│                              │ juspay · Juspay skills + Kolu, via Juspay's │
-│                              │ LiteLLM gateway                             │
+│       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
+│     ✓ Pi              1.0.4  │   anthropic                                 │
+│                              │   openai                                    │
 ├──────────────────────────────┴─────────────────────────────────────────────┤
 │ / filter…                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────╯

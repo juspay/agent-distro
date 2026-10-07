@@ -119,8 +119,18 @@ function body(menu: InstanceType<typeof Menu>, columns: number, rows: number): s
   const l = layout(menu, columns, rows)!;
   const left = l.x - 1;
   return cells(frame(menu, rows, columns), columns, rows)
-    .slice(l.y, l.y + l.body)
+    .slice(l.y + l.profile + 1, l.y + l.profile + 1 + l.body)
     .map((line) => line.slice(left, left + l.inner + 4));
+}
+/** The profile row's text, cut to the box's inner width so a wrap reads whole. */
+function profileRow(menu: InstanceType<typeof Menu>, columns: number, rows: number): string {
+  const l = layout(menu, columns, rows)!;
+  const left = l.x - 1;
+  return cells(frame(menu, rows, columns), columns, rows)
+    .slice(l.y, l.y + l.profile)
+    .map((line) => line.slice(left + 2, left + 2 + l.inner))
+    .join('\n')
+    .replace(/\s+/g, ' ');
 }
 const listCell = (line: string, l: Layout) => line.slice(2, 2 + l.list);
 const panelCell = (line: string, l: Layout) => line.slice(2 + l.list + 3, 2 + l.list + 3 + l.panel);
@@ -154,7 +164,9 @@ for (const count of [1, 2, 3]) {
     const panel = panelText(menu, columns, rows);
     assert.ok(panel.includes(shown.tagline), panel);
     for (const item of shown.auth?.items ?? []) assert.ok(panel.includes(item), panel);
-    assert.ok(panel.includes(menu.active.description), panel);
+    // The profile row, under the header, names the profile and describes it.
+    const row = profileRow(menu, columns, rows);
+    assert.ok(row.includes(`${menu.active.name} · ${menu.active.description}`), row);
   }
 }
 
