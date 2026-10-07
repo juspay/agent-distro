@@ -38,17 +38,17 @@ previews their harnesses; Enter or Tab moves to the harness pane (here with
 `juspay/claude` remembered from last time):
 
 ```
-╭─ agent-distro ───────┬──────────────────────────────────────────── 2 profiles · 6 harnesses ─╮
-│ Profiles             │ Harnesses · juspay                                                    │
-│ ❯ • juspay           │     Oh My Pi     gateway or own provider · extensions         18.6.3  │
-│     vanilla          │     Codex        OpenAI login · plugins via marketplace      0.160.1  │
-│                      │ ❯ • Claude Code  Anthropic login · plugin dirs per session   2.1.291  │
-│ Juspay skills +      │     OpenCode     v1 · gateway or own provider                1.18.34  │
-│ Kolu, via Juspay's   │     OpenCode v2  v2 preview · private server per launch       2.0.24  │
-│ LiteLLM gateway      │     Pi           OMP's upstream · gateway via models.json      1.0.4  │
-├──────────────────────┴───────────────────────────────────────────────────────────────────────┤
-│ / filter…                                                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ agent-distro ───────┬───────────────────────────────────────────────────────────── 2 profiles · 6 harnesses ─╮
+│ Profiles             │ Harnesses · juspay                                                                     │
+│ ❯ • juspay           │     Oh My Pi     gateway or own provider · extensions       LITELLM_API_KEY    18.6.3  │
+│     vanilla          │     Codex        OpenAI login · plugins via marketplace     ChatGPT           0.160.1  │
+│                      │ ❯ • Claude Code  Anthropic login · plugin dirs per session  me@example.com    2.1.291  │
+│ Juspay skills +      │     OpenCode     v1 · gateway or own provider               LITELLM_API_KEY   1.18.34  │
+│ Kolu, via Juspay's   │     OpenCode v2  v2 preview · private server per launch     LITELLM_API_KEY    2.0.24  │
+│ LiteLLM gateway      │     Pi           OMP's upstream · gateway via models.json   LITELLM_API_KEY     1.0.4  │
+├──────────────────────┴────────────────────────────────────────────────────────────────────────────────────────┤
+│ / filter…                                                                                                     │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ↑↓ jk move   Enter launch   ← profiles   Tab switch pane   / filter   q quit
 ```
 
@@ -81,19 +81,36 @@ profile's description. Versions reflect the packages pinned at build time,
 without revision suffixes:
 
 ```
-╭─ agent-distro · juspay ───────────────────────────────── 6 harnesses ─╮
-│ Juspay skills + Kolu, via Juspay's LiteLLM gateway                    │
-│ ❯   Oh My Pi     gateway or own provider · extensions         18.6.3  │
-│     Codex        OpenAI login · plugins via marketplace      0.160.1  │
-│     Claude Code  Anthropic login · plugin dirs per session   2.1.291  │
-│     OpenCode     v1 · gateway or own provider                1.18.34  │
-│     OpenCode v2  v2 preview · private server per launch       2.0.24  │
-│     Pi           OMP's upstream · gateway via models.json      1.0.4  │
-├───────────────────────────────────────────────────────────────────────┤
-│ / filter…                                                             │
-╰───────────────────────────────────────────────────────────────────────╯
+╭─ agent-distro · juspay ────────────────────────────────────────────────── 6 harnesses ─╮
+│ Juspay skills + Kolu, via Juspay's LiteLLM gateway                                     │
+│ ❯   Oh My Pi     gateway or own provider · extensions       LITELLM_API_KEY    18.6.3  │
+│     Codex        OpenAI login · plugins via marketplace     ChatGPT           0.160.1  │
+│     Claude Code  Anthropic login · plugin dirs per session  me@example.com    2.1.291  │
+│     OpenCode     v1 · gateway or own provider               LITELLM_API_KEY   1.18.34  │
+│     OpenCode v2  v2 preview · private server per launch     LITELLM_API_KEY    2.0.24  │
+│     Pi           OMP's upstream · gateway via models.json   LITELLM_API_KEY     1.0.4  │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ / filter…                                                                              │
+╰────────────────────────────────────────────────────────────────────────────────────────╯
 ↑↓ jk move   Enter launch   / filter   q quit
 ```
+
+The status column between the tagline and the version says whether a harness
+can start without a login step. It is presence only: the picker contacts no
+provider and checks no token's validity or expiry. Claude Code's status is the
+`oauthAccount.emailAddress` in `$CLAUDE_CONFIG_DIR/.claude.json` (default
+`~/.claude.json`) or the name of `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`;
+Codex reads `$CODEX_HOME/auth.json` (`ChatGPT` for a `tokens` object, otherwise
+`OPENAI_API_KEY`) or `OPENAI_API_KEY`; a gateway harness shows its profile's
+`gateway.keyEnv`; and a harness using its own provider lists the ids in its
+store — OMP's `~/.omp/agent/agent.db`, Pi's `$PI_CODING_AGENT_DIR/auth.json`
+(default `~/.pi/agent/auth.json`), OpenCode's
+`${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json` — together with the
+provider API-key variables it reads from the environment. A harness with
+nothing to start from shows a dim `not signed in`; one whose store cannot be
+read shows nothing. `AI_GATEWAY=0` puts a gateway harness back on its own
+provider. This is a launch-time fact: `--list` and `--list --json` never carry
+it.
 
 | Key | Does |
 | --- | --- |
@@ -486,7 +503,7 @@ The TypeScript's own checks need no VM or KVM, and `nix flake check` at the
 root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 Daily CI runs `.github/scripts/update-sources.sh`, which discovers npins
@@ -518,8 +535,9 @@ run without a VM: `reader` (the plugin reader), `launch-plugins`
 launches it fails), `<harness>-adapter` (a
 harness's `tests/check-adapter.ts`), `update-schedule` (the updater's
 schedule and cache policy), `list-json` (`--list --json` against its
-type, the chooser's menu and `--list`), and `picker-layout` (the chooser's
-cell widths, truncation and box at common terminal sizes).
+type, the chooser's menu and `--list`), `picker-layout` (the chooser's
+cell widths, truncation and box at common terminal sizes), and `picker-auth`
+(the auth probes over fixture homes and stores).
 
 ### Logo
 
@@ -529,7 +547,8 @@ keep it transparent, textless, readable at 16 px.
 ## Adding a harness
 
 Create `harnesses/<name>/` with four files: `meta.nix` (title, order,
-`releaseNotes = version: URL`, and checks), `default.nix` (the adapter accepting
+`auth = "anthropic" | "openai" | "gateway"`, `releaseNotes = version: URL`,
+and checks), `default.nix` (the adapter accepting
 `{ pkgs, plugins, gateway, package, profileName }`), `source.nix` (`{ pkgs }` to
 package), and `README.md` (design notes). Put pins in `npins/`, scripts in `tests/`, and an
 optional custom updater in `update.py`. Nothing outside this directory needs

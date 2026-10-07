@@ -124,6 +124,39 @@ assert.equal(
   taglines(SHORT),
 );
 
+// Auth statuses: rows with and without one keep the box straight at the sizes
+// users have, versions stay on the right edge, and the tagline gives way before
+// the status — which itself goes before title and version.
+const STATUS: Record<string, { text: string; signedIn: boolean } | undefined> = {
+  omp: { text: 'me@example.com', signedIn: true },
+  codex: { text: 'ChatGPT', signedIn: true },
+  claude: { text: 'not signed in', signedIn: false },
+  opencode: { text: 'anthropic, openai', signedIn: true },
+  opencode2: undefined,
+  pi: { text: 'LITELLM_API_KEY', signedIn: true },
+};
+const withAuth = (count = 2): Listing => {
+  const value = listing(SHORT.slice(0, count));
+  for (const profile of value.profiles)
+    for (const row of profile.harnesses) Object.assign(row, { auth: STATUS[row.name] });
+  return value;
+};
+for (const [columns, rows] of [[80, 24], [60, 24], [120, 30]] as const) {
+  const lines = boxed(new Menu(withAuth(), ''), columns, rows);
+  for (const h of HARNESSES) {
+    const line = lines.find((l) => l.includes('   ' + h.title + ' '))!;
+    assert.ok(line.endsWith(h.version + '  │'), line);
+  }
+}
+// At 50 columns the status is drawn with no tagline; narrower still, the status
+// goes and the tagline returns, with title and version throughout.
+const status = boxed(new Menu(withAuth(1), ''), 50, 24).join('\n');
+assert.ok(status.includes('anthropic, openai'), status);
+assert.ok(!status.includes('Anthropic login'), status);
+const taglineOnly = boxed(new Menu(withAuth(1), ''), 44, 24).join('\n');
+assert.ok(!taglineOnly.includes('anthropic, openai'), taglineOnly);
+assert.ok(taglineOnly.includes('Anthropic'), taglineOnly);
+
 // Wide and joined characters in the data keep the border straight.
 const emoji = listing(SHORT.slice(0, 2), [
   harness('fam', '👨\u200d👩\u200d👧 Fam', '🇯🇵 flag · ❤\ufe0f heart', '1.0'),

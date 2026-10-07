@@ -25,6 +25,18 @@ let
       names;
   };
   menu = builtins.toJSON listing;
+  # One probe spec per `profile/harness` for the chooser's auth column. The
+  # scheme is the harness's own metadata; a gateway-capable harness carries its
+  # profile's keyEnv and its own name, so the chooser can fall back to the
+  # harness's own provider at launch time when AI_GATEWAY=0.
+  authSpec = name: harness:
+    let gateway = profiles.${name}.profile.gateway; in
+    if discovered.metadata.${harness}.auth != "gateway" then { scheme = discovered.metadata.${harness}.auth; }
+    else if gateway == null then { scheme = "provider"; provider = harness; }
+    else { scheme = "gateway"; keyEnv = gateway.keyEnv; provider = harness; };
+  auth = builtins.toJSON (builtins.listToAttrs (lib.concatMap
+    (name: map (harness: { name = "${name}/${harness}"; value = authSpec name harness; }) harnesses)
+    names));
   block = indent: lines: lib.concatMapStrings (line: "\n${indent}${line}") lines;
   arms = block "    " (lib.concatMap
     (name: map
@@ -101,7 +113,7 @@ writeShellApplication {
     narrow=""
     if [ "''${AI_PROFILE+x}" = x ] || [ -n "$selected_profile" ]; then narrow=$profile; fi
     # Quitting prints nothing and exits 0; any other failure keeps its status.
-    choice=$(${runtime.script "picker/choose.ts"} ${quote menu} --profile "$narrow" --remembered "$remembered") || exit
+    choice=$(${runtime.script "picker/choose.ts"} ${quote menu} --auth ${quote auth} --profile "$narrow" --remembered "$remembered") || exit
     if [ -n "$choice" ]; then
       # Only the chooser reaches here; direct selections never update state.
       # A failed state write must never prevent launching the selected agent.

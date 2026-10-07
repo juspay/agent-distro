@@ -1,6 +1,7 @@
 {
   title = "OpenCode v2";
   tagline = "v2 preview · private server per launch";
+  auth = "gateway";
   order = 4;
   releaseNotes = version: "https://github.com/anomalyco/opencode/releases/tag/v${builtins.head (builtins.split "\\+" version)}";
   checks = [

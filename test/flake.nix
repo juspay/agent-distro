@@ -90,6 +90,11 @@
             ${runtime.node} ${./check-picker-layout.ts} ${runtime.tree}/src
             touch "$out"
           '';
+          # The picker's auth probes, on fixture homes and stores.
+          picker-auth = pkgs.runCommand "picker-auth-check" { } ''
+            ${runtime.node} ${./check-picker-auth.ts} ${runtime.tree}/src
+            touch "$out"
+          '';
           # The same picker over the whole registry rather than one profile.
           registry = pkgs.testers.runNixOSTest (import ./test-picker.nix {
             name = "registry";

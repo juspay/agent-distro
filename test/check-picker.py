@@ -205,6 +205,31 @@ for row in ROWS:
     for field in ('title', 'version'):
         assert row[field].encode() in standard.drawn, (row, standard.drawn)
 
+# The auth column: a seeded Claude account and Codex tokens are drawn next to
+# their rows, in the box and appended to the numbered list; without the files,
+# those rows say "not signed in".
+def row_line(drawn, title):
+    return next(line for line in drawn.decode().splitlines() if title in line)
+
+with tempfile.TemporaryDirectory() as auth_home:
+    os.makedirs(os.path.join(auth_home, '.codex'))
+    with open(os.path.join(auth_home, '.claude.json'), 'w') as handle:
+        json.dump({'oauthAccount': {'emailAddress': 'picker@example.com'}}, handle)
+    with open(os.path.join(auth_home, '.codex', 'auth.json'), 'w') as handle:
+        json.dump({'tokens': {'access_token': 'x'}, 'OPENAI_API_KEY': None}, handle)
+    seeded = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': auth_home})
+    assert 'picker@example.com' in row_line(seeded.drawn, 'Claude Code'), seeded.drawn
+    assert 'ChatGPT' in row_line(seeded.drawn, 'Codex'), seeded.drawn
+    # The numbered fallback, where the status is appended to each line.
+    plain_steps = ([(PLAIN_PROFILES, b'\r')] if OTHERS else []) + [(PLAIN_PROMPT, b'\r')]
+    fallback = run(plain_steps, version(DEFAULT, NAMES[0]), {'HOME': auth_home}, size=(len(ROWS) + 5, 120))
+    assert b'picker@example.com' in fallback.drawn, fallback.drawn
+    assert b'ChatGPT' in fallback.drawn, fallback.drawn
+with tempfile.TemporaryDirectory() as bare_home:
+    bare = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': bare_home})
+    assert 'not signed in' in row_line(bare.drawn, 'Claude Code'), bare.drawn
+    assert 'not signed in' in row_line(bare.drawn, 'Codex'), bare.drawn
+
 for index, profile in enumerate(PROFILES):
     for row, harness in enumerate(HARNESSES[profile]):
         expected = version(profile, harness['name'])

@@ -1,11 +1,13 @@
 /**
  * Draw a menu and return a choice; launching and persistence belong to agent-distro.
  *
- * Usage: node choose.ts MENU_JSON [--profile NAME] [--remembered PROFILE/HARNESS]
+ * Usage: node choose.ts MENU_JSON [--auth AUTH_JSON] [--profile NAME] [--remembered PROFILE/HARNESS]
  *
- * MENU_JSON is the `--list --json` value (src/listing.ts). Prints
- * `profile/harness` on stdout and exits 0, or prints nothing and exits 0 when
- * the user quits; argument errors exit 2. The menu is drawn on /dev/tty,
+ * MENU_JSON is the `--list --json` value (src/listing.ts). AUTH_JSON maps
+ * `profile/harness` to the probe spec (src/picker/auth.ts) whose status is
+ * drawn on that row; it is a launch-time fact, so `--list` never carries it.
+ * Prints `profile/harness` on stdout and exits 0, or prints nothing and exits
+ * 0 when the user quits; argument errors exit 2. The menu is drawn on /dev/tty,
  * since the shell captures stdout; a terminal too small or unsupported for
  * the boxed view at start gets a numbered list on stderr.
  *
@@ -13,13 +15,15 @@
  * key), layout (where things go, per terminal size) and render (one frame),
  * and the I/O around them, draw and plain.
  */
-import { openSync, writeSync } from 'node:fs';
+import { existsSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { emitKeypressEvents, createInterface, type Key } from 'node:readline';
+import { DatabaseSync } from 'node:sqlite';
 import { WriteStream } from 'node:tty';
 import { parseArgs } from 'node:util';
 import { parseListing, type Listing, type Profile } from '../listing.ts';
+import { probe, type Io, type Spec, type Status } from './auth.ts';
 
-type Row = { name: string; title: string; tagline: string; version?: string };
+type Row = { name: string; title: string; tagline: string; version?: string; auth?: Status };
 
 // Terminal cells per user-perceived character (grapheme): none for a lone
 // combining or format mark, two for East Asian wide characters, emoji
@@ -246,7 +250,7 @@ export class Menu {
 // Two cells of pointer and two of remembered mark lead every row.
 const GUTTER = 4;
 
-type Columns = { title: number; tagline: number; version: number };
+type Columns = { title: number; tagline: number; auth: number; version: number };
 /** Where things go for the data and one terminal size: the box at (x, y), its panes' widths and rows. */
 type Layout = { x: number; y: number; inner: number; left: number; right: number; columns: Columns; body: number; description: number; terminal: number };
 
@@ -257,16 +261,21 @@ type Layout = { x: number; y: number; inner: number; left: number; right: number
  * pane down to its names.
  */
 export function layout(menu: Menu, columns: number, rows: number): Layout | undefined {
-  const all = menu.profiles.flatMap((p) => p.harnesses);
+  const all: Row[] = menu.profiles.flatMap((p) => p.harnesses);
   const longest = (texts: string[]) => Math.max(0, ...texts.map(width));
   const title = longest(all.map((h) => h.title));
-  const version = longest(all.map((h) => h.version));
+  const version = longest(all.map((h) => h.version ?? ''));
   const tagline = longest(all.map((h) => h.tagline));
+  // The auth column is as wide as the longest status, capped so one long email
+  // cannot push the taglines and versions off the row.
+  const auth = Math.min(24, longest(all.map((h) => h.auth?.text ?? '')));
   const names = longest(menu.profiles.map((p) => p.name));
   const body = menu.panes ? Math.max(menu.harnessCount, menu.profiles.length + 2) : menu.harnessCount;
   const description = body - menu.profiles.length - 1;
-  // A harness row without its tagline: pointer, mark, title and version chip.
-  const minimum = GUTTER + title + 2 + version + 2;
+  // A harness row without its tagline: pointer, mark, title, auth and version
+  // chip; `minimum` adds the auth column, `bare` is what a row keeps without it.
+  const bare = GUTTER + title + 2 + version + 2;
+  const minimum = bare + (auth ? 2 + auth : 0);
   const header = width(brand(menu)) + width(menu.counts()) + 8;
   const room = columns - 4;
   const wanted = Math.max(
@@ -286,12 +295,14 @@ export function layout(menu: Menu, columns: number, rows: number): Layout | unde
   }
   const inner = Math.min(room, Math.max(header - 4, menu.panes ? left + 3 + wanted : wanted));
   const right = menu.panes ? inner - left - 3 : inner;
-  if (right < minimum || inner + 4 < header || rows < body + 6) return undefined;
-  // Taglines take the room left over, so version chips sit on the right edge.
-  const taglines = right - minimum - 2;
+  if (right < bare || inner + 4 < header || rows < body + 6) return undefined;
+  // Taglines take the room left over, so version chips sit on the right edge;
+  // the auth column gives way before the title and version, which a row keeps.
+  const withAuth = auth > 0 && right >= minimum;
+  const taglines = right - (withAuth ? minimum : bare) - 2;
   const x = columns - inner - 4 >= 2 ? 2 : 1;
   const y = rows >= body + 7 ? 2 : 1;
-  return { x, y, inner, left, right, columns: { title, tagline: tagline && taglines >= 6 ? taglines : 0, version }, body, description, terminal: columns };
+  return { x, y, inner, left, right, columns: { title, tagline: tagline && taglines >= 6 ? taglines : 0, auth: withAuth ? auth : 0, version }, body, description, terminal: columns };
 }
 
 const brand = (menu: Menu) => 'agent-distro' + (menu.panes ? '' : ' · ' + menu.profiles[0].name);
@@ -304,9 +315,13 @@ function listRow(row: Row, selected: boolean, focused: boolean, remembered: bool
   let text = (selected ? paint(focused ? style.accent : style.dim, '❯') : ' ') + ' ' + (remembered ? paint(style.accent, '•') : ' ') + ' ';
   text += paint(selected ? style.bold : '', pad(row.title, columns.title));
   if (columns.tagline) text += '  ' + paint(style.dim, pad(fit(row.tagline, columns.tagline), columns.tagline));
+  if (columns.auth) {
+    const cell = pad(fit(row.auth?.text ?? '', columns.auth), columns.auth);
+    text += '  ' + (row.auth ? paint(row.auth.signedIn ? (selected ? style.accent : '') : style.dim, cell) : cell);
+  }
   if (row.version === undefined) return text;
   // Slack goes before the chip, so versions keep to the right edge.
-  const used = GUTTER + columns.title + (columns.tagline ? 2 + columns.tagline : 0);
+  const used = GUTTER + columns.title + (columns.tagline ? 2 + columns.tagline : 0) + (columns.auth ? 2 + columns.auth : 0);
   return text + ' '.repeat(n - used - columns.version - 4) + '  ' + paint(selected ? style.version : '', ' ' + row.version.padStart(columns.version) + ' ');
 }
 
@@ -342,7 +357,7 @@ export function render(menu: Menu, l: Layout, style: Style): string {
     const heading = (text: string, focused: boolean, n: number) => paint(focused ? accent : dim, pad(fit(text, n), n));
     row(heading('Profiles', !profile, l.left), heading(shown ? 'Harnesses · ' + shown.name : 'Harnesses', !!profile, l.right));
     profiles = pane(profile ? menu.profileRows : filtered, profile ? menu.profiles.indexOf(profile) : menu.index, !profile,
-      (p) => menu.isRemembered(p.name), l.left, { title: l.left - GUTTER, tagline: 0, version: 0 });
+      (p) => menu.isRemembered(p.name), l.left, { title: l.left - GUTTER, tagline: 0, auth: 0, version: 0 });
     // The description sits below every profile, filtered or not, so it never moves.
     while (profiles.length <= menu.profiles.length) profiles.push(blank(l.left));
     for (const line of shown ? wrap(shown.description, l.left, l.description) : []) profiles.push(paint(dim, pad(line, l.left)));
@@ -503,7 +518,7 @@ async function plain(menu: Menu): Promise<string> {
     say('agent-distro · ' + (menu.profile ? menu.profile.name : menu.counts()));
     say(menu.profile ? menu.profile.description : 'Profiles');
     say();
-    rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.version].filter(Boolean).join('  ')));
+    rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.version, row.auth?.text].filter(Boolean).join('  ')));
     process.stderr.write(`${menu.profile ? 'Launch' : 'Pick a profile'} [${menu.index + 1}]${back ? ', h profiles' : ''}, q quit: `);
     const line = await lines.next();
     const value = line.done ? '' : line.value.trim();
@@ -524,14 +539,14 @@ async function plain(menu: Menu): Promise<string> {
 }
 
 function usage(message: string): never {
-  process.stderr.write(`choose.ts: ${message}\nusage: choose.ts MENU_JSON [--profile NAME] [--remembered PROFILE/HARNESS]\n`);
+  process.stderr.write(`choose.ts: ${message}\nusage: choose.ts MENU_JSON [--auth AUTH_JSON] [--profile NAME] [--remembered PROFILE/HARNESS]\n`);
   process.exit(2);
 }
 
 function parseArguments(args: string[]) {
   let parsed;
   try {
-    parsed = parseArgs({ args, allowPositionals: true, options: { profile: { type: 'string' }, remembered: { type: 'string' } } });
+    parsed = parseArgs({ args, allowPositionals: true, options: { auth: { type: 'string' }, profile: { type: 'string' }, remembered: { type: 'string' } } });
   } catch (error) {
     usage((error as Error).message);
   }
@@ -542,8 +557,40 @@ function parseArguments(args: string[]) {
   } catch (error) {
     usage(`MENU_JSON is not a listing: ${(error as Error).message}`);
   }
-  return { listing, profile: parsed.values.profile ?? '', remembered: parsed.values.remembered ?? '' };
+  let auth: Record<string, Spec> = {};
+  if (parsed.values.auth !== undefined) {
+    try {
+      const value = JSON.parse(parsed.values.auth);
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('not an object');
+      auth = value;
+    } catch (error) {
+      usage(`AUTH_JSON is not a probe map: ${(error as Error).message}`);
+    }
+  }
+  return { listing, auth, profile: parsed.values.profile ?? '', remembered: parsed.values.remembered ?? '' };
 }
+
+/** The real readers behind `Io`: the files a harness reads, and OMP's SQLite store. */
+const io: Io = {
+  read: (path) => {
+    try {
+      return readFileSync(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  },
+  providers: (path) => {
+    if (!existsSync(path)) return undefined;
+    const database = new DatabaseSync(path, { readOnly: true });
+    try {
+      return database.prepare('SELECT provider FROM auth_credentials').all().map((row) =>
+        typeof row === 'object' && row !== null && 'provider' in row ? String(row.provider) : '');
+    } finally {
+      database.close();
+    }
+  },
+};
 
 /** The controlling terminal, or undefined when there is none to draw on. */
 function openTerminal(): number | undefined {
@@ -556,10 +603,19 @@ function openTerminal(): number | undefined {
 }
 
 async function main() {
-  const { listing, profile, remembered } = parseArguments(process.argv.slice(2));
+  const { listing, auth, profile, remembered } = parseArguments(process.argv.slice(2));
   if (profile) {
     listing.profiles = listing.profiles.filter((p) => p.name === profile);
     if (!listing.profiles.length) usage('unknown profile: ' + profile);
+  }
+  // Auth is a launch-time fact: probe every row once, before drawing.
+  for (const p of listing.profiles) {
+    // `Row` is `Harness` plus the picker-only `auth`, which the listing never carries.
+    const rows = p.harnesses as Row[];
+    for (const row of rows) {
+      const spec = auth[`${p.name}/${row.name}`];
+      if (spec) row.auth = probe(spec, process.env, io);
+    }
   }
   const menu = new Menu(listing, remembered);
   const term = process.env.TERM ?? '';
