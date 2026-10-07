@@ -107,8 +107,9 @@ contacts no provider and checks no token's validity or expiry. Claude Code's
 status is the `oauthAccount.emailAddress` in `$CLAUDE_CONFIG_DIR/.claude.json`
 (default `~/.claude.json`) or the name of
 `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`; Codex reads
-`$CODEX_HOME/auth.json` (`ChatGPT` for a `tokens` object, otherwise
-`OPENAI_API_KEY`) or `OPENAI_API_KEY`; a gateway harness lists its profile's
+`$CODEX_HOME/auth.json`, decoding the `email` claim of the OpenID token in
+`tokens.id_token` without checking its signature (`ChatGPT` when the claim is
+absent), or `OPENAI_API_KEY`; a gateway harness lists its profile's
 `gateway.keyEnv` and then the provider ids it also has credentials for, since
 the gateway and the harness's own providers are usable at once; and a harness
 using its own provider lists the ids in its store — OMP's

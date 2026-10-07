@@ -76,6 +76,27 @@ assert.deepEqual(read({ scheme: 'openai' }), signed('ChatGPT'));
 reset();
 files.set('/home/u/.codex/auth.json', JSON.stringify({ tokens: null, OPENAI_API_KEY: 'sk-openai' }));
 assert.deepEqual(read({ scheme: 'openai' }), signed('OPENAI_API_KEY'));
+// `tokens.id_token`'s payload carries the account email; without a usable
+// claim `ChatGPT` stands in, and a token that does not decode never throws.
+const jwt = (claims: string) => `header.${Buffer.from(claims, 'utf8').toString('base64url')}.signature`;
+reset();
+files.set('/home/u/.codex/auth.json', JSON.stringify({ tokens: { id_token: jwt('{"email":"codex@example.com"}') } }));
+assert.deepEqual(read({ scheme: 'openai' }), signed('codex@example.com'));
+reset();
+files.set('/home/u/.codex/auth.json', JSON.stringify({ tokens: { id_token: jwt('{"sub":"u-1"}') } }));
+assert.deepEqual(read({ scheme: 'openai' }), signed('ChatGPT'));
+reset();
+files.set('/home/u/.codex/auth.json', JSON.stringify({ tokens: { id_token: jwt('{"email":""}') } }));
+assert.deepEqual(read({ scheme: 'openai' }), signed('ChatGPT'));
+reset();
+files.set('/home/u/.codex/auth.json', JSON.stringify({ tokens: { id_token: 'header.!!!.signature' } }));
+assert.deepEqual(read({ scheme: 'openai' }), signed('ChatGPT'));
+reset();
+files.set('/home/u/.codex/auth.json', JSON.stringify({ tokens: { id_token: 'not-a-jwt' } }));
+assert.deepEqual(read({ scheme: 'openai' }), signed('ChatGPT'));
+reset();
+files.set('/home/u/.codex/auth.json', JSON.stringify({ tokens: { id_token: 'a.b' } }));
+assert.deepEqual(read({ scheme: 'openai' }), signed('ChatGPT'));
 // CODEX_HOME relocates the file.
 reset();
 files.set('/codex/auth.json', JSON.stringify({ tokens: { access_token: 'x' } }));

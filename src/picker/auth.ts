@@ -187,18 +187,36 @@ function anthropic(env: Env, io: Io): Status | undefined {
 /**
  * Codex: `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`) with a `tokens`
  * object, or a non-null `OPENAI_API_KEY` in it, or `OPENAI_API_KEY` in the
- * environment. `tokens` is null after `codex login --with-api-key`.
+ * environment. `tokens.id_token` is an OpenID JWT whose payload carries the
+ * account `email` (codex-rs/login/src/token_data.rs:29, decoded at :129-140);
+ * it is decoded without checking the signature — this is presence, not
+ * authentication. `tokens` is null after `codex login --with-api-key`.
  */
 function openai(env: Env, io: Io): Status | undefined {
   const file = json(`${env.CODEX_HOME ?? `${home(env)}/.codex`}/auth.json`, io);
   if ('value' in file) {
     const auth = record(file.value);
-    if (record(auth?.tokens)) return signedIn(['ChatGPT']);
+    const tokens = record(auth?.tokens);
+    if (tokens) return signedIn([idTokenEmail(tokens.id_token) ?? 'ChatGPT']);
     if (typeof auth?.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY) return signedIn(['OPENAI_API_KEY']);
   }
   const variable = env.OPENAI_API_KEY ? 'OPENAI_API_KEY' : undefined;
   if (variable) return signedIn([variable]);
   return absent(file);
+}
+
+/** The `email` claim of an OpenID `id_token`, or undefined when it is absent or the token does not decode. */
+function idTokenEmail(token: unknown): string | undefined {
+  if (typeof token !== 'string') return undefined;
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts.some((part) => !part)) return undefined;
+  try {
+    const claims = record(JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')));
+    const email = claims?.email;
+    return typeof email === 'string' && email ? email : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The provider ids a gateway-capable harness has credentials for, and the store they came from. */

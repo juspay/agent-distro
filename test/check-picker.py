@@ -1,4 +1,5 @@
 """Drive the picker over a PTY: profiles as tabs, filter, shortcuts, fallback and `--list`."""
+import base64
 import fcntl
 import json
 import os
@@ -219,22 +220,24 @@ with tempfile.TemporaryDirectory() as auth_home:
     os.makedirs(os.path.join(auth_home, '.codex'))
     with open(os.path.join(auth_home, '.claude.json'), 'w') as handle:
         json.dump({'oauthAccount': {'emailAddress': 'picker@example.com'}}, handle)
+    # Codex's id_token is an OpenID JWT: its payload's `email` names the account.
+    claims = base64.urlsafe_b64encode(json.dumps({'email': 'codex@example.com'}).encode()).decode().rstrip('=')
     with open(os.path.join(auth_home, '.codex', 'auth.json'), 'w') as handle:
-        json.dump({'tokens': {'access_token': 'x'}, 'OPENAI_API_KEY': None}, handle)
+        json.dump({'tokens': {'access_token': 'x', 'id_token': 'header.' + claims + '.signature'}}, handle)
     # The Claude row (third) is highlighted, so the panel lists its email.
     seeded = run([(LAUNCH, DOWN * 2), (b'picker@example.com', b'\r')], version(DEFAULT, NAMES[2]),
                  {'HOME': auth_home}, size=(24, 120))
     assert CHECK in seeded.drawn, seeded.drawn
     assert b'Signed in' in seeded.drawn, seeded.drawn
     assert seeded.choice == DEFAULT + '/' + NAMES[2], seeded.choice
-    # The Codex row: ChatGPT from its `tokens`.
-    codex = run([(LAUNCH, DOWN), (b'ChatGPT', b'\r')], version(DEFAULT, NAMES[1]), {'HOME': auth_home})
-    assert b'ChatGPT' in codex.drawn, codex.drawn
+    # The Codex row: the email decoded from its id_token.
+    codex = run([(LAUNCH, DOWN), (b'codex@example.com', b'\r')], version(DEFAULT, NAMES[1]), {'HOME': auth_home})
+    assert b'codex@example.com' in codex.drawn, codex.drawn
     # The numbered fallback carries the one-line status before the version.
     plain_steps = ([(PLAIN_PROFILES, b'\r')] if OTHERS else []) + [(PLAIN_PROMPT, b'\r')]
     fallback = run(plain_steps, version(DEFAULT, NAMES[0]), {'HOME': auth_home}, size=(len(ROWS) + 5, 120))
     assert b'picker@example.com' in fallback.drawn, fallback.drawn
-    assert b'ChatGPT' in fallback.drawn, fallback.drawn
+    assert b'codex@example.com' in fallback.drawn, fallback.drawn
 with tempfile.TemporaryDirectory() as bare_home:
     bare = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': bare_home})
     assert b'Not signed in' in bare.drawn, bare.drawn
