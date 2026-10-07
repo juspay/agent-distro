@@ -30,8 +30,13 @@ let
   # profile's keyEnv and its own name, so the chooser can fall back to the
   # harness's own provider at launch time when AI_GATEWAY=0.
   authSpec = name: harness:
-    let gateway = profiles.${name}.profile.gateway; in
-    if discovered.metadata.${harness}.auth != "gateway" then { scheme = discovered.metadata.${harness}.auth; }
+    let
+      meta = discovered.metadata.${harness};
+      gateway = profiles.${name}.profile.gateway;
+    in
+    if !(meta ? auth) then
+      throw "harnesses/${harness}/meta.nix has no `auth`; add `auth = \"anthropic\" | \"openai\" | \"gateway\"`."
+    else if meta.auth != "gateway" then { scheme = meta.auth; }
     else if gateway == null then { scheme = "provider"; provider = harness; }
     else { scheme = "gateway"; keyEnv = gateway.keyEnv; provider = harness; };
   auth = builtins.toJSON (builtins.listToAttrs (lib.concatMap

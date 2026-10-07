@@ -148,14 +148,22 @@ for (const [columns, rows] of [[80, 24], [60, 24], [120, 30]] as const) {
     assert.ok(line.endsWith(h.version + '  │'), line);
   }
 }
-// At 50 columns the status is drawn with no tagline; narrower still, the status
-// goes and the tagline returns, with title and version throughout.
-const status = boxed(new Menu(withAuth(1), ''), 50, 24).join('\n');
-assert.ok(status.includes('anthropic, openai'), status);
-assert.ok(!status.includes('Anthropic login'), status);
-const taglineOnly = boxed(new Menu(withAuth(1), ''), 44, 24).join('\n');
-assert.ok(!taglineOnly.includes('anthropic, openai'), taglineOnly);
-assert.ok(taglineOnly.includes('Anthropic'), taglineOnly);
+// 80×24 with two profiles is the common case: the tagline keeps its floor and
+// the status is still drawn, fitted.
+const common = layout(new Menu(withAuth(), ''), 80, 24)!;
+assert.ok(common.columns.tagline >= 16, JSON.stringify(common.columns));
+assert.ok(common.columns.auth >= 7, JSON.stringify(common.columns));
+const commonFrame = boxed(new Menu(withAuth(), ''), 80, 24).join('\n');
+assert.ok(commonFrame.includes(fit('anthropic, openai', common.columns.auth)), commonFrame);
+// The tagline gives way before the status: at 60 columns the status shrinks to
+// its floor while the tagline holds; narrower still, the status goes and the
+// tagline returns.
+const squeezed = layout(new Menu(withAuth(1), ''), 60, 24)!;
+assert.ok(squeezed.columns.auth > 0 && squeezed.columns.auth < 17, JSON.stringify(squeezed.columns));
+assert.ok(squeezed.columns.tagline >= 16, JSON.stringify(squeezed.columns));
+const gone = boxed(new Menu(withAuth(1), ''), 52, 24).join('\n');
+assert.ok(!gone.includes('anthropic'), gone);
+assert.ok(gone.includes('Anthropic'), gone);
 
 // Wide and joined characters in the data keep the border straight.
 const emoji = listing(SHORT.slice(0, 2), [

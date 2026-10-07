@@ -7,6 +7,7 @@ import re
 import select
 import shutil
 import signal
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -217,18 +218,43 @@ with tempfile.TemporaryDirectory() as auth_home:
         json.dump({'oauthAccount': {'emailAddress': 'picker@example.com'}}, handle)
     with open(os.path.join(auth_home, '.codex', 'auth.json'), 'w') as handle:
         json.dump({'tokens': {'access_token': 'x'}, 'OPENAI_API_KEY': None}, handle)
-    seeded = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': auth_home})
+    seeded = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': auth_home}, size=(24, 120))
     assert 'picker@example.com' in row_line(seeded.drawn, 'Claude Code'), seeded.drawn
     assert 'ChatGPT' in row_line(seeded.drawn, 'Codex'), seeded.drawn
-    # The numbered fallback, where the status is appended to each line.
+    # The numbered fallback, where the status sits before the version.
     plain_steps = ([(PLAIN_PROFILES, b'\r')] if OTHERS else []) + [(PLAIN_PROMPT, b'\r')]
     fallback = run(plain_steps, version(DEFAULT, NAMES[0]), {'HOME': auth_home}, size=(len(ROWS) + 5, 120))
     assert b'picker@example.com' in fallback.drawn, fallback.drawn
     assert b'ChatGPT' in fallback.drawn, fallback.drawn
 with tempfile.TemporaryDirectory() as bare_home:
-    bare = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': bare_home})
+    bare = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': bare_home}, size=(24, 120))
     assert 'not signed in' in row_line(bare.drawn, 'Claude Code'), bare.drawn
     assert 'not signed in' in row_line(bare.drawn, 'Codex'), bare.drawn
+
+# OMP's own store: the enabled credential is drawn on its row, a disabled one
+# is not, and nothing warns on stderr (a Node that warns about node:sqlite must
+# fail here rather than corrupt the picker).
+with tempfile.TemporaryDirectory() as omp_home:
+    os.makedirs(os.path.join(omp_home, '.omp', 'agent'))
+    database = sqlite3.connect(os.path.join(omp_home, '.omp', 'agent', 'agent.db'))
+    database.execute('CREATE TABLE auth_credentials (provider TEXT NOT NULL, disabled_cause TEXT)')
+    database.execute('INSERT INTO auth_credentials (provider, disabled_cause) VALUES (?, NULL)', ('anthropic',))
+    database.execute('INSERT INTO auth_credentials (provider, disabled_cause) VALUES (?, ?)', ('openai', 'revoked'))
+    database.commit()
+    database.close()
+    omp = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': omp_home, 'PI_CODING_AGENT_DIR': None}, size=(24, 120))
+    assert 'anthropic' in row_line(omp.drawn, 'Oh My Pi'), omp.drawn
+    assert 'openai' not in row_line(omp.drawn, 'Oh My Pi'), omp.drawn
+    assert b'Warning' not in omp.drawn, omp.drawn
+# A store OMP has not written a credential to yet is "not signed in", not blank.
+with tempfile.TemporaryDirectory() as fresh_home:
+    os.makedirs(os.path.join(fresh_home, '.omp', 'agent'))
+    database = sqlite3.connect(os.path.join(fresh_home, '.omp', 'agent', 'agent.db'))
+    database.execute('CREATE TABLE other (x)')
+    database.commit()
+    database.close()
+    fresh = run(flow(b'\r'), version(DEFAULT, NAMES[0]), {'HOME': fresh_home, 'PI_CODING_AGENT_DIR': None}, size=(24, 120))
+    assert 'not signed in' in row_line(fresh.drawn, 'Oh My Pi'), fresh.drawn
 
 for index, profile in enumerate(PROFILES):
     for row, harness in enumerate(HARNESSES[profile]):
@@ -320,7 +346,7 @@ for overrides, size, prefix in [({}, (len(ROWS) + 5, 120), ()), ({}, (24, 20), (
                                 ({'TERM': None}, (24, 120), ()), ({}, (24, 120), ('setsid', '-w'))]:
     small = run(numbered, version(DEFAULT, NAMES[0]), overrides, size=size, prefix=prefix)
     assert '╭'.encode() not in small.drawn, small.drawn
-    assert f'1. {ROWS[0]["title"]}  {ROWS[0]["tagline"]}  {ROWS[0]["version"]}'.encode() in small.drawn, small.drawn
+    assert f'1. {ROWS[0]["title"]}  {ROWS[0]["tagline"]}  not signed in  {ROWS[0]["version"]}'.encode() in small.drawn, small.drawn
     assert small.choice == DEFAULT + '/' + NAMES[0], small.choice
     if OTHERS:
         assert f'1. {DEFAULT}  {LISTING["profiles"][0]["description"]}\r\n'.encode() in small.drawn, small.drawn

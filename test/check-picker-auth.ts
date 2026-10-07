@@ -153,6 +153,19 @@ unreadable.add('/home/u/.pi/agent/auth.json');
 assert.equal(read({ scheme: 'provider', provider: 'pi' }), undefined);
 assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ XAI_API_KEY: 'k' })), signed('xai'));
 
+// Status text is drawn on the terminal as is: control and format characters
+// are replaced and whitespace collapsed, once, for every scheme.
+reset();
+files.set('/home/u/.claude.json', JSON.stringify({ oauthAccount: { emailAddress: 'me\u001b[31m@example.com' } }));
+const escaped = read({ scheme: 'anthropic' })!;
+assert.deepEqual(escaped, signed('me [31m@example.com'));
+assert.doesNotMatch(escaped.text, /[\p{Cc}\p{Cf}]/u);
+reset();
+files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ 'an\u0000thropic': { type: 'api_key' } }));
+const controlled = read({ scheme: 'provider', provider: 'pi' })!;
+assert.deepEqual(controlled, signed('an thropic'));
+assert.doesNotMatch(controlled.text, /[\p{Cc}\p{Cf}]/u);
+
 // A spec that names no harness, or an unknown scheme, is unknown — never a throw.
 reset();
 assert.equal(read({ scheme: 'provider' }), undefined);

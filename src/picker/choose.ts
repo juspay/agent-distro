@@ -249,6 +249,11 @@ export class Menu {
 
 // Two cells of pointer and two of remembered mark lead every row.
 const GUTTER = 4;
+// Cells the tagline and the status each keep before giving way: the status
+// shrinks — it is drawn through `fit`, so it ends in `…` — to its floor, then
+// is dropped; the tagline keeps its floor while the status is shown.
+const TAGLINE_FLOOR = 16;
+const STATUS_FLOOR = 7;
 
 type Columns = { title: number; tagline: number; auth: number; version: number };
 /** Where things go for the data and one terminal size: the box at (x, y), its panes' widths and rows. */
@@ -257,8 +262,8 @@ type Layout = { x: number; y: number; inner: number; left: number; right: number
 /**
  * Widths come from the data: the box is as wide as its content wants and the
  * terminal allows. When it must narrow, the room descriptions were given
- * beyond the pane's base width goes first, then taglines, then the profile
- * pane down to its names.
+ * beyond the pane's base width goes first, then the tagline down to its floor,
+ * then the status down to its floor and away; the title and version stay.
  */
 export function layout(menu: Menu, columns: number, rows: number): Layout | undefined {
   const all: Row[] = menu.profiles.flatMap((p) => p.harnesses);
@@ -296,13 +301,15 @@ export function layout(menu: Menu, columns: number, rows: number): Layout | unde
   const inner = Math.min(room, Math.max(header - 4, menu.panes ? left + 3 + wanted : wanted));
   const right = menu.panes ? inner - left - 3 : inner;
   if (right < bare || inner + 4 < header || rows < body + 6) return undefined;
-  // Taglines take the room left over, so version chips sit on the right edge;
-  // the auth column gives way before the title and version, which a row keeps.
-  const withAuth = auth > 0 && right >= minimum;
-  const taglines = right - (withAuth ? minimum : bare) - 2;
+  // The tagline keeps its floor before the status takes room; the status then
+  // shrinks to its own floor before it is dropped, leaving the tagline the
+  // room. At 80×24 with two panes a row has 23 cells for both, hence 16 + 7.
+  const statusRoom = right - bare - 2 - (tagline ? 2 + TAGLINE_FLOOR : 0);
+  const status = auth > 0 && statusRoom >= STATUS_FLOOR ? Math.min(auth, statusRoom) : 0;
+  const taglines = right - bare - 2 - (status ? 2 + status : 0);
   const x = columns - inner - 4 >= 2 ? 2 : 1;
   const y = rows >= body + 7 ? 2 : 1;
-  return { x, y, inner, left, right, columns: { title, tagline: tagline && taglines >= 6 ? taglines : 0, auth: withAuth ? auth : 0, version }, body, description, terminal: columns };
+  return { x, y, inner, left, right, columns: { title, tagline: tagline && taglines >= 6 ? taglines : 0, auth: status, version }, body, description, terminal: columns };
 }
 
 const brand = (menu: Menu) => 'agent-distro' + (menu.panes ? '' : ' · ' + menu.profiles[0].name);
@@ -518,7 +525,7 @@ async function plain(menu: Menu): Promise<string> {
     say('agent-distro · ' + (menu.profile ? menu.profile.name : menu.counts()));
     say(menu.profile ? menu.profile.description : 'Profiles');
     say();
-    rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.version, row.auth?.text].filter(Boolean).join('  ')));
+    rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.auth?.text, row.version].filter(Boolean).join('  ')));
     process.stderr.write(`${menu.profile ? 'Launch' : 'Pick a profile'} [${menu.index + 1}]${back ? ', h profiles' : ''}, q quit: `);
     const line = await lines.next();
     const value = line.done ? '' : line.value.trim();
@@ -584,8 +591,14 @@ const io: Io = {
     if (!existsSync(path)) return undefined;
     const database = new DatabaseSync(path, { readOnly: true });
     try {
-      return database.prepare('SELECT provider FROM auth_credentials').all().map((row) =>
+      // OMP counts only credentials it has not disabled: its own active-credential
+      // reads filter `disabled_cause IS NULL` (sqlite-credential-store.ts:418).
+      return database.prepare('SELECT provider FROM auth_credentials WHERE disabled_cause IS NULL').all().map((row) =>
         typeof row === 'object' && row !== null && 'provider' in row ? String(row.provider) : '');
+    } catch (error) {
+      // A store OMP has not written a credential to yet is "not signed in".
+      if (error instanceof Error && error.message.includes('no such table')) return [];
+      throw error;
     } finally {
       database.close();
     }

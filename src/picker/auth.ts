@@ -47,6 +47,12 @@ type Source<T> = { value: T } | { missing: true } | { unreadable: true };
 const SIGNED_OUT: Status = { text: NOT_SIGNED_IN, signedIn: false };
 const signedIn = (text: string): Status => ({ text, signedIn: true });
 const home = (env: Env) => env.HOME ?? '';
+
+/**
+ * Status text comes from the user's own files, so control and format
+ * characters must not reach the frame; runs of whitespace collapse too.
+ */
+const sanitize = (text: string) => text.replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
@@ -79,8 +85,11 @@ function jsonIds(path: string, io: Io): Source<string[]> {
 /**
  * OMP stores every provider credential in the `auth_credentials` table of
  * `<agent-dir>/agent.db` (`provider` is the credential-pool key); there is no
- * JSON mirror. `PI_CODING_AGENT_DIR` names the agent dir, else XDG relocates
- * the database to `$XDG_DATA_HOME/omp`, else `~/.omp/agent`.
+ * JSON mirror. `PI_CODING_AGENT_DIR` names the agent dir; otherwise XDG
+ * flattens the `agent/` prefix to `$XDG_DATA_HOME/omp/agent.db` once that
+ * directory exists (packages/utils/src/dirs.ts:366-384 and :410, reached by
+ * getAgentDbPath at :911-912), else `~/.omp/agent/agent.db`. The OMP launcher
+ * (harnesses/omp/default.nix:40) knows only `PI_CODING_AGENT_DIR`/`HOME`.
  */
 function ompStore(env: Env, io: Io): Source<string[]> {
   const paths = env.PI_CODING_AGENT_DIR
@@ -134,7 +143,9 @@ const ENV_PROVIDERS: Record<string, string> = {
  * Claude Code: `oauthAccount.emailAddress` in `$CLAUDE_CONFIG_DIR/.claude.json`
  * (default `~/.claude.json`; on macOS the tokens live in the keychain, so this
  * file is the cross-platform signal), or `ANTHROPIC_API_KEY` /
- * `CLAUDE_CODE_OAUTH_TOKEN` in the environment.
+ * `CLAUDE_CODE_OAUTH_TOKEN` in the environment. That file grows with use — a
+ * machine that has run Claude Code for a while has hundreds of KB — so parsing
+ * it on every start is the cost of the cross-platform signal.
  */
 function anthropic(env: Env, io: Io): Status | undefined {
   const path = env.CLAUDE_CONFIG_DIR ? `${env.CLAUDE_CONFIG_DIR}/.claude.json` : `${home(env)}/.claude.json`;
@@ -175,22 +186,27 @@ function provider(harness: string, env: Env, io: Io): Status | undefined {
 
 /** `spec`'s status, or undefined for unknown; never throws. */
 export function probe(spec: Spec, env: Env, io: Io): Status | undefined {
+  let status: Status | undefined;
   try {
     switch (spec.scheme) {
       case 'anthropic':
-        return anthropic(env, io);
+        status = anthropic(env, io);
+        break;
       case 'openai':
-        return openai(env, io);
+        status = openai(env, io);
+        break;
       case 'gateway':
-        if (env.AI_GATEWAY === '0' && spec.provider) return provider(spec.provider, env, io);
-        if (!spec.keyEnv) return undefined;
-        return env[spec.keyEnv] ? signedIn(spec.keyEnv) : SIGNED_OUT;
+        status = env.AI_GATEWAY === '0' && spec.provider ? provider(spec.provider, env, io)
+          : spec.keyEnv ? (env[spec.keyEnv] ? signedIn(spec.keyEnv) : SIGNED_OUT)
+            : undefined;
+        break;
       case 'provider':
-        return spec.provider ? provider(spec.provider, env, io) : undefined;
-      default:
-        return undefined;
+        status = spec.provider ? provider(spec.provider, env, io) : undefined;
+        break;
     }
   } catch {
     return undefined;
   }
+  // Once, for every scheme: the text is drawn on the terminal as is.
+  return status && { text: sanitize(status.text), signedIn: status.signedIn };
 }
