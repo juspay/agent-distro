@@ -10,7 +10,7 @@ nix run github:juspay/agent-distro                     # pick from the list
 AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
 ```
 
-To keep the agents installed and updated daily, see [Install](#install).
+To keep the agents installed and updated, see [Install and keep updated](#install).
 
 - **Systems.** `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 - **Binary cache.** Pass `--accept-flake-config` to use the cache this flake names;[^nixconfig] without it, Oh My Pi is built from source.
@@ -230,9 +230,9 @@ AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-dist
 [^no-pile-up]: So old versions of an edited checkout and translations for an older agent-distro do not pile up.
 [^undo]: Claude Code and OMP take them as arguments, OpenCode in its session config, and Codex through `-c` overrides; Codex keeps an inert copy in its plugin cache, removed once unused for 14 days. Pi only reads its own files, so it records what a launch added and its next launch, whenever that is, takes it back.
 
-## Install
+## Install and keep updated {#install}
 
-Puts every harness on your `PATH` and updates them four times a day.[^update-hours]
+The Home Manager module puts every harness on your `PATH` and keeps them on the latest build: it checks four times a day,[^update-hours] installs only what the binary cache already holds, and never compiles.
 
 [^update-hours]: At 02:00, 08:00, 14:00 and 20:00 UTC, two hours after upstream's update.
 

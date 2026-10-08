@@ -12,7 +12,7 @@ nix run github:juspay/agent-distro
 Everything else is on the website, **<https://agent-distro.nixos.asia>**:
 
 - [Quick start](https://agent-distro.nixos.asia/#quick-start)
-- [Install](https://agent-distro.nixos.asia/#install)
+- [Install and keep updated](https://agent-distro.nixos.asia/#install)
 - [Build your own distribution](https://agent-distro.nixos.asia/#build-your-own-distribution)
 - [Profiles](https://agent-distro.nixos.asia/#profiles)
 - [Harnesses](https://agent-distro.nixos.asia/#harnesses)
