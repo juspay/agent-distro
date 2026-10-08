@@ -73,7 +73,8 @@
             touch "$out"
           '';
           # `--list --json` alone, without a VM: its type, the picker's menu,
-          # `--list`, and each profile's versions stripped of `+` suffixes.
+          # `--list`, each profile's versions stripped of `+` suffixes, and each
+          # bundle's profile.json.
           list-json =
             let
               registry = import "${agent-distro}/profiles/registry.nix";
