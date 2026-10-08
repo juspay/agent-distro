@@ -38,9 +38,9 @@
       },
       "branch": "main",
       "submodules": false,
-      "revision": "33c9ed3dc79c04eb016457eead9a26bcedbe1bea",
-      "url": "https://github.com/juspay/skills/archive/33c9ed3dc79c04eb016457eead9a26bcedbe1bea.tar.gz",
-      "hash": "sha256-1lBTHOFD/YBqio1IybdGti9/vlKsbZ5iJHe1vnXkyNA="
+      "revision": "e065bbb3fc8f5eb55e16c9aa14aa501ee8a702b9",
+      "url": "https://github.com/juspay/skills/archive/e065bbb3fc8f5eb55e16c9aa14aa501ee8a702b9.tar.gz",
+      "hash": "sha256-uhJnhYKTPll/LCmJmK4GthewKAaT9N1RAuBchCLcLf0="
     }
   },
   "version": 8
