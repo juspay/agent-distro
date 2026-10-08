@@ -51,7 +51,7 @@ jobs:
           echo "pins=$pins" >> "$GITHUB_OUTPUT"
           echo "metadata=$metadata" >> "$GITHUB_OUTPUT"
 
-      - name: Update the test lock after the root lock
+      - name: Update the sub-flake locks after the root lock
         run: bash test/update-lock.sh
 
       - name: Describe the locked versions
@@ -73,6 +73,7 @@ jobs:
             flake.nix
             flake.lock
             test/flake.lock
+            doc/flake.lock
             harnesses
             lib/npins
             profiles

@@ -31,7 +31,7 @@ Manager:
 ```
 
 Binary cache and manual install: see agent-distro's
-[Install](https://github.com/juspay/agent-distro#install).
+[Install](https://agent-distro.nixos.asia/#install).
 
 To add a harness to the framework, create `harnesses/<name>/` with `meta.nix`,
-`default.nix`, `source.nix`, and `README.md`; see [Adding a harness](https://github.com/juspay/agent-distro#adding-a-harness).
+`default.nix`, `source.nix`, and `README.md`; see [Adding a harness](https://agent-distro.nixos.asia/#adding-a-harness).

@@ -81,6 +81,12 @@ jobs:
         run: |
           nix build --print-build-logs .#default
 
+      - name: Build the website
+        # The site is the same on every system, so one runner builds it; a
+        # broken site fails the PR.
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        run: nix build ./doc --no-link -L
+
       - name: Wrapper package tests
         # The wrapper tests boot NixOS VMs (x86_64-linux only: the test flake
         # fixes its system, and ARM runners have no KVM). `nix flake check`
