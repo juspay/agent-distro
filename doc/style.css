@@ -322,6 +322,7 @@ kbd {
 .flow-node ul li { padding: 4px 0; border-top: 1px solid var(--line); }
 .flow-node ul li:first-child { border-top: 0; }
 .flow-opt { font-size: .75rem; color: var(--text-3); margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; }
+.flow-sub { display: block; font-size: .82rem; color: var(--text-3); }
 .flow-core { text-align: center; background: var(--bg); border-color: var(--line-2); }
 .flow-core img { display: block; margin: 0 auto 10px; color: var(--text); }
 .flow-core p { margin: 0; color: var(--text-2); font-size: .9rem; }
@@ -336,11 +337,12 @@ kbd {
   border-top: 2px solid var(--teal); border-right: 2px solid var(--teal);
   transform: translateY(-50%) rotate(45deg);
 }
-.flow-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.flow-chips li {
-  padding: 3px 10px; border-radius: 999px; font-size: .85rem;
-  background: var(--bg); border: 1px solid var(--line-2); color: var(--text);
+.flow-node .flow-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.flow-node .flow-chips li {
+  padding: 6px 12px; border: 1px solid var(--line-2); border-top: 1px solid var(--line-2); border-radius: 8px;
+  font-size: .9rem; background: var(--bg); color: var(--text); white-space: nowrap;
 }
+.flow-node .flow-chips li::before { content: "✓ "; color: var(--teal); }
 @media (max-width: 820px) {
   .flow { grid-template-columns: 1fr; }
   .flow-arrow { height: 44px; }
