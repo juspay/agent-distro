@@ -351,6 +351,22 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 #   that picker as `agent-distro`, defaulting to the profile)
 ```
 
+### Bundle layout
+
+A profile's bundle (`nix build .#<profile.name>`) is self-describing: a
+consumer reads two files rather than running a command for information.
+
+```text
+bin/<harness>…                      # one launcher per harness
+bin/agent-distro                    # the picker, defaulting to this profile
+share/agent-distro/profile.json     # {"description": "…", "name": "<profile.name>"}
+share/agent-distro/versions         # <harness>\t<title>\t<version>, one line per harness, in menu order
+```
+
+`profile.json` comes from the same profile attributes as the picker's
+`--list --json`, so the two cannot drift; [src/listing.ts](./src/listing.ts)
+types both files (`ProfileFile`, `parseProfileFile`).
+
 ### Library
 
 Beyond the launchers, `agent-distro.lib` exposes the pieces Home Manager uses

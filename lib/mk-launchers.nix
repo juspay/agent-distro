@@ -1,5 +1,7 @@
 # A profile's launchers: one command per harness, the picker over this profile,
 # and the bundle, which joins the commands and that picker as `bin/agent-distro`.
+# The bundle describes its profile: `share/agent-distro/profile.json` names it
+# and `share/agent-distro/versions` lists its harnesses (src/listing.ts).
 { pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }) }:
 let
   inherit (pkgs) lib;
@@ -47,6 +49,10 @@ commands // {
       cp ${pkgs.writeText "agent-distro-versions" (lib.concatMapStrings
         (name: "${name}\t${discovery.metadata.${name}.title}\t${commands.${name}.version}\n")
         harnesses)} "$out/share/agent-distro/versions"
+      cp ${pkgs.writeText "agent-distro-profile.json" (builtins.toJSON {
+        # The attributes the picker's listing reads, so the two cannot drift.
+        inherit (profile) name description;
+      })} "$out/share/agent-distro/profile.json"
     '';
     meta.mainProgram = "agent-distro";
     passthru = {

@@ -1,7 +1,8 @@
 /**
  * `agent-distro --list --json` without a VM: it is a `Listing`, it is the
  * menu the picker is handed, `--list` prints the same rows, and each version
- * is the launcher's without its `+` suffix.
+ * is the launcher's without its `+` suffix; each bundle's `profile.json`
+ * names its profile as the listing does.
  *
  * Usage: node check-list-json.ts SRC AGENT_DISTRO PROFILE=BUNDLE...
  */
@@ -13,7 +14,7 @@ import { join } from 'node:path';
 import type { Listing } from '../src/listing.ts';
 
 const [src, agentDistro, ...bundles] = process.argv.slice(2);
-const { parseListing } = await import(join(src, 'listing.ts'));
+const { parseListing, parseProfileFile } = await import(join(src, 'listing.ts'));
 const run = (...args: string[]) => execFileSync(agentDistro, args, { encoding: 'utf8' });
 
 const listing: Listing = parseListing(JSON.parse(run('--list', '--json')));
@@ -45,6 +46,11 @@ assert.deepEqual(bundles.map((b) => b.split('=')[0]), listing.profiles.map((p) =
 for (const entry of bundles) {
   const [name, bundle] = entry.split('=');
   const profile = listing.profiles.find((p) => p.name === name)!;
+  // The bundle names its profile as the listing does.
+  assert.deepEqual(parseProfileFile(readFileSync(`${bundle}/share/agent-distro/profile.json`, 'utf8')), {
+    name: profile.name,
+    description: profile.description,
+  });
   const recorded = readFileSync(`${bundle}/share/agent-distro/versions`, 'utf8').trimEnd().split('\n').map((line) => line.split('\t'));
   assert.deepEqual(profile.harnesses.map((h) => [h.name, h.title]), recorded.map(([n, title]) => [n, title]));
   recorded.forEach(([, , version], i) => {
@@ -75,5 +81,17 @@ for (const [bad, message] of [
   [{ default: 'a', profiles: [profile()] }, /unknown field default/],
 ] as const) {
   assert.throws(() => parseListing(structuredClone(bad)), message, JSON.stringify(bad));
+}
+assert.deepEqual(parseProfileFile('{"name": "a", "description": ""}'), { name: 'a', description: '' });
+for (const [bad, message] of [
+  ['[]', /profile is not an object/],
+  ['{"description": ""}', /profile\.name is missing/],
+  ['{"name": "a"}', /profile\.description is missing/],
+  ['{"name": 1, "description": ""}', /profile\.name is not a string/],
+  ['{"name": "a", "description": null}', /profile\.description is not a string/],
+  ['{"name": "a b", "description": ""}', /contains whitespace or \//],
+  ['{"name": "a", "description": "", "harnesses": []}', /unknown field harnesses/],
+] as const) {
+  assert.throws(() => parseProfileFile(bad), message, bad);
 }
 console.log(`--list --json: ${listing.profiles.length} profiles, ${suffixed} suffixed versions stripped`);

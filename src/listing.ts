@@ -9,6 +9,15 @@
  *
  * The first profile is the default; `harnesses` is in menu order. `version`
  * is the display version, without the package's `+` revision suffix.
+ *
+ * A profile's bundle is self-describing, so a consumer reads files rather than
+ * running its picker: `share/agent-distro/profile.json` is a `ProfileFile`,
+ * from the same profile attributes as this listing's `name` and `description`,
+ *
+ *   { "description": "…", "name": "juspay" }
+ *
+ * and `share/agent-distro/versions` has one `name\ttitle\tversion` line per
+ * harness, in menu order, each version as packaged (`+` suffix and all).
  */
 
 export type Harness = {
@@ -30,6 +39,9 @@ export type Listing = {
   /** The default profile first. */
   profiles: Profile[];
 };
+
+/** A bundle's `share/agent-distro/profile.json`. */
+export type ProfileFile = Pick<Profile, 'name' | 'description'>;
 
 type Field = 'string' | 'name' | 'list';
 
@@ -73,4 +85,9 @@ export function parseListing(value: unknown): Listing {
   });
   unique(listing.profiles.map((p) => p.name), 'profiles');
   return listing;
+}
+
+/** Parse a bundle's `profile.json` as a `ProfileFile`; throws naming the first bad field. */
+export function parseProfileFile(text: string): ProfileFile {
+  return record(JSON.parse(text), 'profile', { name: 'name', description: 'string' }) as ProfileFile;
 }
