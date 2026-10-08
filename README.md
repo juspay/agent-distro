@@ -342,11 +342,13 @@ runs `nix run github:<you>/my-distribution`, and updates with
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; }
 # → packages.<system>: every harness, default picker, and <profile.name> bundle
+#   (a bundle's bin/ carries its harness commands and `agent-distro`, its own picker)
 #   apps.<system>: every harness and default picker; homeManagerModules.default;
 #   lib: the same eight-name library attrset this flake exposes
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → every harness launcher, plus picker and bundle
+# → every harness launcher, plus picker and bundle (the bundle's bin/ also holds
+#   that picker as `agent-distro`, defaulting to the profile)
 ```
 
 ### Library
@@ -401,7 +403,7 @@ compiles, so push your own builds to a cache and pass it, or your users' updates
 are skipped.
 
 `mkFlake` returns `packages` (every harness, the default picker, and the
-`<profile.name>` bundle), `apps`, `homeManagerModules.default`, and the same
+`<profile.name>` bundle, which carries its own picker as `bin/agent-distro`), `apps`, `homeManagerModules.default`, and the same
 `lib` attrset `flake.nix` exposes; add other outputs with `//`.
 For NixOS, with your distribution bound as `distro`:
 
@@ -510,6 +512,7 @@ the session.
 
 ```sh
 nix build .#default    # the picker, and through it every profile's launchers
+nix build .#vanilla    # one profile's bundle: its harnesses plus its own bin/agent-distro
 nix flake check
 just test              # offline NixOS VM tests; Linux with KVM
 just test-template

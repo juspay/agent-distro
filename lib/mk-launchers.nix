@@ -1,3 +1,5 @@
+# A profile's launchers: one command per harness, the picker over this profile,
+# and the bundle, which joins the commands and that picker as `bin/agent-distro`.
 { pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }) }:
 let
   inherit (pkgs) lib;
@@ -28,11 +30,18 @@ let
     profileName = profile.name;
   }));
 
+  # The profile's own chooser, defaulting to it; the bundle carries it so a
+  # fetch of the bundle refreshes the picker along with the harnesses.
+  picker = pkgs.callPackage ./picker.nix {
+    default = profile.name;
+    profiles.${profile.name} = { inherit profile; launchers = commands; };
+  };
+
 in
 commands // {
   bundle = pkgs.symlinkJoin {
     name = "agent-distro-${profile.name}";
-    paths = map (name: commands.${name}) harnesses;
+    paths = map (name: commands.${name}) harnesses ++ [ picker ];
     postBuild = ''
       mkdir -p "$out/share/agent-distro"
       cp ${pkgs.writeText "agent-distro-versions" (lib.concatMapStrings
@@ -45,8 +54,5 @@ commands // {
       runtime = import ./runtime.nix pkgs;
     };
   };
-  picker = pkgs.callPackage ./picker.nix {
-    default = profile.name;
-    profiles.${profile.name} = { inherit profile; launchers = commands; };
-  };
+  inherit picker;
 }
