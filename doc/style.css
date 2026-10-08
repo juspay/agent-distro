@@ -350,6 +350,26 @@ kbd {
   .flow-arrow::after { right: auto; left: 50%; top: auto; bottom: 6px; transform: translateX(-50%) rotate(135deg); }
 }
 
+/* ---- kolu ------------------------------------------------------------- */
+
+.kolu { margin-top: clamp(56px, 8vw, 96px); }
+.kolu-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 28px;
+  padding: 28px 32px; border: 1px solid var(--line); border-radius: var(--radius);
+  background:
+    radial-gradient(60% 120% at 0% 50%, var(--glow-c), transparent 70%),
+    radial-gradient(40% 120% at 100% 50%, var(--glow-b), transparent 70%),
+    var(--bg-2);
+}
+.kolu-eyebrow { margin: 0 0 6px; font-size: .78rem; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.kolu-card h2 { margin: 0 0 8px; font-size: clamp(1.3rem, 1rem + 1.2vw, 1.7rem); letter-spacing: -.02em; line-height: 1.2; }
+.kolu-card h2 code { font-size: .9em; padding: .05em .35em; border-radius: 6px; background: var(--code-bg); border: 1px solid var(--line); }
+.kolu-card p:last-child { margin: 0; color: var(--text-2); max-width: 62ch; }
+.kolu-card .button { flex: none; }
+@media (max-width: 760px) {
+  .kolu-card { flex-direction: column; align-items: flex-start; padding: 22px; }
+}
+
 /* ---- docs ------------------------------------------------------------- */
 
 .docs {
@@ -430,6 +450,41 @@ kbd {
 .prose a code { color: inherit; }
 .prose hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
 .prose blockquote { margin: 0 0 18px; padding: 4px 16px; border-left: 3px solid var(--line-2); color: var(--text-2); }
+
+/* Footnotes: a small numbered mark in the text that opens a popover on hover
+   or focus (site.js); the notes themselves are listed at the end. */
+.prose .footnote-ref {
+  display: inline-block; vertical-align: baseline; margin-left: 1px;
+  text-decoration: none;
+}
+.prose .footnote-ref sup {
+  display: inline-block; min-width: 1.35em; height: 1.35em; padding: 0 .3em;
+  border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-2);
+  color: var(--text-2); font-size: .68em; line-height: 1.35em; text-align: center;
+  vertical-align: .35em; font-weight: 600; transition: background .15s, color .15s, border-color .15s;
+}
+.prose .footnote-ref:hover sup, .prose .footnote-ref:focus-visible sup, .prose .footnote-ref.open sup {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+.footnote-pop {
+  position: absolute; z-index: 40; width: min(380px, calc(100vw - 32px));
+  padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--line-2); background: var(--bg-2); color: var(--text);
+  box-shadow: 0 6px 20px rgba(0,0,0,.28); font-size: .9rem; line-height: 1.5;
+}
+.footnote-pop p { margin: 0 0 8px; }
+.footnote-pop p:last-child { margin: 0; }
+.footnote-pop code { font-size: .85em; }
+.footnote-pop .footnote-back { display: none; }
+.prose .footnotes { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--text-2); font-size: .9rem; }
+.prose .footnotes::before { content: "Notes"; display: block; margin-bottom: 10px; font-size: .78rem; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.prose .footnotes hr { display: none; }
+.prose .footnotes ol { padding-left: 1.6em; }
+.prose .footnotes li { margin: 6px 0; }
+.prose .footnotes li:target { color: var(--text); }
+.prose .footnotes li:target > p:first-child::before { content: ""; position: absolute; left: -1.6em; width: 3px; top: 0; bottom: 0; background: var(--accent); }
+.prose .footnotes li { position: relative; }
+.prose .footnote-back { margin-left: 6px; text-decoration: none; }
 
 /* pandoc's skylighting classes, dark and light */
 .sourceCode .kw, .sourceCode .cf { color: var(--violet); }

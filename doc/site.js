@@ -56,6 +56,56 @@
     heading.appendChild(anchor);
   });
 
+  // Footnotes pop up beside their mark on hover, focus or tap. The mark is
+  // still a link to the note at the end, so this is additive.
+  var pop = null, popFor = null, hideTimer = null;
+  function hidePop() {
+    if (pop) pop.remove();
+    if (popFor) popFor.classList.remove('open');
+    pop = null; popFor = null;
+  }
+  function showPop(ref) {
+    clearTimeout(hideTimer);
+    if (popFor === ref) return;
+    hidePop();
+    var note = document.getElementById(decodeURIComponent(ref.hash.slice(1)));
+    if (!note) return;
+    pop = document.createElement('div');
+    pop.className = 'footnote-pop';
+    pop.setAttribute('role', 'tooltip');
+    pop.innerHTML = note.innerHTML;
+    pop.addEventListener('mouseenter', function () { clearTimeout(hideTimer); });
+    pop.addEventListener('mouseleave', scheduleHide);
+    document.body.appendChild(pop);
+    var r = ref.getBoundingClientRect();
+    var width = pop.offsetWidth;
+    var left = Math.max(16, Math.min(r.left + r.width / 2 - width / 2, innerWidth - width - 16));
+    var below = r.bottom + 8 + pop.offsetHeight < innerHeight;
+    pop.style.left = (left + scrollX) + 'px';
+    pop.style.top = (below ? r.bottom + 8 : r.top - 8 - pop.offsetHeight) + scrollY + 'px';
+    popFor = ref;
+    ref.classList.add('open');
+  }
+  function scheduleHide() { hideTimer = setTimeout(hidePop, 160); }
+  document.querySelectorAll('.prose .footnote-ref').forEach(function (ref) {
+    ref.addEventListener('mouseenter', function () { showPop(ref); });
+    ref.addEventListener('mouseleave', scheduleHide);
+    ref.addEventListener('focus', function () { showPop(ref); });
+    ref.addEventListener('blur', scheduleHide);
+    ref.addEventListener('click', function (event) {
+      // A tap on a touch screen shows the note in place instead of jumping.
+      if (matchMedia('(hover: none)').matches) {
+        event.preventDefault();
+        if (popFor === ref) hidePop(); else showPop(ref);
+      }
+    });
+  });
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape') hidePop(); });
+  document.addEventListener('click', function (event) {
+    if (pop && !event.target.closest('.footnote-pop, .footnote-ref')) hidePop();
+  });
+  addEventListener('scroll', function () { if (pop && !matchMedia('(hover: none)').matches) hidePop(); }, { passive: true });
+
   // Contents on this page: highlight the section in view, and open the
   // subsections of the section the reader is in.
   var links = Array.prototype.slice.call(document.querySelectorAll('.toc a[href^="#"]'));
