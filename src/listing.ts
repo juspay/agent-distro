@@ -43,7 +43,7 @@ export type Listing = {
 /** A bundle's `share/agent-distro/profile.json`. */
 export type ProfileFile = Pick<Profile, 'name' | 'description'>;
 
-type Field ='string' | 'name' | 'list';
+type Field = 'string' | 'name' | 'list';
 
 function record(value: unknown, path: string, keys: Record<string, Field>): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${path} is not an object`);
