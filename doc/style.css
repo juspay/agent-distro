@@ -323,6 +323,8 @@ kbd {
 .flow-node ul li:first-child { border-top: 0; }
 .flow-opt { font-size: .75rem; color: var(--text-3); margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; }
 .flow-sub { display: block; font-size: .82rem; color: var(--text-3); }
+.flow-sub code { font-size: .9em; }
+.flow-sub a { color: var(--text-2); text-decoration: underline; text-decoration-color: var(--line-2); }
 .flow-core { text-align: center; background: var(--bg); border-color: var(--line-2); }
 .flow-core img { display: block; margin: 0 auto 10px; color: var(--text); }
 .flow-core p { margin: 0; color: var(--text-2); font-size: .9rem; }
