@@ -17,6 +17,12 @@ stdenvNoCC.mkDerivation {
       --template template.html --metadata-file "$metadataPath" \
       --toc --toc-depth 3 --wrap none --columns 500
     cp style.css site.js logo.svg demo.gif demo.png og.png "$out/"
+    # Pages caches assets for ten minutes; a content hash in the URL means a
+    # new page never runs with an old stylesheet or script.
+    for asset in style.css site.js; do
+      hash=$(sha256sum "$asset" | cut -c1-8)
+      sed -i "s|\"/$asset\"|\"/$asset?v=$hash\"|" "$out/index.html"
+    done
     touch "$out/.nojekyll"
     runHook postBuild
   '';
