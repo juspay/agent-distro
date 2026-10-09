@@ -128,7 +128,7 @@
           # package the binary cache lacks, and a copy of the Juspay profile's
           # agent-distro.nix behaving as the built-in Juspay profile did.
           profiles = pkgs.testers.runNixOSTest (import ./test-profiles.nix {
-            inherit pkgs agent-distro juspay-skills koluPlugin;
+            inherit pkgs agent-distro nixpkgs juspay-skills koluPlugin;
           });
           # The picker's widths, truncation and layout, without a terminal.
           picker-layout = pkgs.runCommand "picker-layout-check" { } ''

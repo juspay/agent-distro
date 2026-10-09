@@ -25,13 +25,16 @@ let
   # What the resolver knows at build time (src/profile/resolve.ts): the
   # launcher's own profile, which is `vanilla`'s too when it is not vanilla,
   # and the nixpkgs a profile's `packages` are evaluated against
-  # (lib/nixpkgs-reference.nix, from the flake input `nixpkgs`), for this
+  # (lib/nixpkgs-reference.nix, from the flake input `nixpkgs`, and its store
+  # path, used when present), for this
   # system. lib/mk-launchers.nix builds it once, for every adapter and the picker.
   info = profile: nixpkgs: {
     default = profile.name;
     builtins = map (p: { inherit (p) name description; gateway = p.gateway or null; })
       ([ profile ] ++ pkgs.lib.optional (profile.name != vanilla.name) vanilla);
     nixpkgs = import ./nixpkgs-reference.nix pkgs nixpkgs;
+    # Without its context, so the launchers do not hold it.
+    nixpkgsPath = builtins.unsafeDiscardStringContext (toString pkgs.path);
     system = pkgs.stdenv.hostPlatform.system;
   };
 in

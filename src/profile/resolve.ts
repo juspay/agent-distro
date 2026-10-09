@@ -55,6 +55,12 @@ export type Info = {
    * holds.
    */
   nixpkgs: string;
+  /**
+   * Where that reference's tree is in the store, which the launcher does not
+   * hold: used while it is there, since Nix downloads a locked github:
+   * reference again rather than finding it in the store.
+   */
+  nixpkgsPath?: string;
   /** The system `packages` are evaluated for. */
   system: string;
 };
@@ -193,20 +199,34 @@ function nixEnvironment(scrubbed = false): NodeJS.ProcessEnv {
 /** `value` as a Nix expression: JSON in a Nix string, `$` escaped against interpolation. */
 const nixJSON = (value: unknown) => `builtins.fromJSON ${JSON.stringify(JSON.stringify(value)).replaceAll('$', '\\$')}`;
 
-/** Run nix for its stdout; a failure is a LaunchError carrying nix's own message. */
+/**
+ * Run nix for its stdout; a failure is a LaunchError carrying nix's own
+ * message, or, when it printed none, how it exited and its last line of output.
+ */
 function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironment()): string {
   const result = spawnSync('nix', args, { encoding: 'utf8', maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'], env });
   if (result.error) {
     const missing = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
     throw new LaunchError(`${what}: ${missing ? 'nix is not on PATH' : result.error.message}`);
   }
-  if (result.status !== 0) throw new LaunchError(`${what}:\n${result.stderr.trim()}`);
-  return result.stdout;
+  if (result.status === 0) return result.stdout;
+  const message = result.stderr.trim();
+  if (message) throw new LaunchError(`${what}:\n${message}`);
+  const exit = result.signal ? `nix was killed by ${result.signal}` : `nix exited with code ${result.status}`;
+  const last = result.stdout.trim().split('\n').pop();
+  throw new LaunchError(`${what}: ${exit} and printed no error${last ? `; its last output: ${last}` : ''}`);
 }
 
-/** A flake reference's directory in the store: the fetched tree, and its `dir` within it. */
+/**
+ * A flake reference's directory in the store: the fetched tree, and its `dir`
+ * within it. Nix downloads the global flake registry before fetching any
+ * reference, so without network even a git+file: one would fail; only an
+ * indirect reference (no `scheme:`, such as `nixpkgs/nixos-unstable`) is
+ * looked up in it, so the others skip it.
+ */
 export function prefetch(reference: string, what: string): string {
-  const text = nix(['flake', 'prefetch', '--json', reference], `${what}: cannot fetch ${reference}`);
+  const registry = /^[a-z][a-z0-9+.-]*:/i.test(reference) ? ['--option', 'flake-registry', ''] : [];
+  const text = nix(['flake', 'prefetch', ...registry, '--json', reference], `${what}: cannot fetch ${reference}`);
   let storePath: unknown;
   let dir: unknown;
   try {
@@ -265,7 +285,8 @@ function evaluate(file: string, info: Info, cache: string, what: string): Evalua
   `${what}: cannot evaluate ${file}`, nixEnvironment(true)));
   let value = run(null);
   if (isObject(value) && value.packages === null) {
-    value = run(isAbsolute(info.nixpkgs) ? info.nixpkgs : fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache));
+    const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
+    value = run(isAbsolute(info.nixpkgs) ? info.nixpkgs : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache));
   }
   if (isObject(value)) {
     if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
