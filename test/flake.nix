@@ -112,7 +112,7 @@
               exit 1
             fi
             # The reference instead.
-            grep -q '"nixpkgs":"github:NixOS/nixpkgs/' ${agent-distro.packages.${system}.default.passthru.info}
+            grep -q '"nixpkgs":"github:NixOS/nixpkgs/' ${agent-distro.packages.${system}.default.passthru.infoFile}
             touch "$out"
           '';
           # The profile in effect without a VM: discovery, precedence,

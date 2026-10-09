@@ -41,7 +41,8 @@ let
 in
 writeShellApplication {
   name = "agent-distro";
-  passthru = { inherit listing; info = infoFile; };
+  # Not `info`: NixOS installs a package's `info` as its texinfo output.
+  passthru = { inherit listing infoFile; };
   text = ''
     invalid=${quote "Invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " harnesses}."}
 
