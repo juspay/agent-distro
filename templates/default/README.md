@@ -1,7 +1,25 @@
 # My coding-agent distribution
 
-Set `my-skills.url` in `flake.nix` to your Agent Plugins repository, then edit
-`profile.nix` to name your distribution and optionally configure a gateway.
+This repository is a profile: `agent-distro.nix` names its plugins, packages
+and optional gateway, and the repository itself is an Agent Plugins directory
+(`plugin.json`, `skills/<name>/SKILL.md`, optionally `mcp.json`). Edit
+`agent-distro.nix` to name your distribution, add skills under `skills/`, and
+optionally configure a gateway.
+
+## Use it from any agent-distro
+
+agent-distro reads `agent-distro.nix` when a harness starts, so nothing is
+built or registered:
+
+```sh
+nix run github:juspay/agent-distro -- github:<you>/my-distribution        # choose a harness
+nix run github:juspay/agent-distro -- github:<you>/my-distribution omp    # or start one
+AI_PROFILE=github:<you>/my-distribution agent-distro claude
+```
+
+A terminal opened in this repository starts its agents with this profile.
+
+## Or build it into a distribution of its own
 
 ```sh
 nix run           # choose a harness
@@ -15,7 +33,7 @@ gateway is configured. `AI_GATEWAY=0` preserves existing user settings; select
 personal models in OMP or Pi if you previously used gateway defaults.
 
 Commit `flake.lock` for reproducible builds. Run `nix flake update` to update
-the framework and skills together.
+the framework.
 
 To install every harness and update them daily, with Home
 Manager:
