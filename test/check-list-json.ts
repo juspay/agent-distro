@@ -1,8 +1,10 @@
 /**
  * `agent-distro --list --json` without a VM: it is a `Listing`, it is the
- * menu the picker is handed, `--list` prints the same rows, and each version
- * is the launcher's without its `+` suffix; each bundle's `profile.json`
- * names its profile as the listing does.
+ * menu the picker is handed with the profile in effect added, `--list` prints
+ * the same rows under that profile, and each version is the launcher's
+ * without its `+` suffix; each bundle's `profile.json` names its profile as
+ * the listing does. Outside any repository and without AI_PROFILE, the
+ * profile in effect is the built-in one.
  *
  * Usage: node check-list-json.ts SRC AGENT_DISTRO PROFILE=BUNDLE...
  */
@@ -18,7 +20,12 @@ const { parseListing, parseProfileFile } = await import(join(src, 'listing.ts'))
 const run = (...args: string[]) => execFileSync(agentDistro, args, { encoding: 'utf8' });
 
 const listing: Listing = parseListing(JSON.parse(run('--list', '--json')));
-assert.deepEqual(Object.keys(listing), ['profiles']);
+assert.deepEqual(Object.keys(listing), ['profiles', 'profile']);
+assert.deepEqual(listing.profile, {
+  name: listing.profiles[0].name, description: listing.profiles[0].description, source: 'builtin', origin: listing.profiles[0].name,
+});
+// Exactly these fields, in this order, as Kolu reads them.
+assert.deepEqual(Object.keys(listing.profile!), ['name', 'description', 'source', 'origin']);
 
 // Both sides come from one Nix string, so equality only guards the shell
 // quoting; what matters is that the chooser's copy is a valid Listing too.
@@ -26,11 +33,13 @@ const script = readFileSync(agentDistro, 'utf8');
 const quoted = script.match(/picker\/choose\.ts ((?:'[^']*'|\\')+)/);
 assert.ok(quoted, 'agent-distro passes the chooser no quoted menu');
 const menu = quoted[1].replace(/'([^']*)'|\\'/g, (_: string, text?: string) => text ?? "'");
-assert.deepEqual(parseListing(JSON.parse(menu)), listing);
+const { profile: _, ...withoutProfile } = listing;
+assert.deepEqual(parseListing(JSON.parse(menu)), withoutProfile);
 
+const [builtIn] = listing.profiles;
 assert.equal(
   run('--list'),
-  listing.profiles.flatMap((p) => p.harnesses.map((h) => `${p.name} ${h.name} ${h.title} ${h.version}\n`)).join(''),
+  `${builtIn.name} · ${builtIn.description} · built in\n` + builtIn.harnesses.map((h) => `${h.name} ${h.title} ${h.version}\n`).join(''),
 );
 // Anything after --list [--json] is an error, not ignored.
 for (const args of [['--list', '--bogus'], ['--list', '--json', 'extra'], ['--list', 'claude']]) {
@@ -79,6 +88,10 @@ for (const [bad, message] of [
   [{ profiles: [profile({ harnesses: [{ ...harness, tagline: null }] })] }, /tagline is not a string/],
   [{ profiles: [profile({ extra: 1 })] }, /unknown field extra/],
   [{ default: 'a', profiles: [profile()] }, /unknown field default/],
+  [{ profiles: [profile()], profile: { name: 'a', description: '', source: 'built-in', origin: 'a' } }, /listing\.profile\.source is not positional/],
+  [{ profiles: [profile()], profile: { name: 'a', description: '', source: 'builtin' } }, /listing\.profile\.origin is missing/],
+  [{ profiles: [profile()], profile: { name: 'a', description: '', source: 'builtin', origin: 'a', reference: 'a' } }, /listing\.profile has unknown field reference/],
+  [{ profiles: [profile()], profile: [] }, /listing\.profile is not an object/],
 ] as const) {
   assert.throws(() => parseListing(structuredClone(bad)), message, JSON.stringify(bad));
 }

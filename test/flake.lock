@@ -35,6 +35,38 @@
         "type": "github"
       }
     },
+    "juspay-skills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791494896,
+        "narHash": "sha256-NlviupfrpfTvwAVV1+1yCDqvwW48/KnfItSPQlgGgHQ=",
+        "owner": "juspay",
+        "repo": "skills",
+        "rev": "73c07841b30a779fc84ce497249c35b13353b415",
+        "type": "github"
+      },
+      "original": {
+        "owner": "juspay",
+        "repo": "skills",
+        "type": "github"
+      }
+    },
+    "kolu": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791560218,
+        "narHash": "sha256-JumdkYCZxM7L+aA7X5EEyD1afrVuBLjJ0VvRF2XNpio=",
+        "owner": "juspay",
+        "repo": "kolu",
+        "rev": "7d821782d868acb0e20aa447211f4a879cb8a333",
+        "type": "github"
+      },
+      "original": {
+        "owner": "juspay",
+        "repo": "kolu",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1791456040,
@@ -55,6 +87,8 @@
       "inputs": {
         "agent-distro": "agent-distro",
         "home-manager": "home-manager",
+        "juspay-skills": "juspay-skills",
+        "kolu": "kolu",
         "nixpkgs": [
           "agent-distro",
           "nixpkgs"

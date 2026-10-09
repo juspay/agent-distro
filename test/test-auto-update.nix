@@ -31,7 +31,12 @@ let
     inherit pkgs;
     modules = [ homeConfig { services.agent-distro = pkgs.lib.mapAttrs (_: pkgs.lib.mkForce) settings; } ];
   }).activationPackage;
-  switchedProfile = switched { profile = "juspay"; };
+  # A profile by reference: the vanilla bundle, with the shims exporting the
+  # reference as AI_PROFILE; a store path, so the VM needs no network.
+  referencedProfile = pkgs.writeTextDir "agent-distro.nix" ''
+    { name = "referenced"; description = "Referenced"; plugins = [ ]; gateway = null; }
+  '';
+  switchedProfile = switched { profile = "${referencedProfile}"; };
   switchedFlake = switched { flake = "path:/home/testuser/other-flake"; };
   original = switched { };
   # A cache the system config does not list: the daemon would ignore it.
@@ -221,6 +226,12 @@ in
             assert "updated-" not in output, output
         machine.succeed("test ! -e " + shlex.quote(state.rsplit("/", 1)[0]))
         check_history()
+        if activation == "${switchedProfile}":
+            # The reference is every command's AI_PROFILE fallback; the user's own wins.
+            listed = machine.succeed(user("agent-distro --list --json"))
+            assert '"name":"referenced"' in listed and '"source":"variable"' in listed, listed
+            listed = machine.succeed(user("AI_PROFILE=vanilla agent-distro --list --json"))
+            assert '"source":"variable","origin":"vanilla"' in listed, listed
 
     # A greeting and a native binary before the shim must still give a precise warning.
     machine.succeed(user("printf 'export PATH=/run/current-system/sw/bin:$PATH\\n' > ~/.bash_profile"))

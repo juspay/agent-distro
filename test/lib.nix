@@ -80,7 +80,6 @@ in
 builtins.listToAttrs checks // {
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
-    profiles = { ${profile.name} = profile; };
-    default = profile.name;
+    inherit profile;
   });
 }

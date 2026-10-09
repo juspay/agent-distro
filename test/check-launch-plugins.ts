@@ -1,6 +1,7 @@
 /**
  * AGENT_DISTRO_PLUGINS without a VM or a harness: cache keys, re-translation,
- * name-based precedence, the cache's upkeep, and the launches it must fail.
+ * name-based precedence, a profile's plugins replacing the built-in ones, the
+ * cache's upkeep, the shell a launcher evaluates, and the launches it must fail.
  *
  * Usage: node check-launch-plugins.ts SRC STORE_PLUGIN STORE_SUBDIRECTORY_PLUGIN NIX_HASH
  *
@@ -19,10 +20,13 @@ import { test } from 'node:test';
 
 const [src, storePlugin, storeSubdirectoryPlugin, nixHash] = process.argv.slice(2);
 const launch = await import(join(src, 'plugin/launch.ts'));
+const launchModule = launch;
 const { adapter: claude } = await import(join(src, 'harness/claude.ts'));
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
 const CLI = join(src, 'plugin/launch-cli.mjs');
 const DAY = 24 * 60 * 60 * 1000;
+// The shell launchers run in; a build has it as SHELL, not on PATH.
+const BASH = process.env.SHELL || 'bash';
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'launch-plugins-'));
 
@@ -52,6 +56,11 @@ function resolve(value: string, cache: string, profile: unknown[] = [], reports:
     (message: string) => reports.push(message));
 }
 
+/** `resolve` for a profile other than the built-in one, whose plugin is `own`. */
+function launch_(own: string, value: string, cache: string, profile: unknown[] = []) {
+  return launch.resolve('claude', claude, claudeArgs(profile), value, { XDG_CACHE_HOME: cache }, () => {}, [own]);
+}
+
 /** The cache root `resolve` uses for an XDG_CACHE_HOME. */
 const cacheDir = (cache: string) => join(cache, 'agent-distro');
 
@@ -68,6 +77,13 @@ function run(value: string, env: Record<string, string | undefined> = {}, profil
     if (item !== undefined) environment[name] = item;
   }
   return spawnSync(process.execPath, [CLI, argsFile(profile)], { encoding: 'utf8', env: environment, timeout: 30_000 });
+}
+
+/** What the launcher runs its harness with: `launched` from the shell the CLI prints. */
+function launched(stdout: string): string {
+  const match = stdout.match(/^launched='((?:[^']|'"'"')*)'$/m);
+  assert.ok(match, stdout);
+  return match[1].replaceAll(`'"'"'`, "'");
 }
 
 /** The one translation directory and link for a key, after any launches. */
@@ -202,7 +218,40 @@ test('no entries load nothing and need no cache', () => {
   const profile = [profileEntry(plugin('kept'), '/profile/kept')];
   const result = run(':', { XDG_CACHE_HOME: undefined, HOME: undefined }, profile);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, '--plugin-dir /profile/kept');
+  assert.equal(launched(result.stdout), '--plugin-dir /profile/kept');
+});
+
+test('a profile other than the built-in one replaces every built-in plugin, ahead of the variable', () => {
+  const cache = temporary();
+  const kept = profileEntry(plugin('kept'), '/profile/kept');
+  const own = plugin('own');
+  const extra = plugin('extra');
+  const launch = launch_(own, extra, cache, [kept]);
+  assert.deepEqual(launch.kept, []);
+  assert.deepEqual(launch.replaced.map((p: any) => p.name), ['kept']);
+  assert.deepEqual(launch.plugins.map((p: any) => p.name), ['own', 'extra']);
+  // The variable still wins over the profile by name.
+  const same = plugin('own', 'other');
+  assert.equal(launch_(own, same, cache, [kept]).plugins[0].description.root, same);
+  // Taking the built-in plugins away needs no cache when nothing is added,
+  // but a launch that does must name the profile when there is none.
+  const homeless = (value: string, replacement: string[]) => () => launchModule.resolve('claude', claude, claudeArgs([kept]),
+    value, {}, () => {}, replacement);
+  assert.throws(homeless('', [own]), /profile: cannot cache translations/);
+  assert.throws(homeless(extra, []), /profile: cannot cache/);
+});
+
+test('the shell a launcher evaluates', () => {
+  const gateway = { url: 'https://gateway.example', keyEnv: 'KEY', models: { large: 'l', small: 's' }, keyHint: "it's here" };
+  const text = launchModule.shell("-e '/a b'", gateway, ['/nix/store/x/bin', '/nix/store/y/bin']);
+  const output = spawnSync(BASH, ['-euc', `PATH=/usr/bin; ${text} printf '%s\\n' "$launched" "$profile_gateway" "$profile_gateway_key_env" "$profile_gateway_key_hint" "$PATH"`],
+    { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}' } });
+  assert.equal(output.status, 0, output.stderr);
+  assert.deepEqual(output.stdout.split('\n').slice(0, 5),
+    ["-e '/a b'", JSON.stringify(gateway), 'KEY', "it's here", '/nix/store/x/bin:/nix/store/y/bin:/usr/bin']);
+  const none = spawnSync(BASH, ['-euc', `${launchModule.shell('', null, [])} printf '%s|%s' "$profile_gateway" "\${AGENT_DISTRO_PROFILE-unset}"`],
+    { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}', PATH: process.env.PATH } });
+  assert.equal(none.stdout, '|unset', none.stderr);
 });
 
 test('reports reach stderr on every launch, cached or not, without control characters', () => {
