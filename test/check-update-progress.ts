@@ -73,3 +73,22 @@ test('bookkeeping is consumed, and anything else reaches stderr', () => {
   assert.deepEqual(log.line('error: cannot build'), { text: 'error: cannot build\n' });
   assert.deepEqual(log.line('@nix not json'), { text: '@nix not json\n' });
 });
+
+test('the last error: line feeds a failed result\'s detail', () => {
+  const log = new NixLog();
+  assert.equal(log.errorDetail, null);
+  const nested = 'error: cannot resolve flake\n       … while fetching the input \'github:foo\'\nerror: unable to download \'https://api.github.com/x\': HTTP error 401\n';
+  assert.deepEqual(
+    log.line(`@nix {"action":"msg","level":0,"msg":${JSON.stringify(nested)}}`),
+    { text: nested },
+  );
+  assert.equal(log.errorDetail, "unable to download 'https://api.github.com/x': HTTP error 401");
+});
+
+test('a control character in the cause is escaped, and it is cut to 300', () => {
+  const log = new NixLog();
+  log.line('error: boom\x1b[31mred\x07');
+  assert.equal(log.errorDetail, 'boom\\x1b[31mred\\x07');
+  log.line(`error: ${'x'.repeat(340)}`);
+  assert.equal(log.errorDetail?.length, 300);
+});

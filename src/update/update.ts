@@ -23,7 +23,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { realpath } from '../util.ts';
 import { checkCaches } from './cache.ts';
 import { updateDue } from './due.ts';
-import { NixLog } from './progress.ts';
+import { NixLog, nixErrorDetail } from './progress.ts';
 
 type Config = {
   profile: string;
@@ -81,7 +81,8 @@ export type Plan = { names: string } | { unknown: string };
 /** What a run ends with: the bundle it settled on, or why it did not. */
 export type Result =
   | { result: 'updated' | 'unchanged'; bundle: string }
-  | { result: 'skipped' | 'failed'; reason: string };
+  | { result: 'skipped'; reason: string }
+  | { result: 'failed'; reason: string; detail?: string };
 
 /**
  * How one run reports. Plain mode prints for a person; `--progress` puts the
@@ -234,9 +235,12 @@ export async function update(config: Config, report: Report = plain, log?: NixLo
       '--option', 'extra-trusted-public-keys', usable.map((cache) => cache.key).join(' ')]
     : [];
 
-  // Lock once so the dry run and the build see the same revision.
+  // Lock once so the dry run and the build see the same revision. The stderr
+  // is piped (not inherited) so a failure can name nix's own error; it is
+  // re-emitted unchanged.
   const metadata = spawnSync(nix, ['flake', 'metadata', '--refresh', '--json', config.flake],
-    { ...UNBOUNDED, stdio: ['inherit', 'pipe', 'inherit'] });
+    { ...UNBOUNDED, stdio: ['inherit', 'pipe', 'pipe'] });
+  process.stderr.write(metadata.stderr);
   let ref = '';
   try {
     if (metadata.status === 0) ref = JSON.parse(metadata.stdout).url ?? '';
@@ -244,9 +248,12 @@ export async function update(config: Config, report: Report = plain, log?: NixLo
     ref = '';
   }
   if (typeof ref !== 'string' || !ref) {
-    report.note(`agent-distro: ${profile} update failed (cannot resolve ${config.flake})\n`);
+    const detail = nixErrorDetail(metadata.stderr);
+    // Under `--progress` the JSON result carries the cause; the plain note appends it.
+    const suffix = !log && detail ? `: ${detail}` : '';
+    report.note(`agent-distro: ${profile} update failed (cannot resolve ${config.flake})${suffix}\n`);
     record('failed: cannot resolve flake');
-    report.result({ result: 'failed', reason: 'cannot resolve flake' });
+    report.result({ result: 'failed', reason: 'cannot resolve flake', ...(detail ? { detail } : {}) });
     return 1;
   }
   const target = `${ref}#${profile}`;
@@ -270,7 +277,8 @@ export async function update(config: Config, report: Report = plain, log?: NixLo
     if (build.error) report.note(`agent-distro: cannot run ${nix}: ${build.error.message}\n`);
     report.note(`agent-distro: ${profile} update failed (exit ${status})\n`);
     record(`failed: nix build exit ${status}`);
-    report.result({ result: 'failed', reason: `nix build exit ${status}` });
+    const detail = log?.errorDetail ?? null;
+    report.result({ result: 'failed', reason: `nix build exit ${status}`, ...(detail ? { detail } : {}) });
     return status;
   }
   const next = realpath(current);

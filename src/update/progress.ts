@@ -11,6 +11,8 @@
  * output still reaches the user.
  */
 
+import { printable } from '../util.ts';
+
 /** Activity types whose progress counts bytes rather than items. */
 const BYTES = new Set([100 /* copy path */, 101 /* file transfer */]);
 /** Result types carrying the numbers: an activity's progress, and a batch's expected total. */
@@ -26,6 +28,23 @@ export type Event =
   /** A line for the user's stderr: nix's own message, or anything not internal-json. */
   | { text: string };
 
+/**
+ * The cause nix names in one of its `error:` lines: the innermost one wins,
+ * because nix prints `… while fetching …` context and then `error: <cause>`.
+ * The prefix is removed, control characters escaped, and the rest cut to
+ * 300 characters. Null when nix printed no such line.
+ */
+export function nixErrorDetail(text: string): string | null {
+  let detail: string | null = null;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('error:')) continue;
+    const cause = printable(trimmed.slice('error:'.length).trim()).slice(0, 300);
+    if (cause !== '') detail = cause;
+  }
+  return detail;
+}
+
 type Activity = { type: number; done: number; expected: number };
 
 const integer = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
@@ -39,6 +58,8 @@ export class NixLog {
   private done = -1;
   private total = -1;
   private at = -Infinity;
+  /** The failed result's `detail`: nix's last `error:` line, scrubbed. */
+  private lastError: string | null = null;
   /** Node's type stripping has no parameter properties, so the clock is a field. */
   private readonly now: () => number;
 
@@ -47,19 +68,24 @@ export class NixLog {
     this.now = now;
   }
 
+  /** The last `error:` line nix printed, for a failed result's `detail`. */
+  get errorDetail(): string | null {
+    return this.lastError;
+  }
+
   /** Consume one line of nix's stderr: the event it yields, or null for bookkeeping. */
   line(line: string): Event | null {
-    if (!line.startsWith('@nix ')) return { text: `${line}\n` };
+    if (!line.startsWith('@nix ')) return this.text(`${line}\n`);
     let record: Record<string, unknown>;
     try {
       // Quoting the id keeps it exact: nix's ids are past 2^53, and as JSON
       // numbers two activities would round to the same one.
       record = JSON.parse(line.slice('@nix '.length).replace(/"id":(\d+)/, '"id":"$1"'));
     } catch {
-      return { text: `${line}\n` };
+      return this.text(`${line}\n`);
     }
     if (record?.action === 'msg' && typeof record.msg === 'string') {
-      return { text: record.msg.endsWith('\n') ? record.msg : `${record.msg}\n` };
+      return this.text(record.msg.endsWith('\n') ? record.msg : `${record.msg}\n`);
     }
     const id = String(record?.id);
     if (record?.action === 'start') {
@@ -81,6 +107,13 @@ export class NixLog {
     }
     const sample = this.sample();
     return sample === null ? null : { progress: sample };
+  }
+
+  /** A text event, remembering nix's last `error:` line for the failed result. */
+  private text(text: string): Event {
+    const detail = nixErrorDetail(text);
+    if (detail !== null) this.lastError = detail;
+    return { text };
   }
 
   /** The sample the 500 ms gap is still holding back, for the end of the build. */
