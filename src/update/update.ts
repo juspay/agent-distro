@@ -158,15 +158,15 @@ const UNBOUNDED = { encoding: 'utf8', maxBuffer: Infinity } as const;
  * both. Anything that stops us reading the answer is `unknown`, never
  * "nothing to compile".
  */
-export function wouldCompile(nix: string, target: string, options: string[]): Plan {
-  const dryRun = spawnSync(nix, ['build', target, ...options, '--dry-run'], { ...UNBOUNDED, stdio: ['ignore', 'pipe', 'pipe'] });
+export function wouldCompile(nix: string, target: string, options: string[], env: NodeJS.ProcessEnv = process.env): Plan {
+  const dryRun = spawnSync(nix, ['build', target, ...options, '--dry-run'], { ...UNBOUNDED, env, stdio: ['ignore', 'pipe', 'pipe'] });
   if (dryRun.error) return { unknown: `nix build --dry-run: ${dryRun.error.message}` };
   // A dry run that nix itself fails is deliberately not a skip: the real
   // build then reports the actual eval or network error.
   const drvs = `${dryRun.stdout}\n${dryRun.stderr}`.split('\n')
     .filter((line) => /^ +\/nix\/store\/.*\.drv$/.test(line)).map((line) => line.trim());
   if (!drvs.length) return { names: '' };
-  const shown = spawnSync(nix, ['derivation', 'show', ...drvs], { ...UNBOUNDED, stdio: ['ignore', 'pipe', 'inherit'] });
+  const shown = spawnSync(nix, ['derivation', 'show', ...drvs], { ...UNBOUNDED, env, stdio: ['ignore', 'pipe', 'inherit'] });
   if (shown.error) return { unknown: `nix derivation show: ${shown.error.message}` };
   if (shown.status !== 0) return { unknown: `nix derivation show exited ${shown.status ?? shown.signal}` };
   type Derivation = {

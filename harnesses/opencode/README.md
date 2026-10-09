@@ -9,7 +9,10 @@ cached list or the profile's two aliases as fallback when unavailable.
 With `AGENT_DISTRO_PLUGINS`, each plugin's skills and server launchers are
 translated into the cache, and the launcher writes a session config (the one
 above, less the profile plugins those replace, plus theirs) to the cache by
-content and points `OPENCODE_CONFIG` at it. OpenCode v2 shares this path.
+content and points `OPENCODE_CONFIG` at it. A profile read at launch (an
+`agent-distro.nix`) takes the same path, its plugins replacing every built-in
+one, and its gateway is added over that config at launch, into the cache, with
+the fetched model list beside it. OpenCode v2 shares this path.
 
 OpenCode v1 uses an npins release pin bounded below v2. Its source build is
 loaded from upstream's lock, except that every nixpkgs in it is the

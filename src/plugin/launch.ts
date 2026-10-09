@@ -1,16 +1,24 @@
 /**
- * Load the Agent Plugins named by AGENT_DISTRO_PLUGINS into one launch.
+ * Set up one launch: the profile in effect (src/profile/resolve.ts), and the
+ * Agent Plugins named by AGENT_DISTRO_PLUGINS on top of it.
  *
- * Run through launch-cli.mjs, as `node launch-cli.mjs ARGS_JSON [BASE]`.
+ * Run through launch-cli.mjs, as `node launch-cli.mjs ARGS_JSON`, by
+ * every harness launcher before it starts its harness.
  *
  * ARGS_JSON is written by a harness launcher at build time: `harness` names the
  * adapter (`src/harness/<harness>.ts`, which exports `adapter`), `profile` lists
- * the profile's plugins as `{ description, ... }` entries, and the rest is the
- * adapter's own. What the adapter prints (extra arguments as shell words, or a
- * path) goes to stdout for the launcher to use.
+ * the built-in profile's plugins as `{ description, ... }` entries, `info`
+ * describes that profile (src/profile/resolve.ts), and the rest is
+ * the adapter's own. Stdout is shell for the launcher to `eval`: `launched` is
+ * what the adapter prints (extra arguments as shell words, or a path),
+ * `profile_gateway` the gateway in effect as JSON (empty for none) with its
+ * `_url`, `_key_env` and `_key_hint`, and the profile's packages go first on
+ * PATH.
  *
- * Each directory on the variable is read exactly as a profile plugin is, then
- * translated once per content into
+ * A profile other than the built-in one replaces the built-in's plugins, its
+ * gateway and its packages: its plugin directories are translated exactly as
+ * the variable's, ahead of them. Each directory is read exactly as a built-in
+ * plugin is, then translated once per content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
  * already content-addressed; otherwise it hashes the directory's NAR
@@ -35,6 +43,8 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
+import type { Gateway } from '../gateway/models.ts';
+import { resolveProfile, select, workingDirectory, isResolved, type Info, type Resolved } from '../profile/resolve.ts';
 
 export type Report = (message: string) => void;
 
@@ -64,9 +74,7 @@ export type Launch<A, E extends ProfileEntry> = {
   replaced: ProfilePlugin<E>[];
   /** The variable's plugins, deduplicated, in order; empty when it names none. */
   plugins: LaunchPlugin[];
-  /** Arguments after ARGS_JSON, such as a configuration to extend. */
-  rest: string[];
-  /** `${XDG_CACHE_HOME:-~/.cache}/agent-distro`; null when `plugins` is empty. */
+  /** `${XDG_CACHE_HOME:-~/.cache}/agent-distro`; null when `plugins` and `replaced` are empty. */
   cache: string | null;
   report: Report;
 };
@@ -100,11 +108,11 @@ const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000;
  * error, not a cache under whatever directory the harness starts in:
  * translations embed their own paths.
  */
-export function cacheRoot(env: NodeJS.ProcessEnv = process.env): string {
+export function cacheRoot(env: NodeJS.ProcessEnv = process.env, label = VARIABLE): string {
   const [name, base] = env.XDG_CACHE_HOME ? ['XDG_CACHE_HOME', env.XDG_CACHE_HOME]
     : env.HOME ? ['HOME', join(env.HOME, '.cache')] : [null, null];
-  if (name === null) throw new LaunchError(`${VARIABLE}: cannot cache translations: XDG_CACHE_HOME and HOME are unset`);
-  if (!isAbsolute(base!)) throw new LaunchError(`${VARIABLE}: ${name} must be an absolute path, not ${JSON.stringify(env[name])}`);
+  if (name === null) throw new LaunchError(`${label}: cannot cache translations: XDG_CACHE_HOME and HOME are unset`);
+  if (!isAbsolute(base!)) throw new LaunchError(`${label}: ${name} must be an absolute path, not ${JSON.stringify(env[name])}`);
   return join(base!, 'agent-distro');
 }
 
@@ -183,7 +191,7 @@ export function narHash(path: string, { skipGit = false } = {}): string {
   return hash.digest('hex');
 }
 
-const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 
 // Only the default store: a plugin in a store elsewhere is keyed by its
 // contents, like any other directory.
@@ -244,7 +252,7 @@ export function readCached<T>(path: string, valid: (value: unknown) => value is 
   throw new LaunchError(`${VARIABLE}: the cached ${path} is unreadable or corrupt; remove ${clear} and launch again`);
 }
 
-const isStrings = (value: unknown): value is string[] =>
+export const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 
 /** Record a use: the link's own time is when it was last used. */
@@ -263,7 +271,7 @@ function listing(directory: string): string[] {
   }
 }
 
-const stale = (path: string, now: number) => {
+export const stale = (path: string, now: number) => {
   try {
     return now - lstatSync(path).mtimeMs > STALE_MS;
   } catch (error) {
@@ -321,17 +329,19 @@ function removeIfEmpty(directory: string) {
  * first when absent. Reports are replayed from the cache, so a cached launch
  * says what the first one did.
  */
-export function translate(entry: string, harness: string, adapter: Adapter, args: unknown, cache: string, report: Report): LaunchPlugin {
+export function translate(
+  entry: string, harness: string, adapter: Adapter, args: unknown, cache: string, report: Report, label = VARIABLE,
+): LaunchPlugin {
   const root = realpath(entry);
   let isDirectory: boolean;
   try {
     isDirectory = statSync(root).isDirectory();
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw new LaunchError(`${VARIABLE}: ${entry}: ${(error as Error).message}`);
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw new LaunchError(`${label}: ${entry}: ${(error as Error).message}`);
     isDirectory = false;
   }
-  if (!isDirectory) throw new LaunchError(`${VARIABLE}: ${entry} is not a directory`);
+  if (!isDirectory) throw new LaunchError(`${label}: ${entry} is not a directory`);
   const inputs = adapter.translationInputs(args);
   const translator = sha256(JSON.stringify({ runtime: import.meta.dirname, inputs })).slice(0, 32);
   const replay = (key: string, link: string, directory: string): LaunchPlugin => {
@@ -357,7 +367,7 @@ export function translate(entry: string, harness: string, adapter: Adapter, args
     try {
       description = readPlugin(root, (message) => reports.push(message));
     } catch (error) {
-      if (error instanceof Fatal) throw new LaunchError(`${VARIABLE}: ${entry}: invalid Agent Plugin: ${error.message}`);
+      if (error instanceof Fatal) throw new LaunchError(`${label}: ${entry}: invalid Agent Plugin: ${error.message}`);
       throw error;
     }
     mkdirSync(parent, { recursive: true });
@@ -372,7 +382,7 @@ export function translate(entry: string, harness: string, adapter: Adapter, args
       writeFileSync(join(directory, 'reports.json'), JSON.stringify(reports));
       if (cacheKey(root) !== key) {
         rmSync(directory, { recursive: true, force: true });
-        if (attempt === 3) throw new LaunchError(`${VARIABLE}: ${entry} kept changing while it was translated`);
+        if (attempt === 3) throw new LaunchError(`${label}: ${entry} kept changing while it was translated`);
         continue;
       }
       symlinkSync(name, link);
@@ -417,23 +427,34 @@ export function writeAddressed(directory: string, data: unknown): string {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   writeAtomic(path, text);
-  const now = Date.now();
-  for (const name of listing(directory)) {
-    if (name.endsWith('.json') && stale(join(directory, name), now)) rmSync(join(directory, name), { force: true });
-  }
+  sweep(directory, (name) => name.endsWith('.json'));
   return path;
 }
 
-/** Resolve the variable against the profile: who stays, who is replaced, who is added. */
+/** Remove the entries of `directory` matching `which` that no launch has used for STALE_DAYS. */
+export function sweep(directory: string, which: (name: string) => boolean = () => true, now = Date.now()) {
+  for (const name of listing(directory)) {
+    if (which(name) && stale(join(directory, name), now)) rmSync(join(directory, name), { recursive: true, force: true });
+  }
+}
+
+/**
+ * Resolve the variable against the profile: who stays, who is replaced, who
+ * is added. `replacement`, the plugin directories of a profile other than the
+ * built-in one, replaces every built-in plugin and comes before the variable's.
+ */
 export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
   harness: string, adapter: Adapter<A, E>, args: A, value: string | undefined, env: NodeJS.ProcessEnv, report: Report,
-): Omit<Launch<A, E>, 'rest'> {
-  const names = entries(value);
-  // Nothing to load needs no cache, so it cannot fail for want of one.
-  const cache = names.length ? cacheRoot(env) : null;
+  replacement?: string[],
+): Launch<A, E> {
+  const own = replacement ?? [];
+  const names = [...own, ...entries(value)];
+  // Nothing to load or take away needs no cache, so it cannot fail for want of one.
+  const changes = names.length > 0 || (replacement !== undefined && args.profile.length > 0);
+  const cache = changes ? cacheRoot(env, replacement !== undefined ? 'profile' : VARIABLE) : null;
   const byName = new Map<string, LaunchPlugin>();
-  for (const entry of names) {
-    const plugin = translate(entry, harness, adapter, args, cache!, report);
+  for (const [i, entry] of names.entries()) {
+    const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? 'profile' : VARIABLE);
     // The last of a name wins, in its own position.
     byName.delete(plugin.name);
     byName.set(plugin.name, plugin);
@@ -442,21 +463,62 @@ export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
     const description = readDescription(entry.description);
     return { name: description.manifest.name, description, entry };
   });
+  const replaces = (plugin: ProfilePlugin<E>) => replacement !== undefined || byName.has(plugin.name);
   return {
     args, cache, report,
-    kept: profile.filter((plugin) => !byName.has(plugin.name)),
-    replaced: profile.filter((plugin) => byName.has(plugin.name)),
+    kept: profile.filter((plugin) => !replaces(plugin)),
+    replaced: profile.filter(replaces),
     plugins: [...byName.values()],
   };
 }
 
-export async function main(argsPath: string, rest: string[]): Promise<number> {
+/** One POSIX shell word, always quoted. */
+const quote = (value: string) => "'" + value.replace(/'/g, `'"'"'`) + "'";
+
+/**
+ * The profile in effect: the one the picker resolved, handed over in
+ * AGENT_DISTRO_PROFILE, else this launch's own resolution.
+ */
+function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved {
+  const handed = env.AGENT_DISTRO_PROFILE;
+  if (handed) {
+    let value: unknown;
+    try {
+      value = JSON.parse(handed);
+    } catch {
+      value = undefined;
+    }
+    if (!isResolved(value)) throw new LaunchError('AGENT_DISTRO_PROFILE is not a resolved profile; unset it');
+    return value;
+  }
+  return resolveProfile(info, select(undefined, workingDirectory(), env, info), env);
+}
+
+/** The shell a launcher evaluates; see the head of this file. */
+export function shell(launched: string, gateway: Gateway | null, paths: string[]): string {
+  const lines = [
+    `launched=${quote(launched)}`,
+    'unset AGENT_DISTRO_PROFILE',
+    `profile_gateway=${quote(gateway ? JSON.stringify(gateway) : '')}`,
+    `profile_gateway_url=${quote(gateway?.url ?? '')}`,
+    `profile_gateway_key_env=${quote(gateway?.keyEnv ?? '')}`,
+    `profile_gateway_key_hint=${quote(gateway?.keyHint ?? '')}`,
+  ];
+  if (paths.length) lines.push(`PATH=${quote(paths.join(':'))}"\${PATH:+:$PATH}"`, 'export PATH');
+  return lines.join('\n') + '\n';
+}
+
+export async function main(argsPath: string): Promise<number> {
   const args = JSON.parse(readFileSync(argsPath, 'utf8'));
   const report: Report = (message) => process.stderr.write(printable(message) + '\n');
   try {
     const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
-    const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report);
-    process.stdout.write(adapter.launch({ ...launch, rest }));
+    const profile = profileInEffect(args.info, process.env);
+    // The built-in profile is the one this launcher was built with.
+    const builtIn = profile.builtin && profile.name === args.info.default;
+    const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
+      builtIn ? undefined : profile.plugins);
+    process.stdout.write(shell(adapter.launch(launch), profile.gateway, profile.paths));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;
     // A cache that cannot be written fails the launch: there is no degraded mode.

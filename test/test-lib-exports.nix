@@ -70,14 +70,11 @@ let
     pkgs = otherPkgs;
     # A real profile and its real mkLaunchers set (not a null stub), so the
     # picker actually forces the launchers it dispatches to.
-    profiles.vanilla = {
+    profile = agent-distro.profiles.vanilla;
+    launchers = agent-distro.lib.mkLaunchers {
+      pkgs = otherPkgs;
       profile = agent-distro.profiles.vanilla;
-      launchers = agent-distro.lib.mkLaunchers {
-        pkgs = otherPkgs;
-        profile = agent-distro.profiles.vanilla;
-      };
     };
-    default = "vanilla";
   };
 
   # The shim is identical text to the module's, so a consumer's edits to it
@@ -106,6 +103,15 @@ let
     profile = agent-distro.profiles.${svc.profile};
     cache = agent-distro.lib.cache;
   };
+  # mkFlake reads an agent-distro.nix by path just as the attribute set it holds.
+  mkFlakeFromFile = agent-distro.lib.mkFlake {
+    profile = "${agent-distro}/profiles/${svc.profile}/agent-distro.nix";
+  };
+  # A built-in profile names its plugins by path: a flake reference is read at launch.
+  referenced = builtins.tryEval (agent-distro.lib.mkLaunchers {
+    inherit pkgs;
+    profile = agent-distro.profiles.vanilla // { plugins = [ "github:juspay/skills" ]; };
+  }).omp.drvPath;
   mkFlakeLibNames = builtins.attrNames mkFlakeOut.lib;
   mkFlakePackageNames = builtins.attrNames mkFlakeOut.packages.${pkgs.system};
   expectedLibNames = [ "cache" "mkFlake" "mkLaunchers" "mkPicker" "mkShims"
@@ -121,7 +127,7 @@ let
     { file = "mk-shims.nix"; required = [ "pkgs" "bundle" "stateDirectory" ]; }
     { file = "mk-updater.nix"; required = [ "pkgs" "bundle" "flake" "profile" "stateDirectory" "history" "nix" "substituters" ]; }
     { file = "state-directory.nix"; required = [ "xdgStateHome" "flake" "profile" ]; }
-    { file = "mk-picker.nix"; required = [ "pkgs" "profiles" "default" ]; }
+    { file = "mk-picker.nix"; required = [ "pkgs" "profile" "launchers" ]; }
   ];
   # mkFlake's file imports with `{ nixpkgs }` and returns the builder, whose
   # one required argument is `profile` — checked by applying the built builder.
@@ -185,6 +191,8 @@ assert lib.escapeShellArgs updater.command ==
 assert mkFlakeLibNames == expectedLibNames;
 assert lib.elem svc.profile mkFlakePackageNames;
 assert lib.elem "default" mkFlakePackageNames;
+assert builtins.attrNames mkFlakeFromFile.packages.${pkgs.system} == mkFlakePackageNames;
+assert !referenced.success;
 # A second nixpkgs must build the picker from a real profile and launchers
 # (named launchers dispatchers force the whole launcher set).
 assert builtins.isString otherPicker.drvPath;

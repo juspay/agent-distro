@@ -2,7 +2,9 @@
 
 Passes plugins as `-e` roots, composing with user extensions. A plugin on
 `AGENT_DISTRO_PLUGINS` is validated and passed as one more `-e` root, its own
-directory, replacing a profile plugin of the same name. A gateway
+directory, replacing a profile plugin of the same name. A profile read at
+launch (an `agent-distro.nix`) reaches OMP the same way, its plugins replacing
+every built-in one. The gateway of the profile in effect, read at launch,
 prompts for its key, sets the LiteLLM environment, and fills absent model roles
 in user YAML while preserving existing values and comments. Every profile fills
 `hideThinkingBlock: true`, so thinking blocks stay hidden; set it to `false` in

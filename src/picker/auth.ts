@@ -5,9 +5,10 @@
  * its relocation variables; a source that cannot be read or parsed is
  * "unknown" (undefined), and a probe never throws.
  *
- * The spec for each `profile/harness` comes from lib/picker.nix; `AI_GATEWAY`
- * is read here, at launch, so a gateway-capable harness falls back to its own
- * provider when the gateway is disabled.
+ * Each harness's scheme comes from its meta.nix through lib/picker.nix, and
+ * `spec` adds the gateway of the profile in effect; `AI_GATEWAY` is read here,
+ * at launch, so a gateway-capable harness falls back to its own provider when
+ * the gateway is disabled.
  *
  * Checked against the pinned sources: Claude Code 2.1.292, Codex 0.160.1,
  * oh-my-pi 18.7.0, Pi 1.0.4, OpenCode 1.18.35 and OpenCode v2 2.0.24.
@@ -15,7 +16,10 @@
 
 export type Env = NodeJS.ProcessEnv;
 
-/** One `profile/harness`'s probe spec, as lib/picker.nix emits it. */
+/** A harness's auth scheme, as its meta.nix declares it. */
+export type Scheme = 'anthropic' | 'openai' | 'gateway';
+
+/** One harness's probe spec, for the profile in effect. */
 export type Spec = {
   scheme: 'anthropic' | 'openai' | 'gateway' | 'provider';
   /** gateway: the profile's `gateway.keyEnv`. */
@@ -45,6 +49,16 @@ export type Io = {
 };
 
 export const NOT_SIGNED_IN = 'not signed in';
+
+/**
+ * The probe for `harness`: a gateway-capable harness carries the profile's
+ * key variable and its own name, or, with no gateway, reads its own provider.
+ */
+export function spec(scheme: Scheme, harness: string, gateway: { keyEnv: string } | null): Spec {
+  if (scheme !== 'gateway') return { scheme };
+  if (gateway === null) return { scheme: 'provider', provider: harness };
+  return { scheme: 'gateway', keyEnv: gateway.keyEnv, provider: harness };
+}
 
 /** A source's content, or why there is none: missing is "not signed in", unreadable is unknown. */
 type Source<T> = { value: T } | { missing: true } | { unreadable: true };

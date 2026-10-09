@@ -21,7 +21,10 @@ leaves nothing that looks installed and is simply repeated, and of two
 concurrent installs the first is kept. The copy stays, inert without the
 override; launches stamp the ones they use, and an install removes the ones
 unused for 14 days. Codex's `-c` splits keys at every `.`, so a plugin whose
-name contains one is reported and skipped.
+name contains one is reported and skipped. A profile read at launch (an
+`agent-distro.nix`) reaches Codex the same way: its plugins get these
+one-plugin marketplaces, and every plugin of the built-in profile is disabled
+for that launch.
 
 The npins branch pin tracks `sadjow/codex-cli-nix`. Its standalone binary
 packaging recipe is called with the distribution's shared nixpkgs, with the

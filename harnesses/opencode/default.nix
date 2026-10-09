@@ -1,6 +1,6 @@
 # A session config composes with the user's global and project settings.
 # OpenCode v2 reuses this adapter with its own schema, shape and session setup.
-{ pkgs, plugins, gateway, package, profileName, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
+{ pkgs, plugins, info, package, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
   opencode = package;
@@ -9,7 +9,7 @@ let
   runtime = import ../../lib/runtime.nix pkgs;
   config = runCommand "${name}-config" { } ''
     ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON {
-      inherit schema gateway;
+      inherit schema;
       bash = runtimeShell;
       env = "${coreutils}/bin/env";
       descriptions = map (plugin: "${runtime.readPlugin plugin}") plugins;
@@ -17,18 +17,22 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "opencode";
-    inherit schema name;
+    inherit schema name info;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     config = "${config}";
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; }) plugins;
   };
-  initialization = lib.optionalString (gateway != null) ''
-    if [ "''${AI_GATEWAY:-1}" != "0" ]; then
-      ${import ../../lib/gateway-key.nix { inherit gum gateway; }}
-      config=$(${runtime.script "gateway/models.ts"} ${config}/gateway.json \
-        "''${XDG_CACHE_HOME:-$HOME/.cache}/agent-distro/${name}/${builtins.hashString "sha256" (toString config)}/opencode.json" \
-        ${curl}/bin/curl ${lib.escapeShellArg gateway.keyEnv} ${shape})
+  # The gateway in effect over the session config, with the models it serves
+  # cached beside it under the same name.
+  initialization = ''
+    if [ -n "$profile_gateway" ] && [ "''${AI_GATEWAY:-1}" != "0" ]; then
+      ${import ../../lib/gateway-key.nix { inherit gum; }}
+      cache="''${XDG_CACHE_HOME:-$HOME/.cache}/agent-distro/${name}"
+      base=$(${runtime.script "gateway/config.ts"} opencode-${schema} "$profile_gateway" "$cache" "$config")
+      models=''${base##*/}
+      config=$(${runtime.script "gateway/models.ts"} "$base" "$cache/''${models%.json}/opencode.json" \
+        ${curl}/bin/curl "$profile_gateway_key_env" ${shape})
     fi
   '';
 in
@@ -37,12 +41,11 @@ writeShellApplication {
   inherit name;
   derivationArgs.version = opencode.version;
   text = ''
-    config=${config}/opencode.json
+    # The profile in effect and its packages, and this config, less the
+    # plugins that profile or AGENT_DISTRO_PLUGINS replaces, plus their own.
+    ${launchPlugins}
+    config=$launched
     ${initialization}
-    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
-      # This config, less the plugins AGENT_DISTRO_PLUGINS replaces, plus its own.
-      config=$(${launchPlugins} "$config")
-    fi
     if [ "''${OPENCODE_CONFIG+x}" = x ]; then
       echo 'warning: agent-distro is replacing OPENCODE_CONFIG.' >&2
     fi

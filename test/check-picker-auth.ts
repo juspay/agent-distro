@@ -12,7 +12,7 @@ import type { Io, Spec, Status } from '../src/picker/auth.ts';
 
 const src = process.argv[2];
 // The module's path is the SRC argument, so it cannot be a static import.
-const { probe, NOT_SIGNED_IN } = await import(join(src, 'picker/auth.ts'));
+const { probe, spec, NOT_SIGNED_IN } = await import(join(src, 'picker/auth.ts'));
 
 const files = new Map<string, string>();
 const databases = new Map<string, string[]>();
@@ -219,5 +219,12 @@ reset();
 assert.equal(read({ scheme: 'provider' }), undefined);
 assert.equal(read({ scheme: 'gateway' }), undefined);
 assert.equal(read({ scheme: 'nonesuch' as Spec['scheme'] }), undefined);
+
+// The probe follows the profile in effect: a gateway harness reads the
+// profile's key, or with no gateway its own provider; the others their own login.
+assert.deepEqual(spec('gateway', 'omp', { keyEnv: 'LITELLM_API_KEY' }), { scheme: 'gateway', keyEnv: 'LITELLM_API_KEY', provider: 'omp' });
+assert.deepEqual(spec('gateway', 'pi', null), { scheme: 'provider', provider: 'pi' });
+assert.deepEqual(spec('anthropic', 'claude', { keyEnv: 'LITELLM_API_KEY' }), { scheme: 'anthropic' });
+assert.deepEqual(spec('openai', 'codex', null), { scheme: 'openai' });
 
 console.log('picker auth: all checks passed');

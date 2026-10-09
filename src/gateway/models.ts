@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { decodeUtf8, isFile, isSystemError, writeTemporary } from '../util.ts';
 
-/** A profile's gateway, as profile.nix declares it. */
+/** A profile's gateway, as its agent-distro.nix declares it. */
 export type Gateway = {
   url: string;
   keyEnv: string;

@@ -57,8 +57,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, null> = {
     }, null, 2));
   },
   launch: ({ args, replaced, plugins, report }) => {
-    if (!plugins.length) return '';
-    const home = codexHome();
+    if (!plugins.length && !replaced.length) return '';
     const words: string[] = [];
     const override = (value: string) => words.push('-c', shellQuote(value));
     const settable = (name: string, action: string) => {
@@ -69,6 +68,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, null> = {
     for (const plugin of replaced) {
       if (settable(plugin.name, 'disable')) override(`plugins.${plugin.name}@${args.marketplace}.enabled=false`);
     }
+    const home = plugins.length ? codexHome() : '';
     for (const plugin of plugins) {
       if (!settable(plugin.name, 'enable')) continue;
       const marketplace = marketplaceName(plugin.key);

@@ -1,10 +1,10 @@
 # Codex owns marketplace registration, installation, and its persistent state.
 # Portable plugin contents and provider policy stay outside this adapter.
-{ pkgs, plugins, gateway, package, profileName }:
+{ pkgs, plugins, info, package }:
 let
   inherit (pkgs) lib writeShellApplication runCommand jq;
   codex = package;
-  marketplaceName = "${profileName}-ai";
+  marketplaceName = "${info.default}-ai";
 
   # Codex loads the original directory itself; the description only supplies
   # its validated name, so an invalid manifest fails here as it does for Claude.
@@ -28,6 +28,7 @@ let
   '';
   launchPlugins = (import ../../lib/runtime.nix pkgs).launchPlugins {
     harness = "codex";
+    inherit info;
     codex = lib.getExe codex;
     marketplace = marketplaceName;
     profile = map (plugin: { description = "${readPlugin plugin}"; }) plugins;
@@ -59,11 +60,11 @@ writeShellApplication {
       done < "$marketplace/plugin-ids"
     fi
   '' + ''
-    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
-      # Per-launch -c overrides: AGENT_DISTRO_PLUGINS enabled, the plugins it replaces disabled.
-      overrides=$(${launchPlugins})
-      eval "set -- $overrides \"\$@\""
-    fi
+    # The profile in effect and its packages. Per-launch -c overrides: the
+    # plugins of a profile other than the built-in one and of
+    # AGENT_DISTRO_PLUGINS enabled, the built-in plugins they replace disabled.
+    ${launchPlugins}
+    eval "set -- $launched \"\$@\""
     exec ${lib.getExe codex} "$@"
   '';
 }

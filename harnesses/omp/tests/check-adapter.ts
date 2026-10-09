@@ -16,14 +16,18 @@ import { test } from 'node:test';
 const [src] = process.argv.slice(2);
 const script = join(src, 'harness/omp.ts');
 const work = mkdtempSync(join(tmpdir(), 'omp-adapter-'));
-// The two layers the launcher passes: every profile's, then a gateway's.
+// The two layers the launcher passes: every profile's, then the gateway's in
+// effect, which omp.ts builds from the gateway itself.
 const always = join(work, 'always.yml');
-const gateway = join(work, 'gateway.yml');
 writeFileSync(always, 'hideThinkingBlock: true\n');
-writeFileSync(gateway, 'modelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n'
+const gatewayJson = JSON.stringify({ url: 'https://gateway.test', keyEnv: 'KEY', models: { large: 'open-large', small: 'open-small' } });
+const gateway = ['--gateway', gatewayJson];
+// The layer the launcher wrote when the gateway was built in.
+const builtGateway = join(work, 'gateway.yml');
+writeFileSync(builtGateway, 'modelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n'
   + '  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n');
 
-function fill(config: string, layers = [always, gateway]) {
+function fill(config: string, layers = [always, ...gateway]) {
   return spawnSync(process.execPath, [script, config, ...layers], { encoding: 'utf8' });
 }
 
@@ -117,6 +121,15 @@ test('mode and symlink are kept; no temporary file is left', () => {
     closeSync(fd);
   }
   assert.deepEqual(readdirSync(directory).sort(), ['config.yml', 'real.yml']);
+});
+
+test('the gateway layer is the one the build used to write', () => {
+  const [built, launched] = ['built', 'launched'].map((name) => join(work, `${name}.yml`));
+  writeFileSync(built, '# mine\n');
+  writeFileSync(launched, '# mine\n');
+  assert.equal(fill(built, [always, builtGateway]).status, 0);
+  assert.equal(fill(launched).status, 0);
+  assert.equal(readFileSync(launched, 'utf8'), readFileSync(built, 'utf8'));
 });
 
 test('an unwritable agent directory only warns', () => {

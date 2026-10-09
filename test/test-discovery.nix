@@ -23,7 +23,7 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
   { pkgs }: pkgs.writeShellScriptBin "discovery-stub" "echo stub"
   SOURCE
   cat > source/harnesses/discovery-stub/default.nix <<'ADAPTER'
-  { pkgs, plugins, gateway, package, profileName }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
+  { pkgs, plugins, info, package }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
   ADAPTER
   hash=$(nix-hash --type sha256 --base32 source)
   tar -cf source.tar source
@@ -46,6 +46,9 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
         nixpkgs = nixpkgsInput;
         agent-distro = distro // { outPath = root; };
         home-manager = {};
+        # Never read: only the checks' names are.
+        juspay-skills = \"/nonexistent\";
+        kolu = \"/nonexistent\";
       };
     in assert builtins.elem \"discovery-stub\" launchers.bundle.commands;
        assert builtins.any (row: row.name == \"discovery-stub\" && row.title == \"Discovery Stub\") (builtins.head launchers.picker.listing.profiles).harnesses;

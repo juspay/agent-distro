@@ -57,17 +57,17 @@ const HARNESSES = [
   harness('opencode2', 'OpenCode v2', 'v2 preview · private server per launch', '2.0.24'),
   harness('pi', 'Pi', "OMP's upstream · gateway via models.json", '1.0.4', AUTH.pi),
 ];
-const OTHER = [HARNESSES[1], HARNESSES[5]];
-const SHORT = ['Juspay skills + Kolu, via Juspay\'s LiteLLM gateway', 'Upstream harnesses with your own provider', 'A third profile'];
-const listing = (descriptions: string[], harnesses = HARNESSES): Listing => ({
-  profiles: descriptions.map((description, i) => ({ name: ['juspay', 'vanilla', 'third'][i], description, harnesses })),
+const listing = (harnesses = HARNESSES): Listing => ({
+  profiles: [{ name: 'vanilla', description: 'Upstream harnesses with your own provider', harnesses }],
 });
-const TWO: Listing = {
-  profiles: [
-    { name: 'juspay', description: SHORT[0], harnesses: HARNESSES },
-    { name: 'vanilla', description: SHORT[1], harnesses: OTHER },
-  ],
-};
+// The profile in effect: the built-in one, or one found in a repository, whose
+// path can be long enough to wrap the profile row.
+const IN_EFFECT = [
+  undefined,
+  { name: 'juspay', description: 'Juspay skills + Kolu, via Juspay\'s LiteLLM gateway', source: 'repository',
+    origin: '/home/someone/src/github.com/juspay/a-rather-long-repository-name/agent-distro.nix' },
+  { name: 'ekala', description: 'Ekala\'s Nix development skills', source: 'positional', origin: 'github:ekala-project/ekala-ai-skills' },
+] as const;
 
 /** The cells a frame draws, one string per row, exactly as written. */
 function cells(frame: string, columns: number, rows: number): string[] {
@@ -142,13 +142,13 @@ const panelText = (menu: InstanceType<typeof Menu>, columns: number, rows: numbe
   return body(menu, columns, rows).map((line) => panelCell(line, l)).join('\n').replace(/\s+/g, ' ');
 };
 
-// The box is straight at the sizes users have, with one, two and three
-// profiles; every row keeps its version on the list's right edge; nothing in
-// the body is cut; and the highlighted harness's tagline, status items and the
-// profile line are all there.
-for (const count of [1, 2, 3]) {
+// The box is straight at the sizes users have, whatever the profile in effect;
+// every row keeps its version on the list's right edge; nothing in the body is
+// cut; and the highlighted harness's tagline, status items and the profile
+// line are all there.
+for (const profile of IN_EFFECT) {
   for (const [columns, rows] of [[80, 24], [60, 24], [120, 30]] as const) {
-    const menu = new Menu(listing(SHORT.slice(0, count)), 'juspay/claude');
+    const menu = new Menu(listing(), 'claude', profile);
     const l = layout(menu, columns, rows)!;
     const lines = boxed(menu, columns, rows);
     const cellsOfBody = body(menu, columns, rows);
@@ -164,63 +164,51 @@ for (const count of [1, 2, 3]) {
     const panel = panelText(menu, columns, rows);
     assert.ok(panel.includes(shown.tagline), panel);
     for (const item of shown.auth?.items ?? []) assert.ok(panel.includes(item), panel);
-    // The profile row, under the header, names the profile and describes it.
+    // The header names the profile in effect; the profile row under it
+    // describes it and says where it came from.
+    const header = screen(frame(menu, rows, columns), columns, rows)[l.y - 1];
+    assert.ok(header.includes(`agent-distro · ${profile?.name ?? 'vanilla'}`), header);
     const row = profileRow(menu, columns, rows);
-    assert.ok(row.includes(`${menu.active.name} · ${menu.active.description}`), row);
+    assert.ok(row.includes(`${menu.active.name} · ${menu.active.description} · `), row);
+    const from = profile === undefined ? 'built in' : profile.source === 'repository' ? `from ${profile.origin}` : `chosen as ${profile.origin}`;
+    // A long path may be broken across lines, which the row joins with a space.
+    assert.ok(row.replace(/ /g, '').includes(from.replace(/ /g, '')), row);
   }
 }
 
 // Too small is no layout at all, the one meaning of "does not fit".
-assert.equal(layout(new Menu(listing(SHORT.slice(0, 2)), ''), 30, 8), undefined);
-assert.equal(layout(new Menu(listing(SHORT.slice(0, 2)), ''), 50, 24), undefined);
+assert.equal(layout(new Menu(listing(), ''), 30, 8), undefined);
+assert.equal(layout(new Menu(listing(), ''), 50, 24), undefined);
 // Colour follows NO_COLOR and the terminal: ANSI has eight colours, a VT100 none.
 assert.match(palette({ TERM: 'ansi' }).accent, /36/);
 assert.doesNotMatch(palette({ TERM: 'vt100' }).accent, /36/);
 assert.doesNotMatch(palette({ TERM: 'xterm-256color', NO_COLOR: '1' }).accent, /36/);
 
-// Switching profile — →, Tab and l forward, ←, Shift-Tab and h back — changes
-// the header's accent and the list.
-for (const key of ['right', 'tab', 'l']) {
-  const menu = new Menu(TWO, '');
+// One profile per launch: no keys switch it, and Enter chooses a harness alone.
+for (const key of ['right', 'tab', 'l', 'left', 'backtab', 'h']) {
+  const menu = new Menu(listing(), '', IN_EFFECT[1]);
+  assert.equal(menu.press(key), undefined);
   assert.equal(menu.active.name, 'juspay');
-  menu.press(key);
-  assert.equal(menu.active.name, 'vanilla');
   assert.equal(menu.index, 0);
-  const header = rendered(menu, 80, 24)[0];
-  assert.ok(header.includes('\x1b[1mvanilla'), header);
-  assert.ok(header.includes('\x1b[2mjuspay'), header);
-  assert.ok(header.includes(' · '), header);
-  const drawn = boxed(menu, 80, 24).join('\n');
-  assert.ok(drawn.includes('Codex'), drawn);
-  assert.ok(!drawn.includes('Oh My Pi'), drawn);
 }
-for (const key of ['left', 'backtab', 'h']) {
-  const menu = new Menu(TWO, '');
-  menu.press('right');
-  menu.press(key);
-  assert.equal(menu.active.name, 'juspay');
+assert.equal(new Menu(listing(), '').press('enter'), 'omp');
+assert.ok(!boxed(new Menu(listing(), ''), 80, 24).join('\n').includes('profile'), 'no profile key in the footer');
+assert.ok(rendered(new Menu(listing(), ''), 80, 24)[0].includes('\x1b[2m · vanilla'), 'the brand names the profile, dimmed');
+// The remembered harness has the cursor and keeps its dot; a choice
+// remembered with its profile, as releases with a profile selector wrote it,
+// is read as its harness.
+for (const remembered of ['pi', 'juspay/pi']) {
+  const menu = new Menu(listing(), remembered, IN_EFFECT[1]);
+  assert.equal(menu.index, HARNESSES.findIndex((h) => h.name === 'pi'));
+  const markedL = layout(menu, 80, 24)!;
+  const markedBody = body(menu, 80, 24);
+  const dot = (title: string) => listCell(markedBody.find((b) => titleCell(b, markedL) === title)!, markedL).slice(2, 4);
+  assert.equal(dot('Pi'), '• ', 'the remembered harness keeps its dot');
+  assert.equal(dot('Codex'), '  ');
 }
-// The default profile opens whatever was remembered; switching to the
-// remembered profile puts the cursor on its remembered harness, which keeps
-// its dot.
-const toVanilla = new Menu(TWO, 'vanilla/pi');
-assert.equal(toVanilla.active.name, 'juspay');
-assert.equal(toVanilla.index, 0);
-toVanilla.press('right');
-assert.equal(toVanilla.active.name, 'vanilla');
-assert.equal(toVanilla.index, 1);
-const markedL = layout(toVanilla, 80, 24)!;
-const markedBody = body(toVanilla, 80, 24);
-const dot = (title: string) => listCell(markedBody.find((b) => titleCell(b, markedL) === title)!, markedL).slice(2, 4);
-assert.equal(dot('Pi'), '• ', 'the remembered harness keeps its dot');
-assert.equal(dot('Codex'), '  ');
-// A single-profile distribution shows its one name, not as a tab.
-const one = boxed(new Menu(listing(SHORT.slice(0, 1)), ''), 80, 24).join('\n');
-assert.ok(one.includes('agent-distro · juspay'), one);
-assert.ok(!one.includes(' · vanilla'), one);
 
 // Wide and joined characters in the data keep the border straight.
-const emoji = listing(SHORT.slice(0, 2), [
+const emoji = listing([
   harness('fam', '👨\u200d👩\u200d👧 Fam', '🇯🇵 flag · ❤\ufe0f heart', '1.0', AUTH.claude),
   harness('cjk', '日本語', '中文说明 · 한국어 \u{2000B}', '2.0', AUTH.omp),
   ...HARNESSES,
@@ -248,7 +236,7 @@ typed.press('backspace');
 assert.equal(typed.query, 'a');
 
 // A filtered cursor survives the filter being cleared (and so a fallback).
-const filtered = new Menu(listing(SHORT.slice(0, 1)), '');
+const filtered = new Menu(listing(), '');
 filtered.press('/');
 for (const character of 'pi') filtered.press(character);
 while (filtered.rows()[filtered.index].name !== 'pi') filtered.press('down');
@@ -256,30 +244,28 @@ assert.ok(filtered.index > 0);
 filtered.clearFilter();
 assert.equal(filtered.rows()[filtered.index].name, 'pi');
 // The filter matches a tagline the row no longer shows.
-const byTagline = new Menu(listing(SHORT.slice(0, 1)), '');
+const byTagline = new Menu(listing(), '');
 byTagline.press('/');
 for (const character of 'gateway') byTagline.press(character);
 assert.deepEqual(byTagline.rows().map((r) => r.name), ['omp', 'opencode', 'pi']);
 // No matches blanks the panel, and the list says so.
-const none = new Menu(listing(SHORT.slice(0, 1)), '');
+const none = new Menu(listing(), '');
 none.press('/');
 for (const character of 'nonesuch') none.press(character);
 assert.ok(boxed(none, 80, 24).join('\n').includes('No matches'));
 assert.ok(!panelText(none, 80, 24).trim(), 'the panel is blank when nothing matches');
 
-// The default profile opens whatever was remembered; the remembered profile
-// and harness still mark their dots, and switching to it moves the cursor.
-const remembered = new Menu(listing(SHORT.slice(0, 2)), 'vanilla/claude');
-assert.equal(remembered.active.name, 'juspay');
-assert.equal(remembered.index, 0);
-remembered.press('right');
-assert.equal(remembered.active.name, 'vanilla');
-assert.equal(remembered.index, HARNESSES.findIndex((h) => h.name === 'claude'));
-assert.equal(new Menu(listing(SHORT.slice(0, 2)), '').active.name, 'juspay');
+// A remembered harness this launcher no longer has leaves the cursor on the first.
+assert.equal(new Menu(listing(), 'gone').index, 0);
 
 // A menu that is not a Listing is an argument error, exit 2.
 const node = process.execPath;
-const bad = spawnSync(node, [join(src, 'picker/choose.ts'), JSON.stringify({ profiles: [{ name: 'a', description: '', harnesses: [{ name: 'x', title: 'X', tagline: null, version: '1' }] }] })], { encoding: 'utf8' });
+const menuJson = (tagline: unknown) => JSON.stringify({ profiles: [{ name: 'a', description: '', harnesses: [{ name: 'x', title: 'X', tagline, version: '1' }] }] });
+const bad = spawnSync(node, [join(src, 'picker/choose.ts'), menuJson(null)], { encoding: 'utf8' });
 assert.equal(bad.status, 2, bad.stderr);
 assert.match(bad.stderr, /tagline is not a string/);
+// So is a profile in effect that is not one.
+const badProfile = spawnSync(node, [join(src, 'picker/choose.ts'), menuJson(''), '--profile', '{"name":"a"}'], { encoding: 'utf8' });
+assert.equal(badProfile.status, 2, badProfile.stderr);
+assert.match(badProfile.stderr, /RESOLVED_JSON is not a resolved profile/);
 console.log('picker layout: all checks passed');

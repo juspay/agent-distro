@@ -26,9 +26,11 @@ class UpdateFlakeTests(unittest.TestCase):
             for tool in [nix, npins]:
                 tool.chmod(0o755)
             env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}')
+            (root / 'harnesses/team/npins').mkdir(parents=True)
+            # Profiles are read at launch from their own repositories; none pins here.
             (root / 'profiles/team/npins').mkdir(parents=True)
             subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
-            self.assertEqual((root / 'pin-calls').read_text().splitlines(), ['profiles/team/npins'])
+            self.assertEqual((root / 'pin-calls').read_text().splitlines(), ['harnesses/team/npins'])
 
             # Adding only a harness directory must enroll its pins and updater.
             harness = root / 'harnesses/new-agent'
@@ -41,7 +43,7 @@ class UpdateFlakeTests(unittest.TestCase):
             (root / 'pin-calls').unlink()
             subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
             self.assertEqual(set((root / 'pin-calls').read_text().splitlines()), {
-                'profiles/team/npins', 'harnesses/new-agent/npins', 'lib/npins', 'lib/helper/npins'})
+                'harnesses/team/npins', 'harnesses/new-agent/npins', 'lib/npins', 'lib/helper/npins'})
             self.assertEqual((harness / 'custom-pin.txt').read_text(), 'updated\n')
 
     def test_yaml_repin_stays_on_its_major(self):
@@ -105,7 +107,8 @@ class UpdateFlakeTests(unittest.TestCase):
     def test_all_pin_directories(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for folder, pin in [('profiles/team', {'type': 'Git', 'revision': 'a' * 40}),
+            for folder, pin in [('harnesses/team', {'type': 'Git', 'revision': 'a' * 40}),
+                                ('profiles/ignored', {'type': 'Git', 'revision': 'c' * 40}),
                                 ('harnesses/new-agent', {'type': 'GitRelease', 'version': 'v3',
                                                         'repository': {'type': 'GitHub', 'owner': 'example', 'repo': 'agent'}}),
                                 ('lib', {'type': 'Git', 'revision': 'b' * 40})]:

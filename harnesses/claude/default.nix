@@ -1,6 +1,6 @@
 # Claude's plugin layout and CLI are local to this adapter. Shared sources stay
 # portable; no provider initialization or persistent plugin install is needed.
-{ pkgs, plugins, gateway, package, profileName }:
+{ pkgs, plugins, info, package }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils;
   claude = package;
@@ -13,11 +13,9 @@ let
       description = "${runtime.readPlugin plugin}";
     })}
   '';
-  pluginFlags = lib.concatMapStringsSep " "
-    (plugin: "--plugin-dir ${lib.escapeShellArg (toString (adaptPlugin plugin))}")
-    plugins;
   launchPlugins = runtime.launchPlugins {
     harness = "claude";
+    inherit info;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${adaptPlugin plugin}"; }) plugins;
@@ -27,12 +25,10 @@ writeShellApplication {
   name = "claude";
   derivationArgs.version = claude.version;
   text = ''
-    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
-      # The profile's plugin dirs, less those AGENT_DISTRO_PLUGINS replaces, then its own.
-      plugin_dirs=$(${launchPlugins})
-      eval "set -- $plugin_dirs \"\$@\""
-      exec ${lib.getExe claude} "$@"
-    fi
-    exec ${lib.getExe claude} ${pluginFlags} "$@"
+    # The profile in effect and its packages, and its plugin dirs, less those
+    # AGENT_DISTRO_PLUGINS replaces, then the variable's own.
+    ${launchPlugins}
+    eval "set -- $launched \"\$@\""
+    exec ${lib.getExe claude} "$@"
   '';
 }
