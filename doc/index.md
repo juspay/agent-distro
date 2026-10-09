@@ -460,6 +460,17 @@ AI_PROFILE=github:juspay/skills agent-distro claude
 
 </details>
 
+### Checking a profile's packages
+
+A profile's `packages` must be in the binary cache on every platform its users run, or the launch stops. Check them ahead of time:
+
+```sh
+nix run github:juspay/agent-distro#check-profile                       # ./agent-distro.nix
+nix run github:juspay/agent-distro#check-profile -- path/to/agent-distro.nix
+```
+
+It runs the launcher's own policy, against agent-distro's nixpkgs and caches, and prints one line per package; it exits 1 if any is not cached, or cannot be told. It checks for the machine it runs on, so run it in CI once per platform.
+
 ## Harnesses
 
 Each harness is a directory under [harnesses/](https://github.com/juspay/agent-distro/tree/main/harnesses); its README holds the design notes for that adapter.
