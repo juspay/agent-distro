@@ -318,7 +318,10 @@ agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → every harness launcher, plus picker and bundle (the bundle's bin/ also holds
-#   that picker as `agent-distro`, with this profile built in)
+#   that picker as `agent-distro`, with this profile built in). A `pkgs` from
+#   agent-distro's own nixpkgs is named by a locked reference, fetched only for a
+#   launch-time profile with `packages`; any other `pkgs` puts its source in the
+#   closure
 ```
 
 - **Outputs.** `mkFlake` returns `packages`,[^mkflake-packages] `apps`, `homeManagerModules.default`, and the same `lib` attrset `flake.nix` exposes; add other outputs with `//`.
@@ -383,9 +386,11 @@ agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; histo
 #   come from `lib.schedule` and are not overridable here; the updater never
 #   compiles, handing nix only `substituters`.
 
-agent-distro.lib.mkPicker { pkgs; profile; launchers; }
+agent-distro.lib.mkPicker { pkgs; profile; launchers; nixpkgs ? null; }
 # → lib/picker.nix's derivation: the interactive harness chooser over
 #   `launchers`, the `mkLaunchers` result for `profile`, its built-in profile.
+#   `nixpkgs`, the flake input `pkgs` came from, names it by reference as
+#   `mkLaunchers` does.
 ```
 
 The updater's schedule is one `lib/schedule.nix`, exposed as `agent-distro.lib.schedule`: `updateHoursUTC`, `defaultFrequency`, `updatePeriodSeconds` and `updateOffsetSeconds`. The module, `mkUpdater` and any consumer read the same numbers.
@@ -410,8 +415,9 @@ or `AI_PROFILE=github:ekala-project/ekala-ai-skills agent-distro omp`.
 
 Or let the repository you are in choose: with no profile named on the command line, the launcher uses the
 `agent-distro.nix` found from the working directory up to the git root, then `AI_PROFILE`,
-then `vanilla`. A terminal opened in a repository, in Kolu or anywhere, starts its agents with
-that repository's profile.
+then `vanilla`. Discovery needs a git repository: an `agent-distro.nix` in a plain directory is
+read only when named, as `./dir` or in `AI_PROFILE`. A terminal opened in a repository, in Kolu
+or anywhere, starts its agents with that repository's profile.
 
 - **Nothing to register.** agent-distro ships `vanilla` only. Any repository with an
   `agent-distro.nix` is a profile.
@@ -421,10 +427,14 @@ that repository's profile.
   and agent-distro build, like plugin translations.[^profile-cache]
 - **Never compiles.** `packages` come from the binary cache or the launch stops and names the
   missing one.[^never-compiles]
-- **Trust.** A profile's plugins and MCP servers run. Only open terminals in repositories you
-  trust, as you already do with their `.envrc`.
+- **Works offline.** A flake reference that cannot be fetched uses the store path it last
+  resolved to, and says so on stderr.[^profile-cache]
+- **Trust.** Reading a profile is safe: Nix evaluates it restricted, without network, without your
+  environment, and reading nothing outside its directory and nixpkgs. Using one is not: its plugins
+  and MCP servers run. Only open terminals in repositories you trust, as you already do with
+  their `.envrc`.
 
-[^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache.
+[^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. Its last store path is kept under `agent-distro/references/` for launches without network. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache; launchers name that nixpkgs by a locked reference and fetch its source only for a profile with `packages`.
 [^never-compiles]: Under the same policy as the updater: what a build would compile rather than fetch stops the launch.
 
 | Profile | What it is |
@@ -517,14 +527,15 @@ python3 .github/scripts/test-update-flake.py
 The TypeScript's own checks need no VM or KVM, and `nix flake check` at the root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,profile-resolve,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,profile-resolve,vanilla-closure,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 | Check | Covers |
 | --- | --- |
 | `reader` | the plugin reader |
 | `launch-plugins` | `AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence, a profile replacing the built-in plugins, and the launches it fails |
-| `profile-resolve` | the profile in effect, with a fake nix: discovery, precedence, references, its cache and the no-compile policy |
+| `profile-resolve` | the profile in effect, with a fake nix: discovery, precedence, references and their offline fallback, the evaluation's isolation, its cache, nixpkgs fetched only for packages, and the no-compile policy |
+| `vanilla-closure` | the `vanilla` bundle names nixpkgs by reference and does not hold its source |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule and cache policy |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
