@@ -53,8 +53,8 @@ if (args[0] === 'eval') {
   if (given.nixpkgs === null && answer.packages?.length) answer.packages = null;
   process.stdout.write(JSON.stringify(answer));
 } else if (args[0] === 'flake' && args[1] === 'prefetch') {
-  const answer = path.join(bin, 'refs', encodeURIComponent(args[3]));
-  if (args[3].startsWith('silent:')) { console.log('fetching\\nhalfway'); process.exit(3); }
+  const answer = path.join(bin, 'refs', encodeURIComponent(args.at(-1)));
+  if (args.at(-1).startsWith('silent:')) { console.log('fetching\\nhalfway'); process.exit(3); }
   if (!fs.existsSync(answer)) { console.error('error: cannot fetch'); process.exit(1); }
   process.stdout.write(fs.readFileSync(answer, 'utf8'));
 } else if (args[0] === 'build' && args.includes('--dry-run')) {
@@ -202,6 +202,12 @@ test('flake references are fetched: the profile and its plugin references, every
     assert.deepEqual(resolved.plugins, ['/nix/store/11111111111111111111111111111111-source/one', '/abs/plugin']);
   }
   assert.equal(calls('flake prefetch') - before, 4, 'the profile and its plugin reference, at each launch');
+  // Offline, nix would fail downloading the global registry, which only an
+  // indirect reference needs.
+  assert.equal(calls('flake prefetch --option flake-registry  --json git+file:///profiles?dir=sub'), 2);
+  reference('my-registry/sub', tree, 'sub');
+  resolve({ source: 'variable', origin: 'my-registry/sub' });
+  assert.equal(calls('flake prefetch --json my-registry/sub'), 1, 'an indirect reference keeps the registry');
   assert.ok(existsSync(file));
   assert.throws(() => resolve({ source: 'variable', origin: 'github:no/such' }), /AI_PROFILE=github:no\/such: cannot fetch github:no\/such:\nerror: cannot fetch/);
   // Nix failing without a word still says how it failed.
@@ -336,7 +342,7 @@ test('nixpkgs is fetched by its locked reference, and only for a profile with pa
   reference(nixpkgs, tree);
   const referenced = { ...info, nixpkgs };
   const env = { XDG_CACHE_HOME: temporary() };
-  const fetches = () => calls(`flake prefetch --json ${nixpkgs}`);
+  const fetches = () => calls(`flake prefetch --option flake-registry  --json ${nixpkgs}`);
   const before = fetches();
   const bare = temporary();
   profileFile(bare, { name: 'bare' });
@@ -353,6 +359,15 @@ test('nixpkgs is fetched by its locked reference, and only for a profile with pa
   const { args, given } = lastEvaluation();
   assert.equal(given.nixpkgs, tree);
   assert.ok(args.includes(tree), 'nixpkgs is readable to the evaluation');
+  // Its tree already in the store: used as it is, never fetched.
+  const stored = temporary();
+  profile.resolveProfile({ ...referenced, nixpkgsPath: stored }, { source: 'positional', origin: packaged }, { XDG_CACHE_HOME: temporary() });
+  assert.equal(fetches() - before, 1);
+  assert.equal(lastEvaluation().given.nixpkgs, stored);
+  // Gone from the store: fetched.
+  profile.resolveProfile({ ...referenced, nixpkgsPath: join(stored, 'gone') }, { source: 'positional', origin: packaged }, { XDG_CACHE_HOME: temporary() });
+  assert.equal(fetches() - before, 2);
+  assert.equal(lastEvaluation().given.nixpkgs, tree);
 });
 
 test('without network, a reference uses its last store path, and says so', () => {

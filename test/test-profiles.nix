@@ -10,7 +10,7 @@
 # profile's agent-distro.nix, its github: plugin reference replaced by a local
 # path, runs the real OMP, Codex and Claude Code as the built-in Juspay
 # profile did.
-{ pkgs, agent-distro, juspay-skills, koluPlugin }:
+{ pkgs, agent-distro, nixpkgs, juspay-skills, koluPlugin }:
 let
   inherit (pkgs) lib;
   common = import ./common.nix;
@@ -85,9 +85,9 @@ in
     environment.systemPackages = [ agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla pkgs.python3 pkgs.git koluFixture ] ++ probes;
     # What the profiles' packages evaluate to is already here, as a binary
     # cache would provide it; nothing else is, and nothing can be fetched.
-    # The nixpkgs source too: launchers name it by a locked reference, which
-    # resolves from the store.
-    system.extraDependencies = [ pkgs.hello pkgs.mcp-nixos pkgs.path ] ++ lib.attrValues plugins;
+    # The nixpkgs source too, at the store path launchers find it by (the
+    # input's outPath: `pkgs.path`, a path value, would be copied to another).
+    system.extraDependencies = [ pkgs.hello pkgs.mcp-nixos nixpkgs.outPath ] ++ lib.attrValues plugins;
     nix.settings.substituters = lib.mkForce [ ];
   };
   testScript = ''
@@ -145,8 +145,8 @@ in
         assert in_effect("~/repo/nested/deep") == {
             "name": "repo", "description": "The repository", "source": "repository",
             "origin": "/home/testuser/repo/agent-distro.nix"}
-        # The picker's header names it.
-        assert "agent-distro · repo" in user("cd ~/repo && probe-agent-distro --list")
+        # --list names it, and where it was found.
+        assert "repo · The repository · from /home/testuser/repo/agent-distro.nix" in user("cd ~/repo && probe-agent-distro --list")
         # Outside the repository, the built-in profile.
         assert launched("probe-claude") == ([], "")
         assert in_effect() == {"name": "vanilla", "description": "${vanilla.description}", "source": "builtin", "origin": "vanilla"}
@@ -190,7 +190,7 @@ in
           [ ''"github:juspay/kolu?dir=agent-plugin"'' ] [ ''"${koluPlugin}"'' ] juspayProfile)})
         juspay = "AI_PROFILE=/home/testuser/juspay"
         assert in_effect("~", juspay)["name"] == "juspay"
-        user(f"{juspay} " + shlex.quote("python ${./profiles/check-juspay.py}") + " " + " ".join(shlex.quote(a) for a in [
+        user(f"{juspay} python " + shlex.quote("${./profiles/check-juspay.py}") + " " + " ".join(shlex.quote(a) for a in [
             ${builtins.toJSON (builtins.toJSON expected)}, "juspay-ai",
             "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
             "${pkgs.mcp-nixos}/bin"]))

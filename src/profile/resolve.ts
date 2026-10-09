@@ -55,6 +55,12 @@ export type Info = {
    * holds.
    */
   nixpkgs: string;
+  /**
+   * Where that reference's tree is in the store, which the launcher does not
+   * hold: used while it is there, since Nix downloads a locked github:
+   * reference again rather than finding it in the store.
+   */
+  nixpkgsPath?: string;
   /** The system `packages` are evaluated for. */
   system: string;
 };
@@ -211,9 +217,16 @@ function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironme
   throw new LaunchError(`${what}: ${exit} and printed no error${last ? `; its last output: ${last}` : ''}`);
 }
 
-/** A flake reference's directory in the store: the fetched tree, and its `dir` within it. */
+/**
+ * A flake reference's directory in the store: the fetched tree, and its `dir`
+ * within it. Nix downloads the global flake registry before fetching any
+ * reference, so without network even a git+file: one would fail; only an
+ * indirect reference (no `scheme:`, such as `nixpkgs/nixos-unstable`) is
+ * looked up in it, so the others skip it.
+ */
 export function prefetch(reference: string, what: string): string {
-  const text = nix(['flake', 'prefetch', '--json', reference], `${what}: cannot fetch ${reference}`);
+  const registry = /^[a-z][a-z0-9+.-]*:/i.test(reference) ? ['--option', 'flake-registry', ''] : [];
+  const text = nix(['flake', 'prefetch', ...registry, '--json', reference], `${what}: cannot fetch ${reference}`);
   let storePath: unknown;
   let dir: unknown;
   try {
@@ -272,7 +285,8 @@ function evaluate(file: string, info: Info, cache: string, what: string): Evalua
   `${what}: cannot evaluate ${file}`, nixEnvironment(true)));
   let value = run(null);
   if (isObject(value) && value.packages === null) {
-    value = run(isAbsolute(info.nixpkgs) ? info.nixpkgs : fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache));
+    const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
+    value = run(isAbsolute(info.nixpkgs) ? info.nixpkgs : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache));
   }
   if (isObject(value)) {
     if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
