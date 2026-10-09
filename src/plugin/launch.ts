@@ -42,7 +42,7 @@ import {
 import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
-import { isSystemError, realpath, writeTemporary } from '../util.ts';
+import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
 import type { Gateway } from '../gateway/models.ts';
 import { resolveProfile, select, workingDirectory, isResolved, type Info, type Resolved } from '../profile/resolve.ts';
 
@@ -121,11 +121,7 @@ export function entries(value: string | undefined): string[] {
   return (value ?? '').split(':').filter((entry) => entry !== '');
 }
 
-/** Control characters escaped, so cached or plugin-chosen text cannot drive the terminal. */
-export function printable(text: string): string {
-  return text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/gu,
-    (c) => '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0'));
-}
+export { printable } from '../util.ts';
 
 function narString(hash: ReturnType<typeof createHash>, value: string | Buffer) {
   const bytes = typeof value === 'string' ? Buffer.from(value) : value;

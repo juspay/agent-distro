@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 const { update, wouldCompile } = await import(join(process.argv[2], 'update/update.ts'));
+const { NixLog } = await import(join(process.argv[2], 'update/progress.ts'));
+import type { Result } from '../src/update/update.ts';
 const work = mkdtempSync(join(tmpdir(), 'would-compile-'));
 
 type Fake = {
@@ -26,10 +28,14 @@ type Fake = {
    * `__structuredAttrs`), or `plain` (nowhere: a real cache miss).
    */
   shapes?: ('env' | 'structuredAttrs' | 'plain')[];
+  /** If set, `nix flake metadata` prints this to stderr and exits 1. */
+  resolveError?: string;
+  /** If set, the real `nix build` prints this to stderr and exits 1. */
+  buildError?: string;
 };
 
 /** A nix answering per `fake`; every call is logged, so a test can tell whether a real build ran. */
-function fakeNix(name: string, { drvs, fetched = 0, show = 'json', shapes = [] }: Fake): string {
+function fakeNix(name: string, { drvs, fetched = 0, show = 'json', shapes = [], resolveError, buildError }: Fake): string {
   const path = join(work, name);
   writeFileSync(path, `#!${process.execPath}
 const fs = require('node:fs');
@@ -37,9 +43,14 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(path + '.log')}, args.join(' ') + '\\n');
 const store = (i, suffix) => '/nix/store/' + String(i).padStart(32, '0') + '-pkg-' + i + suffix;
 const show = ${JSON.stringify(show)};
+const resolveError = ${JSON.stringify(resolveError ?? '')};
+const buildError = ${JSON.stringify(buildError ?? '')};
 if (args[0] === 'store') console.log(JSON.stringify({ trusted: 1, url: 'daemon' }));
 else if (args[0] === 'config') console.log('');
-else if (args[0] === 'flake') console.log(JSON.stringify({ url: 'path:/fixture' }));
+else if (args[0] === 'flake') {
+  if (resolveError) { console.error(resolveError); process.exit(1); }
+  console.log(JSON.stringify({ url: 'path:/fixture' }));
+}
 else if (args[0] === 'build' && args.includes('--dry-run')) {
   const lines = ['these ${drvs} derivations will be built:'];
   for (let i = 0; i < ${drvs}; i++) lines.push('  ' + store(i, '.drv'));
@@ -67,6 +78,7 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
     process.stdout.write(show === 'truncated' ? text.slice(0, text.length / 2) : text);
   }
 } else if (args[0] === 'build') {
+  if (buildError) { console.error(buildError); process.exit(1); }
   // The real build: an out-link to a bundle that records its versions.
   const bundle = ${JSON.stringify(join(work, name + '-bundle'))};
   fs.mkdirSync(bundle + '/share/agent-distro', { recursive: true });
@@ -80,16 +92,23 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
   return path;
 }
 
-async function run(nix: string) {
+async function run(nix: string, { progress = false } = {}) {
   const state = join(work, `${nix}-state`);
   const history = join(work, `${nix}-history.log`);
+  const results: Result[] = [];
+  const notes: string[] = [];
   const status = await update({
     profile: 'p', flake: 'path:/fixture', state, history, nix,
     substituters: {}, periodSeconds: 21600, offsetSeconds: 7200,
-  });
+  }, {
+    summary: () => {},
+    note: (line) => notes.push(line),
+    result: (result) => results.push(result),
+    progress: () => {},
+  }, progress ? new NixLog() : undefined);
   const builds = readFileSync(nix + '.log', 'utf8').split('\n')
     .filter((line) => line.startsWith('build ') && !line.includes('--dry-run'));
-  return { status, builds, history: readFileSync(history, 'utf8'), stamped: existsSync(join(state, 'last-success')) };
+  return { status, builds, history: readFileSync(history, 'utf8'), stamped: existsSync(join(state, 'last-success')), results, notes };
 }
 
 test('megabytes of derivation show still name what would compile', () => {
@@ -144,4 +163,52 @@ test('an update with nothing to compile builds', async () => {
   assert.equal(result.builds.length, 1);
   assert.match(result.history, / p updated: Pi 1\.0\n$/);
   assert.ok(result.stamped);
+});
+
+const NESTED_RESOLVE = [
+  'error: cannot resolve flake \'github:juspay/agent-distro/HEAD\'',
+  '       … while fetching the input \'github:juspay/agent-distro/HEAD\'',
+  'error: unable to download \'https://api.github.com/repos/juspay/agent-distro/commits/HEAD\': HTTP error 401',
+].join('\n') + '\n';
+
+test('a failed resolve names nix\'s own error in the --progress result', async () => {
+  const nix = fakeNix('resolve-fail-progress', { drvs: 0, resolveError: NESTED_RESOLVE });
+  const result = await run(nix, { progress: true });
+  assert.equal(result.status, 1);
+  assert.deepEqual(result.results, [{
+    result: 'failed',
+    reason: 'cannot resolve flake',
+    detail: "unable to download 'https://api.github.com/repos/juspay/agent-distro/commits/HEAD': HTTP error 401",
+  }]);
+  assert.match(result.history, / p failed: cannot resolve flake\n$/);
+  assert.deepEqual(result.builds, []);
+});
+
+test('plain mode appends nix\'s error to the resolve-failure note', async () => {
+  const nix = fakeNix('resolve-fail-plain', { drvs: 0, resolveError: NESTED_RESOLVE });
+  const result = await run(nix);
+  assert.equal(result.status, 1);
+  assert.ok(result.notes.some((line) => line.includes("update failed (cannot resolve path:/fixture): unable to download 'https://api.github.com/repos/juspay/agent-distro/commits/HEAD': HTTP error 401")));
+});
+
+const NESTED_BUILD = '@nix {"action":"msg","level":0,"msg":"error: a build failed\\n\\n       … while evaluating ...\\nerror: cannot build: the sandbox exploded\\n"}\n';
+
+test('a failed --progress build names nix\'s last error line', async () => {
+  const nix = fakeNix('build-fail-progress', { drvs: 0, buildError: NESTED_BUILD });
+  const result = await run(nix, { progress: true });
+  assert.equal(result.status, 1);
+  assert.equal(result.builds.length, 1);
+  assert.deepEqual(result.results, [{
+    result: 'failed',
+    reason: 'nix build exit 1',
+    detail: 'cannot build: the sandbox exploded',
+  }]);
+  assert.match(result.history, / p failed: nix build exit 1\n$/);
+});
+
+test('no error: line means no detail on a failed result', async () => {
+  const nix = fakeNix('build-fail-plain-text', { drvs: 0, buildError: 'the build daemon went away\n' });
+  const result = await run(nix, { progress: true });
+  assert.equal(result.status, 1);
+  assert.deepEqual(result.results, [{ result: 'failed', reason: 'nix build exit 1' }]);
 });

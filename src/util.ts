@@ -70,6 +70,12 @@ export function decodeUtf8(bytes: Uint8Array): string {
   return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
 }
 
+/** Control characters escaped, so cached or plugin-chosen text cannot drive the terminal. */
+export function printable(text: string): string {
+  return text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/gu,
+    (c) => '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0'));
+}
+
 /**
  * Write `data` to a new file in `directory`, for a rename into place. The file
  * is removed if writing it fails, so a full disk leaves nothing behind.
