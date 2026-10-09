@@ -76,7 +76,6 @@ jobs:
             doc/flake.lock
             harnesses
             lib/npins
-            profiles
           title: ${{ steps.report.outputs.pr-title }}
           body-path: ${{ steps.report.outputs.pr-body-path }}
           commit-message: "chore(flake): update inputs"

@@ -6,11 +6,12 @@ description: "Your team's coding agents, in one command. Package your skills, MC
 ## Quick start
 
 ```sh
-nix run github:juspay/agent-distro                     # pick from the list
-AI_HARNESS=claude nix run github:juspay/agent-distro   # skip the list
+nix run github:juspay/agent-distro                            # pick from the list
+AI_HARNESS=claude nix run github:juspay/agent-distro          # skip the list
+nix run github:juspay/agent-distro -- github:juspay/skills    # with a profile from any repository
 ```
 
-To keep the agents installed and updated, see [Install and keep updated](#install).
+To keep the agents installed and updated, see [Install and keep updated](#install). To give your agents a team's skills, MCP servers and gateway, see [Profiles](#profiles).
 
 - **Systems.** `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 - **Binary cache.** Pass `--accept-flake-config` to use the cache this flake names;[^nixconfig] without it, Oh My Pi is built from source.
@@ -19,87 +20,63 @@ To keep the agents installed and updated, see [Install and keep updated](#instal
 
 ### The chooser
 
-With several profiles, the chooser is master–detail: profiles are tabs in the header, harnesses are the list on the left, and the highlighted harness fills the panel on the right.[^chooser-rows] <kbd>←</kbd>/<kbd>→</kbd> (or <kbd>Tab</kbd>) switch profile, and nothing in the box is ever cut.
+The chooser is master–detail: harnesses are the list on the left, and the highlighted harness fills the panel on the right.[^chooser-rows] One [profile](#profiles) is in effect for the launch: the header names it, and the row under it says what it is and where it came from. Nothing in the box is ever cut.
 
-Here `vanilla/pi` is remembered from last time.[^remembered-example]
+Here the terminal is in a repository whose `agent-distro.nix` is the Juspay profile, and `pi` is remembered from last time.
 
-[^chooser-rows]: The active profile's name and description take a row of their own under the header. The panel shows the highlighted harness's tagline and its auth status.
-[^remembered-example]: So the default profile opens, the remembered one is dotted, and switching to it lands on that harness.
+[^chooser-rows]: The panel shows the highlighted harness's tagline and its auth status. Versions reflect the packages pinned at build time, shown without revision suffixes.
 
 ```
-╭─ agent-distro ───────────────────────── juspay · • vanilla ── 6 harnesses ─╮
-│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway                │
+╭─ agent-distro · juspay ────────────────────────────────────── 6 harnesses ─╮
+│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway · from         │
+│ /home/me/src/skills/agent-distro.nix                                       │
 ├──────────────────────────────┬─────────────────────────────────────────────┤
-│ ❯   ✓ Oh My Pi       18.7.0  │ Oh My Pi 18.7.0                             │
-│     ✓ Codex         0.160.1  │ gateway or own provider · extensions        │
+│     ✓ Oh My Pi       18.7.0  │ Pi 1.0.4                                    │
+│     ✓ Codex         0.160.1  │ OMP's upstream · gateway via models.json    │
 │     ✓ Claude Code   2.1.292  │                                             │
 │     ✓ OpenCode      1.18.35  │ Signed in                                   │
 │       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
-│     ✓ Pi              1.0.4  │   anthropic                                 │
-│                              │   openai                                    │
+│ ❯ • ✓ Pi              1.0.4  │                                             │
 ├──────────────────────────────┴─────────────────────────────────────────────┤
 │ / filter…                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────╯
-↑↓ jk move   ←→ profile   Enter launch   / filter   q quit
+↑↓ jk move   Enter launch   / filter   q quit
 ```
 
 | Variable[^var-names] | Values | Effect |
 | --- | --- | --- |
 | `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list[^non-interactive] |
-| `AI_PROFILE` | a directory under `profiles/` | Chooses the profile;[^profile-default] on its own, narrows the list to that profile |
+| `AI_PROFILE` | `vanilla`, or a profile [reference](#profiles) | The profile when the repository has none[^profile-fallback] |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 | `AGENT_DISTRO_PLUGINS` | `:`-separated plugin directories | Loads more plugins for that launch; see [Plugins at launch](#plugins-at-launch) |
 
 [^var-names]: Names unchanged for script compatibility.
 [^non-interactive]: Also usable in scripts and non-interactive shells.
-[^profile-default]: Defaulting to the one `registry.nix` names.
+[^profile-fallback]: Read by every command, `agent-distro`, `claude`, `omp` and the rest alike: it is the fallback an environment such as Kolu sets. See [Profiles](#profiles) for the order.
 
 ### By name
 
 | Command | Does |
 | --- | --- |
 | `agent-distro <harness>` | Launches directly |
-| `agent-distro <profile> <harness>` | Selects both |
-| `agent-distro <profile>` | Narrows the chooser |
+| `agent-distro <profile> <harness>` | Launches with that profile |
+| `agent-distro <profile>` | Opens the chooser with that profile |
 
-For example:
+A leading argument naming a harness is the harness. Otherwise a built-in profile name (`vanilla`), or any value containing `/` or `:`, is the profile: a path, which when relative must start with `./`, or a flake reference.
 
 ```sh
 agent-distro codex --version
-agent-distro juspay claude --version
-agent-distro juspay
-agent-distro --list                      # profile harness title version, one row per line
+agent-distro github:juspay/skills claude --version
+agent-distro ./path/to/repo claude
+agent-distro vanilla                     # the built-in profile, whatever the repository says
+agent-distro --list                      # the profile in effect, then harness title version, one per line
 agent-distro --list --json               # the same, as JSON (below)
 ```
 
-- **Precedence.** `AI_HARNESS` and `AI_PROFILE` take precedence over positional selections.[^positional-default]
-- **Passthrough.** Recognized leading names are consumed; other arguments and everything after `--` are passed to the harness unchanged.
+- **Precedence.** The positional profile overrides the repository's `agent-distro.nix`, which overrides `AI_PROFILE`. `AI_HARNESS` takes precedence over a positional harness.
+- **Passthrough.** Recognized leading selectors are consumed;[^dash] other arguments and everything after `--` are passed to the harness unchanged.
 
-[^positional-default]: The profile otherwise defaults to the registry default.
-
-### One profile
-
-Narrowed to one profile,[^narrowed] the header shows that profile's name instead of tabs, and the row under it is the same. Versions reflect the packages pinned at build time.[^no-revision]
-
-[^narrowed]: By `agent-distro juspay`, by `AI_PROFILE`, or by being a single-profile distribution.
-[^no-revision]: Shown without revision suffixes.
-
-```
-╭─ agent-distro · juspay ────────────────────────────────────── 6 harnesses ─╮
-│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway                │
-├──────────────────────────────┬─────────────────────────────────────────────┤
-│ ❯   ✓ Oh My Pi       18.7.0  │ Oh My Pi 18.7.0                             │
-│     ✓ Codex         0.160.1  │ gateway or own provider · extensions        │
-│     ✓ Claude Code   2.1.292  │                                             │
-│     ✓ OpenCode      1.18.35  │ Signed in                                   │
-│       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
-│     ✓ Pi              1.0.4  │   anthropic                                 │
-│                              │   openai                                    │
-├──────────────────────────────┴─────────────────────────────────────────────┤
-│ / filter…                                                                  │
-╰────────────────────────────────────────────────────────────────────────────╯
-↑↓ jk move   Enter launch   / filter   q quit
-```
+[^dash]: An argument starting with `-` is never a selector, so `agent-distro --model=a:b` passes it to the harness.
 
 ### Signed-in marks
 
@@ -126,7 +103,6 @@ Narrowed to one profile,[^narrowed] the header shows that profile's name instead
 | Key | Does |
 | --- | --- |
 | <kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>j</kbd>/<kbd>k</kbd> | Move in the list |
-| <kbd>←</kbd>/<kbd>→</kbd>, <kbd>Tab</kbd>/<kbd>Shift-Tab</kbd>, <kbd>h</kbd>/<kbd>l</kbd> | Switch profile (several profiles only) |
 | <kbd>Enter</kbd> | Launch the highlighted harness |
 | <kbd>/</kbd> | Filter the list by title or tagline |
 | <kbd>Escape</kbd> (filtering) | Clear the filter, keeping the cursor on its row |
@@ -144,35 +120,22 @@ Narrowed to one profile,[^narrowed] the header shows that profile's name instead
 
 ### Remembered choice
 
-An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`.[^state-unavailable] Next time the default profile still opens, and the remembered profile and harness are marked with `•`.[^remembered-cursor]
+An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}/agent-distro/last-choice`.[^state-unavailable] Next time the cursor starts on that harness, which is marked with `•`.
 
 - **Updates it.** Every interactive choice, including `agent-distro <profile>`.
 - **Never updates it.** Direct selections: `AI_HARNESS`, `agent-distro <harness>`, or `agent-distro <profile> <harness>`.
 
 [^state-unavailable]: An unavailable state directory is silently ignored.
-[^remembered-cursor]: Switching to the remembered profile puts the cursor on that harness.
 
 ### Listing as JSON
 
-`agent-distro --list --json` prints what the chooser draws, on one line, for programs that offer the same choice (such as [kolu](https://github.com/juspay/kolu)).[^listing-type] Here it is pretty-printed, with each profile cut to one harness:
+`agent-distro --list --json` prints what the chooser draws, on one line, for programs that offer the same choice (such as [kolu](https://github.com/juspay/kolu)).[^listing-type] Here it is pretty-printed, cut to one harness, from a terminal in a repository with its own profile:
 
 [^listing-type]: Its shape is stable, typed as `Listing` in [src/listing.ts](https://github.com/juspay/agent-distro/blob/main/src/listing.ts).
 
 ```json
 {
   "profiles": [
-    {
-      "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
-      "harnesses": [
-        {
-          "name": "claude",
-          "tagline": "Anthropic login · plugin dirs per session",
-          "title": "Claude Code",
-          "version": "2.1.291"
-        }
-      ],
-      "name": "juspay"
-    },
     {
       "description": "Upstream harnesses with your own provider",
       "harnesses": [
@@ -185,18 +148,27 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
       ],
       "name": "vanilla"
     }
-  ]
+  ],
+  "profile": {
+    "name": "ekala",
+    "description": "Ekala's Nix development skills",
+    "source": "repository",
+    "origin": "/home/me/src/ekala-ai-skills/agent-distro.nix"
+  }
 }
 ```
 
 | Field | Rule |
 | --- | --- |
-| `profiles` | The first profile is the default |
+| `profiles` | The launcher's built-in profile, and its harnesses |
 | `harnesses` | In menu order |
-| `name` | Unique at its level, free of whitespace and `/`; what `AI_PROFILE` or `AI_HARNESS` (or a positional selector) takes |
+| `name` | Free of whitespace and `/`; what `AI_HARNESS` (or a positional selector) takes |
 | `version` | The display version, as `--list` prints it[^plus-suffix] |
+| `profile` | The profile in effect for a launch from the same directory and environment |
+| `profile.source` | `positional`, `repository`, `variable` (`AI_PROFILE`) or `builtin` |
+| `profile.origin` | The reference as given, the path to the `agent-distro.nix` found, or the built-in name |
 
-Keys within an object are sorted. `--list` takes no other arguments.[^three-agree]
+Keys within `profiles` are sorted; `profile`'s are in the order above. `--list` takes no other arguments.[^three-agree] A profile that cannot be read fails `--list` as it would fail a launch.
 
 [^plus-suffix]: Without the package's `+` revision suffix.
 [^three-agree]: The plain `--list` and the chooser read the same value, so the three cannot disagree.
@@ -205,11 +177,12 @@ Keys within an object are sorted. `--list` takes no other arguments.[^three-agre
 
 A profile fixes the plugins its harnesses start with. Put more [Agent
 Plugins](https://agent-plugins.org) directories on `AGENT_DISTRO_PLUGINS`, and
-every harness loads them too, in every profile, for that launch:
+every harness loads them too, on top of whichever profile is in effect, for
+that launch:
 
 ```sh
 AGENT_DISTRO_PLUGINS=~/src/my-plugin agent-distro claude
-AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-distro juspay omp
+AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-distro github:juspay/skills omp
 ```
 
 > Unset or empty, the launchers behave exactly as they do without this feature.
@@ -225,7 +198,7 @@ AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-dist
 [^entry-resolve]: A relative entry is resolved against the directory the launcher starts in, and symlinks are followed. `~` is expanded by the shell, and only where an assignment expands it: unquoted, in bash or zsh, not in fish.
 [^launch-warnings]: Skipped skills, a disabled `mcp.json` or an invalid server entry are reported on stderr, on every launch.
 [^no-version]: No `version` is compared.
-[^cache-dir]: The cache directory must be an absolute path. A launch never calls Nix, and a cache it cannot write fails it.
+[^cache-dir]: The cache directory must be an absolute path. Loading these plugins never calls Nix, and a cache it cannot write fails the launch.
 [^cache-key]: A plugin under `/nix/store` is keyed by its store path, as is, without reading it. Any other directory is keyed by a hash of its contents (its NAR serialization, computed without Nix, leaving out a top-level `.git`) and of its absolute path, so a key is particular to one machine and user. That directory is hashed in full on every launch: a large tree (a `node_modules`, say) costs launch time, and a FIFO or an unreadable file in it fails the launch.
 [^no-pile-up]: So old versions of an edited checkout and translations for an older agent-distro do not pile up.
 [^undo]: Claude Code and OMP take them as arguments, OpenCode in its session config, and Codex through `-c` overrides; Codex keeps an inert copy in its plugin cache, removed once unused for 14 days. Pi only reads its own files, so it records what a launch added and its next launch, whenever that is, takes it back.
@@ -243,12 +216,14 @@ The Home Manager module puts every harness on your `PATH` and keeps them on the 
   imports = [ inputs.agent-distro.homeManagerModules.default ];
   services.agent-distro = {
     enable = true;
-    profile = "vanilla"; # default: juspay
+    profile = "github:juspay/skills"; # default: vanilla
   };
 }
 ```
 
-Home Manager creates the state directory and schedules the updates for you.[^hm-prune]
+Home Manager creates the state directory and schedules the updates for you.[^hm-prune] `profile` is a built-in name, which installs that bundle, or a [reference](#profiles), which installs the `vanilla` bundle and makes the reference every command's `AI_PROFILE` fallback.[^hm-reference]
+
+[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` wins over both. A reference is an absolute path or a flake reference; anything else that is not a built-in name is an evaluation error.
 
 [^hm-prune]: At activation its prune stage deletes sibling state directories left from an earlier flake/profile choice.
 
@@ -257,8 +232,8 @@ Home Manager creates the state directory and schedules the updates for you.[^hm-
 Update by hand:
 
 ```sh
-nix profile install github:juspay/agent-distro#juspay
-nix profile upgrade juspay
+nix profile install github:juspay/agent-distro#vanilla
+nix profile upgrade vanilla
 ```
 
 Or keep the cache-only updates, but drive them yourself:
@@ -304,16 +279,18 @@ nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13Ei
 | Full run output, Linux | `journalctl --user -u agent-distro-update` |
 | Full run output, macOS | `~/.local/state/agent-distro/<source>/update.log` |
 
-[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 juspay updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing.
+[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 vanilla updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing.
 
 ## Build your own distribution
+
+A [profile](#profiles) needs no distribution of its own: any agent-distro reads it at launch. Build one when your team wants its own pinned flake, bundle and Home Manager module.
 
 ```sh
 mkdir my-distribution && cd my-distribution
 nix flake init -t github:juspay/agent-distro
 ```
 
-Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
+The template is a repository that is both an Agent Plugins directory and a profile: edit `agent-distro.nix`, add skills under `skills/`, and the same file works read at launch (`agent-distro github:<you>/my-distribution`) and built by its `flake.nix`.
 
 | Field | Meaning |
 | --- | --- |
@@ -323,7 +300,7 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 | `gateway` | `null`, or `{ url; keyEnv; models = { large; small; }; keyHint; }` for a LiteLLM proxy |
 | `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness[^bare-command] |
 
-[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`.
+[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A built distribution takes paths only; a flake reference string is read at launch, so name that plugin with a flake input instead.
 [^bare-command]: An MCP server that a plugin declares by bare command, such as `"command": "mcp-nixos"`, is found on `PATH`. List its package here and it is built, or fetched from a binary cache, together with the launcher, so the server starts at once instead of being downloaded when the agent first asks for it, and every user runs the version the build pinned.
 
 - **Start from.** The template includes a gateway example; `agent-distro.profiles.vanilla` is the reference profile shape.
@@ -333,6 +310,7 @@ Point `my-skills` at your Agent Plugins repository and edit `profile.nix`:
 
 ```nix
 agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; }
+# profile: an agent-distro.nix, or the attribute set it holds
 # → packages.<system>: every harness, default picker, and <profile.name> bundle
 #   (a bundle's bin/ carries its harness commands and `agent-distro`, its own picker)
 #   apps.<system>: every harness and default picker; homeManagerModules.default;
@@ -340,11 +318,11 @@ agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → every harness launcher, plus picker and bundle (the bundle's bin/ also holds
-#   that picker as `agent-distro`, defaulting to the profile)
+#   that picker as `agent-distro`, with this profile built in)
 ```
 
 - **Outputs.** `mkFlake` returns `packages`,[^mkflake-packages] `apps`, `homeManagerModules.default`, and the same `lib` attrset `flake.nix` exposes; add other outputs with `//`.
-- **One profile.** A single-profile distribution draws the narrowed list above: one profile's rows under its description. `mkFlake` gives you the individual launchers and a bundle named after the profile, with the picker as its `default`.
+- **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. A repository's `agent-distro.nix`, `AI_PROFILE` or a positional reference still replace it for a launch, as they replace `vanilla`; `vanilla` stays accepted by name.
 - **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache. Push your own builds to a cache and pass it, or your users' updates are skipped.[^cache-only]
 
 [^mkflake-packages]: Every harness, the default picker, and the `<profile.name>` bundle, which carries its own picker as `bin/agent-distro`.
@@ -366,7 +344,7 @@ A profile's bundle (`nix build .#<profile.name>`) is self-describing: a consumer
 
 ```text
 bin/<harness>…                      # one launcher per harness
-bin/agent-distro                    # the picker, defaulting to this profile
+bin/agent-distro                    # the picker, with this profile built in
 share/agent-distro/profile.json     # {"description": "…", "name": "<profile.name>"}
 share/agent-distro/versions         # <harness>\t<title>\t<version>, one line per harness, in menu order
 ```
@@ -387,12 +365,13 @@ agent-distro.lib.stateDirectory { xdgStateHome; flake; profile; }
 #   same hash Home Manager computes today. One function, so a consumer and the
 #   updater can never disagree on where `current` lives.
 
-agent-distro.lib.mkShims { pkgs; bundle; stateDirectory; }
+agent-distro.lib.mkShims { pkgs; bundle; stateDirectory; profile ? null; }
 # → a derivation whose bin/ holds one shim per bundle.commands, each
 #   `exec "<stateDirectory>/current/bin/<name>"` when executable, else
 #   `exec <bundle>/bin/<name>`; identical text to the Home Manager module's shims.
 #   `bundle` must be a bundle from `mkLaunchers` of this agent-distro (it carries
-#   `commands`); anything else is an eval error naming the problem.
+#   `commands`); anything else is an eval error naming the problem. A `profile`
+#   reference is exported as AI_PROFILE unless the environment sets one.
 
 agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; }
 # → { config = <the generated JSON file>; command = [ node update.ts config ];
@@ -404,61 +383,72 @@ agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; histo
 #   come from `lib.schedule` and are not overridable here; the updater never
 #   compiles, handing nix only `substituters`.
 
-agent-distro.lib.mkPicker { pkgs; profiles; default; }
-# → lib/picker.nix's derivation: the interactive profile/harness chooser, where
-#   `profiles = { <name> = { profile; launchers; }; … }` — one entry per profile,
-#   `launchers` the `mkLaunchers` result for it — and `default` names the preselected one.
+agent-distro.lib.mkPicker { pkgs; profile; launchers; }
+# → lib/picker.nix's derivation: the interactive harness chooser over
+#   `launchers`, the `mkLaunchers` result for `profile`, its built-in profile.
 ```
 
 The updater's schedule is one `lib/schedule.nix`, exposed as `agent-distro.lib.schedule`: `updateHoursUTC`, `defaultFrequency`, `updatePeriodSeconds` and `updateOffsetSeconds`. The module, `mkUpdater` and any consumer read the same numbers.
 
 ## Profiles
 
+A profile is an `agent-distro.nix` in a git repository:
+
+```nix
+{
+  name = "ekala";
+  description = "Ekala's Nix development skills";
+  plugins = [ ./. ];              # Agent Plugins directories: a path relative to this file,
+                                  # or a flake reference string such as "github:juspay/kolu?dir=agent-plugin"
+  gateway = null;                 # or { url; keyEnv; models = { large; small; }; keyHint; }
+  packages = pkgs: [ ];           # optional: commands the plugins' MCP servers name
+}
+```
+
+Run it: `nix run github:juspay/agent-distro -- github:ekala-project/ekala-ai-skills`
+or `AI_PROFILE=github:ekala-project/ekala-ai-skills agent-distro omp`.
+
+Or let the repository you are in choose: with no profile named on the command line, the launcher uses the
+`agent-distro.nix` found from the working directory up to the git root, then `AI_PROFILE`,
+then `vanilla`. A terminal opened in a repository, in Kolu or anywhere, starts its agents with
+that repository's profile.
+
+- **Nothing to register.** agent-distro ships `vanilla` only. Any repository with an
+  `agent-distro.nix` is a profile.
+- **Always the latest agent-distro.** The profile is read when the harness starts, by whatever
+  agent-distro you run. The repository pins nothing.
+- **Read once.** The profile and its `packages` are evaluated on first use and cached per content
+  and agent-distro build, like plugin translations.[^profile-cache]
+- **Never compiles.** `packages` come from the binary cache or the launch stops and names the
+  missing one.[^never-compiles]
+- **Trust.** A profile's plugins and MCP servers run. Only open terminals in repositories you
+  trust, as you already do with their `.envrc`.
+
+[^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache.
+[^never-compiles]: Under the same policy as the updater: what a build would compile rather than fetch stops the launch.
+
 | Profile | What it is |
 | --- | --- |
-| `vanilla` | Upstream harnesses with your own provider; no plugins, no gateway |
-| `juspay` (default) | Juspay skills + Kolu, via Juspay's LiteLLM gateway |
+| `vanilla` | Built in: upstream harnesses with your own provider; no plugins, no gateway |
+| `github:juspay/skills` | Juspay skills + Kolu, via Juspay's LiteLLM gateway |
 
 <details>
 <summary>Using the Juspay profile</summary>
 
 ```sh
-AI_PROFILE=juspay nix run github:juspay/agent-distro
-AI_PROFILE=juspay AI_HARNESS=omp nix run github:juspay/agent-distro -- --version
+nix run github:juspay/agent-distro -- github:juspay/skills
+nix run github:juspay/agent-distro -- github:juspay/skills omp --version
+AI_PROFILE=github:juspay/skills agent-distro claude
 ```
 
 - **Adds** Juspay's skills and Kolu.
 - **Gateway.** Runs OMP, Pi, and OpenCode against Juspay's LiteLLM gateway, prompting for `LITELLM_API_KEY` unless it is exported.[^litellm-key] `AI_GATEWAY=0` keeps the plugins but skips gateway initialization.
 - **Own login.** Codex and Claude Code always use their own login.
-- **MCP servers.** Kolu's MCP server needs `kolu` on `PATH`. The profile supplies `mcp-nixos` itself, at its latest release.
+- **MCP servers.** Kolu's MCP server needs `kolu` on `PATH`. The profile supplies `mcp-nixos` itself, from nixpkgs.
 
 [^litellm-key]: Create a key at [grid.ai.juspay.net/dashboard](https://grid.ai.juspay.net/dashboard) (Juspay VPN required).
 
 </details>
-
-A profile is a directory under `profiles/`:
-
-```
-profiles/
-  registry.nix          # { default = "<name>"; } — the profile the list opens on
-  <name>/profile.nix    # { name; description; plugins; gateway; packages; }
-  <name>/npins/         # optional: the profile's pinned plugin and package sources
-```
-
-- **Discovered.** Profiles are discovered from the directory listing, so adding one is adding a directory; nothing in `flake.nix` names them.
-- **Plain data.** `profile.nix` is a plain attrset whose `name` must match its directory.[^packages-fn]
-- **Pinned with [npins](https://github.com/andir/npins).** Each profile pins its own sources, not with flake inputs:[^why-npins]
-
-```nix
-let sources = import ./npins;
-in { name = "example"; plugins = [ sources.skills ]; /* … */ }
-```
-
-- **Adding a source.** `npins --directory profiles/<name>/npins add github <owner> <repo>` follows the repository's releases; add `--branch main` to follow a branch.
-- **Updates.** The daily update advances every profile's pins alongside the harnesses: a release pin to the latest release, a branch pin to its head.
-
-[^packages-fn]: `packages` is its one function, since only the builder has a package set.
-[^why-npins]: The top-level `flake.lock` is inherited by everyone who builds on `lib.mkFlake`, and no distribution's plugins belong there.
 
 ## Harnesses
 
@@ -475,7 +465,7 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 
 ## How it works
 
-- **Profile.** Harness-independent data.
+- **Profile.** Harness-independent data: an `agent-distro.nix`, read at launch, or the one a launcher was built with.
 - **Harness.** The agent application.
 - **Plugin.** A portable Agent Plugins directory.
 - **Gateway.** An optional LiteLLM proxy used by OMP, Pi, and OpenCode.
@@ -486,10 +476,10 @@ Harness design notes live in each directory under [harnesses/](https://github.co
 
 - **TypeScript, no build step.** What runs on your machine beyond the harnesses themselves[^what-runs] is TypeScript under [src/](https://github.com/juspay/agent-distro/tree/main/src), run by Node 24's native type stripping: no `package.json`, bundler or compile step.[^js-entry]
 - **Dependencies.** Node comes from the distribution's nixpkgs. Its one npm dependency is `yaml`, for OMP's config.[^yaml-pin]
-- **Entry points.** The commands you run, and the shims Home Manager installs, stay small generated shell scripts that call into it.
+- **Entry points.** The commands you run, and the shims Home Manager installs, stay small generated shell scripts that call into it. Every launch starts with one call, which resolves the profile in effect ([src/profile/](https://github.com/juspay/agent-distro/tree/main/src/profile)) and prints shell for the launcher: its plugins, its gateway and its packages' `PATH`.
 
 [^what-runs]: The plugin reader, each harness's config writer, the picker and the Home Manager updater.
-[^js-entry]: The one exception is the entry for `AGENT_DISTRO_PLUGINS`, plain JavaScript so that it can turn on Node's compile cache before any TypeScript loads.
+[^js-entry]: The one exception is that launch entry, plain JavaScript so that it can turn on Node's compile cache before any TypeScript loads.
 [^yaml-pin]: A tarball pinned in `lib/npins`, which [lib/runtime.nix](https://github.com/juspay/agent-distro/blob/main/lib/runtime.nix) links in as `node_modules/yaml`.
 
 ### Reading plugins
@@ -502,21 +492,21 @@ Every plugin is read once, harness-independently, against Agent Plugins 1.0.0, b
 
 > One known gap: Claude Code expands `${VAR}` in a remote server's `url` and `headers`, which the spec forbids.[^var-gap]
 
-[^read-when]: A profile's at build time, and one from `AGENT_DISTRO_PLUGINS` at launch, into the cache described in [Plugins at launch](#plugins-at-launch).
+[^read-when]: A built-in profile's at build time; a profile read at launch, and one from `AGENT_DISTRO_PLUGINS`, at launch, into the cache described in [Plugins at launch](#plugins-at-launch).
 [^failure-boundaries]: As the spec's failure boundaries require.
 [^var-gap]: Those values cannot go through a launcher, so a remote server whose URL or headers contain `${` reaches Claude Code as is.
 
 ### Shared homes
 
-Profiles share each harness's own home directory, so what OMP and Codex persist outlives the profile that wrote it.[^persisted] Claude Code's plugins last only for the session.
+Profiles share each harness's own home directory, so what OMP persists outlives the profile that wrote it.[^persisted] Claude Code's plugins last only for the session, and a profile read at launch reaches Codex and Pi as `AGENT_DISTRO_PLUGINS` does.
 
-[^persisted]: A Codex marketplace registered by one profile is still registered when you launch `vanilla`, and so are the model roles a gateway filled into OMP's config.
+[^persisted]: The model roles a gateway filled into OMP's config stay when you launch `vanilla`, and a built-in profile's Codex marketplace stays registered.
 
 ## Development
 
 ```sh
-nix build .#default    # the picker, and through it every profile's launchers
-nix build .#vanilla    # one profile's bundle: its harnesses plus its own bin/agent-distro
+nix build .#default    # the picker, and through it every launcher
+nix build .#vanilla    # the bundle: its harnesses plus its own bin/agent-distro
 nix flake check
 just test              # offline NixOS VM tests; Linux with KVM
 just test-template
@@ -527,16 +517,17 @@ python3 .github/scripts/test-update-flake.py
 The TypeScript's own checks need no VM or KVM, and `nix flake check` at the root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,profile-resolve,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 | Check | Covers |
 | --- | --- |
 | `reader` | the plugin reader |
-| `launch-plugins` | `AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence and the launches it fails |
+| `launch-plugins` | `AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence, a profile replacing the built-in plugins, and the launches it fails |
+| `profile-resolve` | the profile in effect, with a fake nix: discovery, precedence, references, its cache and the no-compile policy |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule and cache policy |
-| `list-json` | `--list --json` against its type, the chooser's menu and `--list` |
+| `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
 | `picker-layout` | the chooser's cell widths, truncation and box at common terminal sizes |
 | `picker-auth` | the auth probes over fixture homes and stores |
 
@@ -551,7 +542,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,omp-
 
 For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake update`, and then `bash test/update-lock.sh`.
 
-[^update-sources]: It discovers npins directories under `profiles/`, `harnesses/`, and `lib/`, re-pins `yaml` to the newest npm release of its major version, and runs each harness's `update.py`.
+[^update-sources]: It discovers npins directories under `harnesses/` and `lib/`, re-pins `yaml` to the newest npm release of its major version, and runs each harness's `update.py`.
 [^attic-token]: `ATTIC_TOKEN` is needed except on fork PRs.
 [^auto-merge]: The update workflow approves runs GitHub holds back for automation-created pull requests and squash-merges after the checks required by `Require CI on main` pass.
 
@@ -561,7 +552,7 @@ Consumers can import `test/lib.nix { pkgs; launchers; profile; features; koluPlu
 
 - **Also `mkLaunchers`.** Rebuild and gateway checks also accept `mkLaunchers`.
 - **Plugin rebuilds.** Select plugin rebuild checks only for nonempty skill plugins.
-- **Coverage.** The test flake covers vanilla (with kolu's plugin loaded at launch), Juspay, and spec fixtures, plus `registry` (the picker over the whole profile registry).
+- **Coverage.** The test flake covers vanilla (with kolu's plugin loaded at launch), the Juspay profile built in, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a copy of the Juspay profile's `agent-distro.nix` matching the built-in one in OMP, Codex and Claude Code.
 
 [^features]: The features are `plugins`, `gateway`, `kolu`, `spec`, and `koluLaunch`, which loads `koluPlugin` through `AGENT_DISTRO_PLUGINS`.
 
@@ -578,12 +569,13 @@ Create `harnesses/<name>/` with four files:
 | File | Holds |
 | --- | --- |
 | `meta.nix` | title, order, `auth`,[^auth-values] `releaseNotes = version: URL`, and checks |
-| `default.nix` | the adapter, accepting `{ pkgs, plugins, gateway, package, profileName }`[^profile-name] |
+| `default.nix` | the adapter, accepting `{ pkgs, plugins, gateway, package, profileName }`[^profile-name] and starting with `runtime.launchPlugins`[^launch-json] |
 | `source.nix` | `{ pkgs }` to package |
 | `README.md` | design notes |
 
 [^auth-values]: `auth = "anthropic" | "openai" | "gateway"`.
 [^profile-name]: The explicit `profileName` argument supports profile-specific registration, such as Codex’s marketplace name.
+[^launch-json]: `plugins`, `gateway` and `profileName` are the built-in profile's; the adapter passes them to `launchPlugins` rather than baking the gateway in, and evaluates what it prints: the plugins and gateway of the profile in effect, which may be one read at launch.
 
 - **Alongside.** Pins in `npins/`, scripts in `tests/`, and an optional custom updater in `update.py`.
 - **No registration.** Nothing outside this directory needs registration.[^discovery]

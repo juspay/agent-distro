@@ -1,4 +1,4 @@
-"""Print where every profile, harness, and shared npins pin is, as one JSON object; never fetch.
+"""Print where every harness and shared npins pin is, as one JSON object; never fetch.
 
 npins' file format stays in here. What comes out is what a reader of the
 update calls a pin's position: the release it is on, or a short revision when
@@ -24,12 +24,11 @@ def position(pin):
 
 def main():
     pins = {}
-    for sources in [*Path('profiles').glob('*/npins/sources.json'),
-                    *Path('harnesses').glob('*/npins/sources.json'),
+    for sources in [*Path('harnesses').glob('*/npins/sources.json'),
                     *Path('lib').glob('npins/sources.json')]:
-        profile = sources.parent.parent.name
+        owner = sources.parent.parent.name
         for name, pin in json.loads(sources.read_text())['pins'].items():
-            pins[f'{profile}/{name}'] = position(pin)
+            pins[f'{owner}/{name}'] = position(pin)
     print(json.dumps(pins, sort_keys=True))
 
 

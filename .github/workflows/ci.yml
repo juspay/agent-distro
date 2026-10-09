@@ -76,8 +76,8 @@ jobs:
           nix build github:srid/devour-flake -L --no-link \
             --override-input flake .
 
-      - name: Build the profile menu
-        # The menu depends on every profile's launchers, so this builds them all.
+      - name: Build the picker
+        # The picker depends on every launcher, so this builds them all.
         run: |
           nix build --print-build-logs .#default
 

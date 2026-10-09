@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { writeConfig, mergeState } = await import(join(process.argv[2], 'harness/pi.ts'));
+const { writeConfig, mergeState, gatewayConfig } = await import(join(process.argv[2], 'harness/pi.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'pi-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -57,7 +57,7 @@ test('translation and skipped transports', () => {
   const gateway = { url: 'https://gateway.test/', keyEnv: 'TEST_KEY', models: { large: 'large', small: 'small' } };
   const args = (name: string, ...descriptions: string[]) => {
     const path = join(root, `${name}.json`);
-    writeFileSync(path, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', gateway, descriptions }));
+    writeFileSync(path, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', descriptions }));
     return path;
   };
 
@@ -74,7 +74,8 @@ test('translation and skipped transports', () => {
   assert.ok(!lstatSync(join(skills, 'approved')).isSymbolicLink());
   assert.equal(readFileSync(join(skills, 'approved'), 'utf8'), 'Guide');
   assert.ok(!existsSync(join(skills, 'unapproved')));
-  const provider = readJson(join(out, 'gateway.json')).providers.litellm;
+  assert.ok(!existsSync(join(out, 'gateway.json')), 'the gateway is the launch\'s, not the build\'s');
+  const provider = gatewayConfig(gateway).providers.litellm;
   assert.equal(provider.apiKey, '$TEST_KEY');
   assert.equal(provider.baseUrl, 'https://gateway.test/v1');
   assert.deepEqual(provider.models, [{ id: 'large' }, { id: 'small' }]);

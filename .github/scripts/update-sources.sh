@@ -3,7 +3,7 @@
 set -euo pipefail
 shopt -s nullglob
 
-for pins in profiles/*/npins harnesses/*/npins lib/npins lib/*/npins; do
+for pins in harnesses/*/npins lib/npins lib/*/npins; do
   [ -d "$pins" ] || continue
   nix run nixpkgs#npins -- --directory "$pins" update
 done

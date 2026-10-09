@@ -133,7 +133,7 @@ for (const schema of ['v1', 'v2'] as const) {
         },
       }));
       const out = join(root, 'out');
-      assert.equal(writeConfig(out, gateway, [description]).status, 0);
+      assert.equal(writeConfig(out, null, [description]).status, 0);
       const plain = readJson(join(out, 'opencode.json'));
       assert.ok(!(providerKey in plain));
       const paths = schema === 'v2' ? plain.skills : plain.skills.paths;
@@ -141,7 +141,15 @@ for (const schema of ['v1', 'v2'] as const) {
       assert.equal(readFileSync(join(paths[0], 'guide/SKILL.md'), 'utf8'), readFileSync(join(source, 'SKILL.md'), 'utf8'));
       const servers = schema === 'v2' ? plain.mcp.servers : plain.mcp;
       assert.equal(servers.remote.type, 'remote');
-      const config = readJson(join(out, 'gateway.json'));
+      // The gateway is added at launch, over the session config, into the cache.
+      const cache = join(root, 'cache');
+      const added = spawnSync(process.execPath, [join(src, 'gateway/config.ts'), `opencode-${schema}`, JSON.stringify(gateway),
+        cache, join(out, 'opencode.json')], { encoding: 'utf8' });
+      assert.equal(added.status, 0, added.stderr);
+      const written = added.stdout.trim();
+      assert.equal(dirname(written), join(cache, 'gateway'));
+      const config = readJson(written);
+      assert.deepEqual(config.skills, plain.skills);
       const provider = config[providerKey].litellm;
       assert.deepEqual(new Set(Object.keys(provider.models)), new Set(['large', 'small']));
       assert.equal(provider[settingsKey].baseURL, 'https://gateway.example/v1');
