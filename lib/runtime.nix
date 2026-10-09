@@ -20,18 +20,34 @@ let
   '';
   # The command line that runs one module, e.g. `script "plugin/read.ts"`.
   script = module: "${node} ${tree}/src/${module}";
+  # The built-in profile every launcher accepts by name.
+  vanilla = import ../profiles/vanilla/agent-distro.nix;
+  # What the resolver knows at build time (src/profile/resolve.ts): the
+  # launcher's own profile, which is `vanilla`'s too when it is not vanilla,
+  # and the nixpkgs a profile's `packages` are evaluated against.
+  info = { name, description ? "", gateway }: {
+    default = name;
+    builtins = [ { inherit name description gateway; } ]
+      ++ pkgs.lib.optional (name != vanilla.name) { inherit (vanilla) name description gateway; };
+    nixpkgs = "${pkgs.path}";
+  };
 in
 {
-  inherit node tree script;
+  inherit node tree script info;
   # One Agent Plugin, validated once into a harness-independent description
   # for any adapter that needs more than its directory. A fatal manifest
   # violation fails the build.
   readPlugin = plugin: pkgs.runCommand "agent-plugin.json" { } ''
     ${script "plugin/read.ts"} ${plugin} > "$out"
   '';
-  # The command a launcher runs, only when AGENT_DISTRO_PLUGINS is set, to
-  # bring the plugins named there into this launch. `args` names the adapter
-  # (`harness`) and the profile's plugins (`profile`, each with its
-  # `description`); see src/plugin/launch.ts.
-  launchPlugins = args: "${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON args)}";
+  # The command every launcher runs before its harness, printing shell to
+  # eval: the profile in effect, its gateway and packages, and the plugins of
+  # that profile and of AGENT_DISTRO_PLUGINS. `args` names the adapter
+  # (`harness`), the built-in profile's plugins (`profile`, each with its
+  # `description`), its `gateway` and `profileName`; see src/plugin/launch.ts.
+  launchPlugins = { profileName, gateway, ... }@args:
+    let
+      json = builtins.removeAttrs args [ "profileName" ] // { info = info { name = profileName; inherit gateway; }; };
+    in
+    "${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON json)}";
 }

@@ -28,6 +28,7 @@ let
   '';
   launchPlugins = (import ../../lib/runtime.nix pkgs).launchPlugins {
     harness = "codex";
+    inherit gateway profileName;
     codex = lib.getExe codex;
     marketplace = marketplaceName;
     profile = map (plugin: { description = "${readPlugin plugin}"; }) plugins;
@@ -37,6 +38,8 @@ writeShellApplication {
   name = "codex";
   runtimeInputs = [ jq ];
   derivationArgs.version = codex.version;
+  # `launched` is assigned by the launch's eval.
+  excludeShellChecks = [ "SC2154" ];
   text = builtins.readFile ./session-defaults.sh + lib.optionalString (plugins != [ ]) ''
     # The name stays fixed, but its store path changes between builds. Use the
     # native installer only when that path changes, preserving disabled plugins
@@ -59,11 +62,12 @@ writeShellApplication {
       done < "$marketplace/plugin-ids"
     fi
   '' + ''
-    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
-      # Per-launch -c overrides: AGENT_DISTRO_PLUGINS enabled, the plugins it replaces disabled.
-      overrides=$(${launchPlugins})
-      eval "set -- $overrides \"\$@\""
-    fi
+    # The profile in effect and its packages. Per-launch -c overrides: the
+    # plugins of a profile other than the built-in one and of
+    # AGENT_DISTRO_PLUGINS enabled, the built-in plugins they replace disabled.
+    launch=$(${launchPlugins})
+    eval "$launch"
+    eval "set -- $launched \"\$@\""
     exec ${lib.getExe codex} "$@"
   '';
 }

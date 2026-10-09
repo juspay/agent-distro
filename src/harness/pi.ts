@@ -5,9 +5,10 @@
  * Usage: node pi.ts write-config OUT ARGS_JSON
  *        node pi.ts merge-state --check|--merge AGENT_DIR FRAGMENT_JSON [GATEWAY_JSON]
  *
- * write-config translates plugins once, at build time. merge-state runs at
- * launch: ours replace ours, user entries stay untouched, and invalid JSON
- * aborts before any write. --check stages every write without replacing a file
+ * write-config translates plugins once, at build time; the gateway's
+ * GATEWAY_JSON is written at launch by src/gateway/config.ts with
+ * `gatewayConfig`. merge-state runs at launch: ours replace ours, user entries
+ * stay untouched, and invalid JSON aborts before any write. --check stages every write without replacing a file
  * and exits 2 when the directory cannot be written.
  *
  * AGENT_DISTRO_PLUGINS reaches Pi the same way: src/plugin/launch.ts uses
@@ -85,9 +86,7 @@ function claim(owners: Record<string, string>, description: Description, Failure
 }
 
 export function writeConfig(out: string, argsPath: string) {
-  const args: Inputs & { gateway: Gateway | null; descriptions: string[] } =
-    JSON.parse(readFileSync(argsPath, 'utf8'));
-  const { gateway } = args;
+  const args: Inputs & { descriptions: string[] } = JSON.parse(readFileSync(argsPath, 'utf8'));
   mkdirSync(out, { recursive: true });
   const skills: string[] = [];
   const servers: Servers = {};
@@ -101,21 +100,22 @@ export function writeConfig(out: string, argsPath: string) {
     Object.assign(servers, fragment.mcpServers);
   }
   writeFileSync(join(out, 'config.json'), JSON.stringify({ skills, mcpServers: servers }, null, 2));
-  if (gateway !== null) {
-    const config: GatewayConfig = {
-      providers: {
-        litellm: {
-          baseUrl: gateway.url.replace(/\/+$/, '') + '/v1',
-          api: 'openai-completions',
-          apiKey: '$' + gateway.keyEnv,
-          models: [...new Set(Object.values(gateway.models))].map((id) => ({ id })),
-        },
+}
+
+/** What merge-state applies for the profile's gateway; at launch, by gateway/config.ts. */
+export function gatewayConfig(gateway: Gateway): GatewayConfig {
+  return {
+    providers: {
+      litellm: {
+        baseUrl: gateway.url.replace(/\/+$/, '') + '/v1',
+        api: 'openai-completions',
+        apiKey: '$' + gateway.keyEnv,
+        models: [...new Set(Object.values(gateway.models))].map((id) => ({ id })),
       },
-      defaultProvider: 'litellm',
-      defaultModel: gateway.models.large,
-    };
-    writeFileSync(join(out, 'gateway.json'), JSON.stringify(config, null, 2));
-  }
+    },
+    defaultProvider: 'litellm',
+    defaultModel: gateway.models.large,
+  };
 }
 
 function readObject(path: string): JsonObject {
@@ -227,7 +227,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
   launch: ({ args, kept, replaced, plugins, cache }) => {
-    if (!plugins.length) return join(args.config, 'config.json');
+    if (!plugins.length && !replaced.length) return join(args.config, 'config.json');
     // Pi reads plugins only from its agent directory; without one they would
     // be dropped without a word.
     if (!process.env.PI_CODING_AGENT_DIR && !process.env.HOME) {

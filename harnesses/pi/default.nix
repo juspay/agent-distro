@@ -7,7 +7,6 @@ let
   runtime = import ../../lib/runtime.nix pkgs;
   config = runCommand "pi-config" { } ''
     ${runtime.script "harness/pi.ts"} write-config "$out" ${writeText "pi-args.json" (builtins.toJSON {
-      inherit gateway;
       bash = runtimeShell;
       env = "${coreutils}/bin/env";
       descriptions = map (plugin: "${runtime.readPlugin plugin}") plugins;
@@ -15,6 +14,7 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "pi";
+    inherit gateway profileName;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     config = "${config}";
@@ -24,21 +24,26 @@ in
 writeShellApplication {
   name = "pi";
   derivationArgs.version = pi.version;
+  # `launched` and `profile_gateway*` are assigned by the launch's eval.
+  excludeShellChecks = [ "SC2154" ];
   text = ''
-    fragment=${config}/config.json
-    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
-      # The profile's fragment, less the plugins AGENT_DISTRO_PLUGINS replaces,
-      # plus its own; this fails without a home to merge them into.
-      fragment=$(${launchPlugins})
-    fi
+    # The profile in effect and its packages, and its fragment, less the
+    # plugins that profile or AGENT_DISTRO_PLUGINS replaces, plus their own;
+    # loading plugins other than the built-in ones fails without a home to
+    # merge them into.
+    launch=$(${launchPlugins})
+    eval "$launch"
+    fragment=$launched
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
       agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.pi/agent}"
       gateway=()
-      ${lib.optionalString (gateway != null) ''
-        if [ "''${AI_GATEWAY:-1}" != "0" ]; then
-          gateway=(${config}/gateway.json)
-        fi
-      ''}
+      if [ -n "$profile_gateway" ] && [ "''${AI_GATEWAY:-1}" != "0" ]; then
+        # The gateway in effect as Pi's provider, with the models it serves
+        # cached beside it under the same name.
+        cache="''${XDG_CACHE_HOME:-''${HOME:-$agent_dir}/.cache}/agent-distro/pi"
+        base=$(${runtime.script "gateway/config.ts"} pi "$profile_gateway" "$cache")
+        gateway=("$base")
+      fi
       status=0
       ${runtime.script "harness/pi.ts"} merge-state --check "$agent_dir" "$fragment" "''${gateway[@]}" || status=$?
       if [ "$status" = 1 ]; then exit 1; fi
@@ -47,15 +52,13 @@ writeShellApplication {
         exit 1
       fi
       if [ "$status" = 0 ]; then
-        ${lib.optionalString (gateway != null) ''
-          if [ "''${AI_GATEWAY:-1}" != "0" ]; then
-            ${import ../../lib/gateway-key.nix { inherit gum gateway; }}
-            cached=$(${runtime.script "gateway/models.ts"} ${config}/gateway.json \
-              "''${XDG_CACHE_HOME:-''${HOME:-$agent_dir}/.cache}/agent-distro/pi/${builtins.hashString "sha256" (toString config)}/models.json" \
-              ${curl}/bin/curl ${lib.escapeShellArg gateway.keyEnv} ${./gateway-shape.json})
-            gateway=("$cached")
-          fi
-        ''}
+        if [ "''${#gateway[@]}" != 0 ]; then
+          ${import ../../lib/gateway-key.nix { inherit gum; }}
+          models=''${base##*/}
+          cached=$(${runtime.script "gateway/models.ts"} "$base" "$cache/''${models%.json}/models.json" \
+            ${curl}/bin/curl "$profile_gateway_key_env" ${./gateway-shape.json})
+          gateway=("$cached")
+        fi
         ${runtime.script "harness/pi.ts"} merge-state --merge "$agent_dir" "$fragment" "''${gateway[@]}"
       fi
     else

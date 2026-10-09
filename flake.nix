@@ -21,16 +21,15 @@
       packageSets = lib.genAttrs systems (system: import nixpkgs { inherit system; config.allowUnfree = true; });
       pkgsFor = system: packageSets.${system};
 
-      # Discovered, not listed: adding a directory is the whole registration
-      # step, which is what keeps one distribution's plugins, gateway and name
-      # out of this file.
+      # The built-in profiles: `vanilla` alone. Any other profile is an
+      # `agent-distro.nix` in its own repository, read at launch.
       profiles = lib.mapAttrs
         (name: _:
-          let profile = import (./profiles + "/${name}/profile.nix"); in
+          let profile = import (./profiles + "/${name}/agent-distro.nix"); in
           # AI_PROFILE, the Codex marketplace and the picker all key off the
-            # directory name, so a mismatch would surface far from its cause.
+          # directory name, so a mismatch would surface far from its cause.
           if profile.name == name then import ./lib/validate-profile.nix profile
-          else throw "profiles/${name}/profile.nix declares name \"${profile.name}\"; it must match its directory.")
+          else throw "profiles/${name}/agent-distro.nix declares name \"${profile.name}\"; it must match its directory.")
         (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./profiles));
 
       registry = import ./profiles/registry.nix;
@@ -56,13 +55,7 @@
 
       bundles = lib.mapAttrs (_: lib.mapAttrs (_: ls: ls.bundle)) launchers;
 
-      pickers = lib.genAttrs systems (system:
-        (pkgsFor system).callPackage ./lib/picker.nix {
-          inherit default;
-          profiles = lib.mapAttrs
-            (name: profile: { inherit profile; launchers = launchers.${system}.${name}; })
-            profiles;
-        });
+      pickers = lib.genAttrs systems (system: launchers.${system}.${default}.picker);
     in
     {
       # The picker stays the runnable default; profile bundles install every harness command.
@@ -95,7 +88,7 @@
       inherit profiles;
       templates.default = {
         path = ./templates/default;
-        description = "A coding-agent distribution with one profile";
+        description = "A coding-agent distribution from one agent-distro.nix";
       };
     };
 }

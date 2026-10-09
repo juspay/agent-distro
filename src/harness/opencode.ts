@@ -3,6 +3,9 @@
  *
  * Usage: node opencode.ts OUT ARGS_JSON
  *
+ * The profile's gateway is added at launch, by src/gateway/config.ts with
+ * `withGateway`, since the profile in effect is only known then.
+ *
  * One adapter serves both config schemas: `v1` for OpenCode and `v2` for
  * OpenCode v2, which differ only in where skills, servers and the provider go.
  * At launch, src/plugin/launch.ts uses `adapter` to add AGENT_DISTRO_PLUGINS to
@@ -15,7 +18,7 @@ import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
 import type { Gateway } from '../gateway/models.ts';
 
-type Args = { schema: string; bash: string; env: string; gateway: Gateway | null; descriptions: string[] };
+type Args = { schema: string; bash: string; env: string; descriptions: string[] };
 type Server = { type: 'remote'; url: string; headers: Record<string, string> } | { type: 'local'; command: string[] };
 type Fragment = { skills: string | null; servers: Record<string, Server> };
 type Inputs = { bash: string; env: string };
@@ -63,7 +66,7 @@ function claim(owners: Record<string, string>, description: Description) {
 
 function main(out: string, argsPath: string) {
   const args: Args = JSON.parse(readFileSync(argsPath, 'utf8'));
-  const { schema, gateway } = args;
+  const { schema } = args;
   if (schema !== 'v1' && schema !== 'v2') throw new Error(`Unknown OpenCode schema: ${schema}`);
   const owners: Record<string, string> = {};
   mkdirSync(join(out, 'bin'), { recursive: true });
@@ -89,28 +92,31 @@ function main(out: string, argsPath: string) {
     Object.assign(servers, fragment.servers);
   }
   writeFileSync(join(out, 'opencode.json'), JSON.stringify(config, null, 2));
-  if (gateway !== null) {
-    const models = Object.fromEntries(Object.values(gateway.models).map((model) => [model, { name: model }]));
-    const url = gateway.url.replace(/\/+$/, '') + '/v1';
-    if (schema === 'v2') {
-      config.providers = {
-        litellm: {
-          name: 'LiteLLM', models, env: [gateway.keyEnv],
-          package: '@opencode/ai/providers/openai-compatible', settings: { baseURL: url },
-        },
-      };
-    } else {
-      config.provider = {
-        litellm: {
-          name: 'LiteLLM', models, npm: '@ai-sdk/openai-compatible',
-          options: { baseURL: url, apiKey: '{env:' + gateway.keyEnv + '}' },
-        },
-      };
-      config.small_model = 'litellm/' + gateway.models.small;
-    }
-    config.model = 'litellm/' + gateway.models.large;
-    writeFileSync(join(out, 'gateway.json'), JSON.stringify(config, null, 2));
+}
+
+/** `config` with the profile's gateway as its provider and default models; at launch, by gateway/config.ts. */
+export function withGateway(config: Record<string, unknown>, schema: string, gateway: Gateway): Record<string, unknown> {
+  const models = Object.fromEntries(Object.values(gateway.models).map((model) => [model, { name: model }]));
+  const url = gateway.url.replace(/\/+$/, '') + '/v1';
+  const result = { ...config };
+  if (schema === 'v2') {
+    result.providers = {
+      litellm: {
+        name: 'LiteLLM', models, env: [gateway.keyEnv],
+        package: '@opencode/ai/providers/openai-compatible', settings: { baseURL: url },
+      },
+    };
+  } else {
+    result.provider = {
+      litellm: {
+        name: 'LiteLLM', models, npm: '@ai-sdk/openai-compatible',
+        options: { baseURL: url, apiKey: '{env:' + gateway.keyEnv + '}' },
+      },
+    };
+    result.small_model = 'litellm/' + gateway.models.small;
   }
+  result.model = 'litellm/' + gateway.models.large;
+  return result;
 }
 
 type LaunchArgs = Inputs & { schema: string; name: string; config: string; profile: ProfileEntry[] };
@@ -125,7 +131,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
   launch: ({ args, kept, replaced, plugins, rest, cache }) => {
-    if (!plugins.length) return rest[0];
+    if (!plugins.length && !replaced.length) return rest[0];
     const config = JSON.parse(readFileSync(rest[0], 'utf8'));
     const { skills, servers } = sections(config, args.schema);
     const owners: Record<string, string> = {};

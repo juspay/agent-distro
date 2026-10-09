@@ -5,8 +5,10 @@ let
   # the `cache` it passed is handed straight back under lib.cache. `mkFlake`
   # points back at this builder so the returned distribution can build further
   # flake outputs the same way.
-  build = { profile, systems ? import ./systems.nix, cache ? import ./cache.nix }:
+  # `profile` is an `agent-distro.nix`, or the attribute set one holds.
+  build = { profile, systems ? import ./systems.nix, cache ? import ./cache.nix }@args:
     let
+      profile = if builtins.isAttrs args.profile then args.profile else import args.profile;
       checked = import ./validate-profile.nix profile;
       launchers = nixpkgs.lib.genAttrs systems (system:
         mkLaunchers { pkgs = import nixpkgs { inherit system; config.allowUnfree = true; }; inherit profile; });

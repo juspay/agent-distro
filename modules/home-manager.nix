@@ -7,20 +7,31 @@
 let
   cfg = config.services.agent-distro;
   available = bundles.${pkgs.stdenv.hostPlatform.system};
-  bundle = available.${cfg.profile} or (throw
-    "Unknown agent-distro profile \"${cfg.profile}\"; valid names: ${lib.concatStringsSep ", " (builtins.attrNames available)}.");
+  # A built-in name selects its bundle; a reference (an absolute path or a
+  # flake reference, src/profile/resolve.ts) installs the default bundle and
+  # is read at launch.
+  reference = !(available ? ${cfg.profile});
+  bundleName =
+    if !reference then cfg.profile
+    else if lib.hasPrefix "/" cfg.profile || lib.hasInfix ":" cfg.profile then defaultProfile
+    else throw "Unknown agent-distro profile \"${cfg.profile}\"; give a built-in name (${lib.concatStringsSep ", " (builtins.attrNames available)}), an absolute path or a flake reference such as github:juspay/skills.";
+  bundle = available.${bundleName};
   schedule = import ../lib/schedule.nix lib;
   stateDirectory = import ../lib/state-directory.nix {
     inherit (cfg) flake profile;
     xdgStateHome = config.xdg.stateHome;
   };
-  shims = import ../lib/mk-shims.nix { inherit pkgs bundle stateDirectory; };
+  shims = import ../lib/mk-shims.nix {
+    inherit pkgs bundle stateDirectory;
+    profile = if reference then cfg.profile else null;
+  };
   nix = lib.getExe (if config.nix.package != null then config.nix.package else pkgs.nix);
   updater = import ../lib/mk-updater.nix {
     inherit pkgs bundle nix;
     history = "${config.xdg.stateHome}/agent-distro/history.log";
     inherit stateDirectory;
-    inherit (cfg) flake profile substituters;
+    inherit (cfg) flake substituters;
+    profile = bundleName;
   };
   # Discover commands from the bundle, keeping shims and collision checks together.
   names = bundle.commands;
@@ -34,7 +45,12 @@ in
     profile = lib.mkOption {
       type = lib.types.str;
       default = defaultProfile;
-      description = "Profile bundle to install and update.";
+      description = ''
+        The profile: a built-in name selects its bundle; a reference, such as
+        github:juspay/skills or an absolute path to a repository with an
+        agent-distro.nix, installs the ${defaultProfile} bundle and is the
+        AI_PROFILE fallback every command reads at launch.
+      '';
     };
     flake = lib.mkOption ({
       type = lib.types.str;

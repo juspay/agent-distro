@@ -2,10 +2,18 @@
 # and the bundle, which joins the commands and that picker as `bin/agent-distro`.
 # The bundle describes its profile: `share/agent-distro/profile.json` names it
 # and `share/agent-distro/versions` lists its harnesses (src/listing.ts).
+#
+# A profile here is built in: its plugins are paths at build time, never the
+# flake references an `agent-distro.nix` read at launch may also name.
 { pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }) }:
 let
   inherit (pkgs) lib;
-  inherit (profile) plugins;
+  plugins = map
+    (plugin:
+      if builtins.isString plugin && !(lib.hasPrefix "/" plugin) then
+        throw "Profile \"${profile.name}\" names plugin \"${plugin}\": a flake reference is read at launch, not built in; pass a flake input's path instead."
+      else plugin)
+    profile.plugins;
   gateway = profile.gateway or null;
 
   # What a plugin's MCP servers name by bare command. They reach every harness
@@ -32,12 +40,9 @@ let
     profileName = profile.name;
   }));
 
-  # The profile's own chooser, defaulting to it; the bundle carries it so a
-  # fetch of the bundle refreshes the picker along with the harnesses.
-  picker = pkgs.callPackage ./picker.nix {
-    default = profile.name;
-    profiles.${profile.name} = { inherit profile; launchers = commands; };
-  };
+  # The profile's own chooser; the bundle carries it so a fetch of the
+  # bundle refreshes the picker along with the harnesses.
+  picker = pkgs.callPackage ./picker.nix { inherit profile; launchers = commands; };
 
 in
 commands // {

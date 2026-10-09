@@ -13,11 +13,9 @@ let
       description = "${runtime.readPlugin plugin}";
     })}
   '';
-  pluginFlags = lib.concatMapStringsSep " "
-    (plugin: "--plugin-dir ${lib.escapeShellArg (toString (adaptPlugin plugin))}")
-    plugins;
   launchPlugins = runtime.launchPlugins {
     harness = "claude";
+    inherit gateway profileName;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${adaptPlugin plugin}"; }) plugins;
@@ -26,13 +24,14 @@ in
 writeShellApplication {
   name = "claude";
   derivationArgs.version = claude.version;
+  # `launched` is assigned by the launch's eval.
+  excludeShellChecks = [ "SC2154" ];
   text = ''
-    if [ -n "''${AGENT_DISTRO_PLUGINS:-}" ]; then
-      # The profile's plugin dirs, less those AGENT_DISTRO_PLUGINS replaces, then its own.
-      plugin_dirs=$(${launchPlugins})
-      eval "set -- $plugin_dirs \"\$@\""
-      exec ${lib.getExe claude} "$@"
-    fi
-    exec ${lib.getExe claude} ${pluginFlags} "$@"
+    # The profile in effect and its packages, and its plugin dirs, less those
+    # AGENT_DISTRO_PLUGINS replaces, then the variable's own.
+    launch=$(${launchPlugins})
+    eval "$launch"
+    eval "set -- $launched \"\$@\""
+    exec ${lib.getExe claude} "$@"
   '';
 }
