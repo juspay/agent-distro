@@ -57,19 +57,26 @@
       bundles = lib.mapAttrs (_: lib.mapAttrs (_: ls: ls.bundle)) launchers;
 
       pickers = lib.genAttrs systems (system: launchers.${system}.${default}.picker);
+      # The launcher's own no-compile policy, run ahead of time for a profile repository's CI.
+      checkers = lib.genAttrs systems (system:
+        let pkgs = pkgsFor system; in
+        pkgs.callPackage ./lib/mk-check-profile.nix {
+          info = (import ./lib/runtime.nix pkgs).info profiles.${default} nixpkgs;
+        });
     in
     {
       # The picker stays the runnable default; profile bundles install every harness command.
-      packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; });
+      packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; check-profile = checkers.${system}; });
       homeManagerModules.default = import ./modules/home-manager.nix {
         inherit bundles;
         defaultProfile = default;
         defaultFlake = "github:juspay/agent-distro";
         cache = import ./lib/cache.nix;
       };
-      apps = lib.mapAttrs
-        (_: picker: { default = { type = "app"; program = lib.getExe picker; }; })
-        pickers;
+      apps = lib.genAttrs systems (system: {
+        default = { type = "app"; program = lib.getExe pickers.${system}; };
+        check-profile = { type = "app"; program = lib.getExe checkers.${system}; };
+      });
 
       # Upstream's own packages, for the daily update to report: a harness
       # version is a property of the lock, not of any profile.

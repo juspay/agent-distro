@@ -186,7 +186,7 @@ const NIX_NEEDS = [
  * enabled whatever the user's configuration says: this process's own, or for
  * an evaluation (`scrubbed`) only what nix needs.
  */
-function nixEnvironment(scrubbed = false): NodeJS.ProcessEnv {
+export function nixEnvironment(scrubbed = false): NodeJS.ProcessEnv {
   if (!scrubbed) {
     const config = process.env.NIX_CONFIG;
     return { ...process.env, NIX_CONFIG: config ? `${config}\n${FEATURES}` : FEATURES };
@@ -277,7 +277,7 @@ const EVALUATE = join(import.meta.dirname, 'evaluate.nix');
  * profile with packages evaluates them to null: only then is nixpkgs fetched
  * and the file evaluated again.
  */
-function evaluate(file: string, info: Info, cache: string, what: string): Evaluated {
+export function evaluate(file: string, info: Info, cache: string, what: string): Evaluated {
   const run = (nixpkgs: string | null): unknown => JSON.parse(nix(['eval', '--json', '--impure',
     '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
     ...[dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])].flatMap((path) => ['-I', path]),

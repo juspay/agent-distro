@@ -437,6 +437,17 @@ or anywhere, starts its agents with that repository's profile.
 [^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. Its last store path is kept under `agent-distro/references/` for launches without network. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache; launchers name that nixpkgs by a locked reference and fetch its source only for a profile with `packages`.
 [^never-compiles]: Under the same policy as the updater: what a build would compile rather than fetch stops the launch.
 
+### Checking a profile's packages
+
+A profile's `packages` must be in the binary cache on every platform its users run, or the launch stops. Check them ahead of time:
+
+```sh
+nix run github:juspay/agent-distro#check-profile                       # ./agent-distro.nix
+nix run github:juspay/agent-distro#check-profile -- path/to/agent-distro.nix
+```
+
+It runs the launcher's own policy, against agent-distro's nixpkgs and caches, and prints one line per package; it exits 1 if any is not cached. It checks for the machine it runs on, so run it in CI once per platform.
+
 | Profile | What it is |
 | --- | --- |
 | `vanilla` | Built in: upstream harnesses with your own provider; no plugins, no gateway |

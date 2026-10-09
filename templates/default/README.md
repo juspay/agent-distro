@@ -18,6 +18,8 @@ AI_PROFILE=github:<you>/my-distribution agent-distro claude
 ```
 
 A terminal opened in this repository starts its agents with this profile.
+Check that its `packages` are in the binary cache, for the machine you run it on:
+`nix run github:juspay/agent-distro#check-profile`.
 
 ## Or build it into a distribution of its own
 

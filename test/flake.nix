@@ -123,6 +123,13 @@
             ${runtime.node} ${./check-profile.ts} ${runtime.tree}/src
             touch "$out"
           '';
+          # `check-profile` without a VM: one line per package, every package
+          # reported, and the exit status, with a fake nix.
+          check-check-profile = pkgs.runCommand "check-check-profile-check" { } ''
+            export HOME="$TMPDIR"
+            ${runtime.node} ${./check-check-profile.ts} ${runtime.tree}/src
+            touch "$out"
+          '';
           # Profiles read at launch, in a VM: paths and git+file: references,
           # discovery from a nested directory, precedence, the refusal of a
           # package the binary cache lacks, and a copy of the Juspay profile's
