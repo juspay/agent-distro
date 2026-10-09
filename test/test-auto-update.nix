@@ -228,10 +228,15 @@ in
         check_history()
         if activation == "${switchedProfile}":
             # The reference is every command's AI_PROFILE fallback; the user's own wins.
-            listed = machine.succeed(user("agent-distro --list --json"))
+            # The shims are the harness commands only, so trace one.
+            for name in ${builtins.toJSON commands}:
+                traced = machine.succeed(user("unset XDG_STATE_HOME; AI_GATEWAY=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
+                assert "export AI_PROFILE=${referencedProfile}" in traced, traced
+                traced = machine.succeed(user("unset XDG_STATE_HOME; AI_PROFILE=vanilla AI_GATEWAY=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
+                assert "export AI_PROFILE" not in traced, traced
+            # And the launchers take it as the profile in effect.
+            listed = machine.succeed(user("AI_PROFILE=${referencedProfile} ${agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla}/bin/agent-distro --list --json"))
             assert '"name":"referenced"' in listed and '"source":"variable"' in listed, listed
-            listed = machine.succeed(user("AI_PROFILE=vanilla agent-distro --list --json"))
-            assert '"source":"variable","origin":"vanilla"' in listed, listed
 
     # A greeting and a native binary before the shim must still give a precise warning.
     machine.succeed(user("printf 'export PATH=/run/current-system/sw/bin:$PATH\\n' > ~/.bash_profile"))
