@@ -10,9 +10,8 @@
   plugins = [ ./. ];
   # Commands your plugins' MCP servers name, put on PATH for every harness:
   # packages = pkgs: [ pkgs.mcp-nixos ];
-  gateway = null;
-  # To connect OMP, OpenCode and Pi to a LiteLLM gateway, replace null with:
-  # {
+  # A LiteLLM gateway for OMP, OpenCode and Pi; without one, each uses its own provider:
+  # gateway = {
   #   url = "https://llm.example.org";
   #   keyEnv = "LITELLM_API_KEY";
   #   models = { large = "large"; small = "fast"; };

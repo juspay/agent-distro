@@ -12,7 +12,8 @@ system=$(nix eval --impure --raw --expr builtins.currentSystem)
 nix build ".#packages.$system.default" --out-link "$work/result"
 AI_HARNESS=omp nix run . -- --version
 # The same agent-distro.nix, read at launch by agent-distro itself: from the
-# repository, and by path from anywhere.
+# repository, and by path from anywhere. It has no `gateway`, so both the
+# build above and this read cover a profile without one.
 listed=$("$work/result/bin/agent-distro" --list --json)
 grep -qF '"source":"repository"' <<<"$listed"
 grep -qF '"name":"my-distribution"' <<<"$listed"

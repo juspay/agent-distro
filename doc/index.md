@@ -405,7 +405,7 @@ A profile is an `agent-distro.nix` in a git repository:
   description = "Ekala's Nix development skills";
   plugins = [ ./. ];              # Agent Plugins directories: a path relative to this file,
                                   # or a flake reference string such as "github:juspay/kolu?dir=agent-plugin"
-  gateway = null;                 # or { url; keyEnv; models = { large; small; }; keyHint; }
+  gateway = { url; keyEnv; models = { large; small; }; keyHint; };  # optional: a LiteLLM gateway
   packages = pkgs: [ ];           # optional: commands the plugins' MCP servers name
 }
 ```
