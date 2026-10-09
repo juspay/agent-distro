@@ -1,5 +1,5 @@
 # OMP owns LiteLLM initialization and portable extension loading.
-{ pkgs, plugins, gateway, package, profileName }:
+{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
 let
   inherit (pkgs) lib writeShellApplication formats gum;
   omp = package;
@@ -17,7 +17,7 @@ let
   };
   launchPlugins = runtime.launchPlugins {
     harness = "omp";
-    inherit gateway profileName;
+    inherit gateway profileName nixpkgs;
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${plugin}"; }) plugins;
   };
 

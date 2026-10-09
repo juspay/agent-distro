@@ -1,6 +1,6 @@
 # Codex owns marketplace registration, installation, and its persistent state.
 # Portable plugin contents and provider policy stay outside this adapter.
-{ pkgs, plugins, gateway, package, profileName }:
+{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
 let
   inherit (pkgs) lib writeShellApplication runCommand jq;
   codex = package;
@@ -28,7 +28,7 @@ let
   '';
   launchPlugins = (import ../../lib/runtime.nix pkgs).launchPlugins {
     harness = "codex";
-    inherit gateway profileName;
+    inherit gateway profileName nixpkgs;
     codex = lib.getExe codex;
     marketplace = marketplaceName;
     profile = map (plugin: { description = "${readPlugin plugin}"; }) plugins;

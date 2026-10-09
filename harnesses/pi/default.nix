@@ -1,5 +1,5 @@
 # Pi's subcommands require resources in settings, not prepended CLI flags.
-{ pkgs, plugins, gateway, package, profileName }:
+{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
   pi = package;
@@ -14,7 +14,7 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "pi";
-    inherit gateway profileName;
+    inherit gateway profileName nixpkgs;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     config = "${config}";

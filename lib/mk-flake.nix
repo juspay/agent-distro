@@ -1,6 +1,6 @@
 { nixpkgs }:
 let
-  mkLaunchers = import ./mk-launchers.nix;
+  mkLaunchers = args: import ./mk-launchers.nix ({ inherit nixpkgs; } // args);
   # A third-party distribution: same library shape as flake.nix exposes, and
   # the `cache` it passed is handed straight back under lib.cache. `mkFlake`
   # points back at this builder so the returned distribution can build further

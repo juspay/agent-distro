@@ -101,6 +101,20 @@
                 ${default}=${agent-distro.packages.${system}.${default}}
               touch "$out"
             '';
+          # Launchers name nixpkgs by a locked reference, fetched only for a
+          # profile with packages (lib/nixpkgs-reference.nix): no bundle holds
+          # its source.
+          vanilla-closure = pkgs.runCommand "vanilla-closure-check"
+            { closure = pkgs.closureInfo { rootPaths = [ agent-distro.packages.${system}.vanilla ]; }; } ''
+            source=${lib.escapeShellArg (builtins.unsafeDiscardStringContext nixpkgs.outPath)}
+            if grep -qxF "$source" "$closure/store-paths"; then
+              echo "the vanilla bundle's closure holds the nixpkgs source $source" >&2
+              exit 1
+            fi
+            # The reference instead.
+            grep -q '"nixpkgs":"github:NixOS/nixpkgs/' ${agent-distro.packages.${system}.default.passthru.info}
+            touch "$out"
+          '';
           # The profile in effect without a VM: discovery, precedence,
           # references, the evaluation cache and the no-compile policy, with a
           # fake nix.

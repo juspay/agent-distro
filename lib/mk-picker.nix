@@ -1,5 +1,5 @@
 # The documented export of lib/picker.nix: a callPackage adapter so any
 # consumer can build the picker over one profile's launchers from a plain
-# import, not only through flake.nix.
-{ pkgs, profile, launchers }:
-pkgs.callPackage ./picker.nix { inherit profile launchers; }
+# import, not only through flake.nix. `nixpkgs` is as lib/mk-launchers.nix's.
+{ pkgs, profile, launchers, nixpkgs ? null }:
+pkgs.callPackage ./picker.nix { inherit profile launchers; nixpkgsReference = import ./nixpkgs-reference.nix pkgs nixpkgs; }

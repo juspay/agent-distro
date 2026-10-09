@@ -1,6 +1,6 @@
 # A session config composes with the user's global and project settings.
 # OpenCode v2 reuses this adapter with its own schema, shape and session setup.
-{ pkgs, plugins, gateway, package, profileName, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
+{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
   opencode = package;
@@ -17,7 +17,7 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "opencode";
-    inherit schema name gateway profileName;
+    inherit schema name gateway profileName nixpkgs;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     config = "${config}";

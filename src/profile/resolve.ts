@@ -18,6 +18,15 @@
  * since neither is pinned by the file: a reference follows its branch (Nix's
  * tarball TTL bounds the cost), and a package that is gone is fetched again,
  * from the binary cache only, as the updater does.
+ *
+ * A repository's Nix is untrusted: opening a terminal in a clone evaluates
+ * it. Nix evaluates it restricted (no network, no files beyond its own
+ * directory, nixpkgs and evaluate.nix) and with only the variables nix itself
+ * needs, so it can neither read the user's secrets nor send them anywhere.
+ *
+ * Each reference's last store path is remembered under
+ * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/references/`, so a launch
+ * without network uses what is already in the store, and says so.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -44,8 +53,14 @@ export type Info = {
   /** The launcher's own profile: the one in effect when nothing chooses another. */
   default: string;
   builtins: Builtin[];
-  /** The nixpkgs `packages` are evaluated against. */
+  /**
+   * The nixpkgs `packages` are evaluated against: a locked flake reference,
+   * fetched only for a profile with `packages`, or a store path the launcher
+   * holds.
+   */
   nixpkgs: string;
+  /** The system `packages` are evaluated for. */
+  system: string;
 };
 
 /** Which profile, and from where: `origin` is the reference, the file found, or the built-in name. */
@@ -67,13 +82,15 @@ export type Resolved = {
   paths: string[];
 };
 
+type Package = { name: string; drvPath: string; out: string; bin: string };
+
 /** A cached evaluation of one file: references unresolved, packages unbuilt. */
 type Evaluated = {
   name: string;
   description: string;
   plugins: string[];
   gateway: Gateway | null;
-  packages: { name: string; drvPath: string; out: string; bin: string }[];
+  packages: Package[];
 };
 
 const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
@@ -105,10 +122,13 @@ export function isResolved(value: unknown): value is Resolved {
     && isStrings(value.plugins) && gatewayProblem(value.gateway) === null && isStrings(value.paths);
 }
 
-function isEvaluated(value: unknown): value is Evaluated {
+const isPackages = (value: unknown): value is Package[] => Array.isArray(value)
+  && value.every((p) => isObject(p) && isString(p.name) && isString(p.drvPath) && isString(p.out) && isString(p.bin));
+
+/** An evaluation; `packages` is null when the profile has some and nixpkgs was not given. */
+function isEvaluated(value: unknown, packages: (value: unknown) => boolean = isPackages): value is Evaluated {
   return isObject(value) && isName(value.name) && isString(value.description) && isStrings(value.plugins)
-    && gatewayProblem(value.gateway) === null && Array.isArray(value.packages)
-    && value.packages.every((p) => isObject(p) && isString(p.name) && isString(p.drvPath) && isString(p.out) && isString(p.bin));
+    && gatewayProblem(value.gateway) === null && packages(value.packages);
 }
 
 /**
@@ -169,16 +189,36 @@ export function label({ source, origin }: Selection): string {
   return origin;
 }
 
-/** Nix with the commands the resolver uses, whatever the user's configuration enables. */
-function nixEnvironment(env: NodeJS.ProcessEnv) {
-  const features = 'extra-experimental-features = nix-command flakes';
-  // wouldCompile runs nix with this process's environment.
-  process.env.NIX_CONFIG = env.NIX_CONFIG ? `${env.NIX_CONFIG}\n${features}` : features;
+const FEATURES = 'extra-experimental-features = nix-command flakes';
+
+/** What nix itself needs from the environment: all an evaluation of a profile sees. */
+const NIX_NEEDS = [
+  'PATH', 'HOME', 'USER', 'TMPDIR', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_CONFIG_DIRS', 'XDG_DATA_HOME',
+  'XDG_STATE_HOME', 'NIX_REMOTE', 'NIX_CONF_DIR', 'NIX_USER_CONF_FILES', 'NIX_STORE_DIR', 'NIX_STATE_DIR',
+  'NIX_DAEMON_SOCKET_PATH', 'NIX_SSL_CERT_FILE', 'SSL_CERT_FILE',
+];
+
+/**
+ * The environment one nix command runs with, the commands the resolver uses
+ * enabled whatever the user's configuration says: this process's own, or for
+ * an evaluation (`scrubbed`) only what nix needs.
+ */
+function nixEnvironment(scrubbed = false): NodeJS.ProcessEnv {
+  if (!scrubbed) {
+    const config = process.env.NIX_CONFIG;
+    return { ...process.env, NIX_CONFIG: config ? `${config}\n${FEATURES}` : FEATURES };
+  }
+  // Not even the user's NIX_CONFIG, which can carry access tokens.
+  const needed = NIX_NEEDS.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]);
+  return { ...Object.fromEntries(needed), NIX_CONFIG: FEATURES };
 }
 
+/** `value` as a Nix expression: JSON in a Nix string, `$` escaped against interpolation. */
+const nixJSON = (value: unknown) => `builtins.fromJSON ${JSON.stringify(JSON.stringify(value)).replaceAll('$', '\\$')}`;
+
 /** Run nix for its stdout; a failure is a LaunchError carrying nix's own message. */
-function nix(args: string[], what: string): string {
-  const result = spawnSync('nix', args, { encoding: 'utf8', maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'] });
+function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironment()): string {
+  const result = spawnSync('nix', args, { encoding: 'utf8', maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'], env });
   if (result.error) {
     const missing = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
     throw new LaunchError(`${what}: ${missing ? 'nix is not on PATH' : result.error.message}`);
@@ -205,22 +245,66 @@ export function prefetch(reference: string, what: string): string {
   return isString(dir) && dir ? join(storePath, dir) : storePath;
 }
 
+/**
+ * `prefetch`, remembering the store path under the cache; when nix cannot
+ * fetch (say, offline past the tarball TTL), the last one, if still in the
+ * store, noted on stderr.
+ */
+function fetched(reference: string, what: string, cache: string): string {
+  const memory = join(cache, 'references', sha256(reference));
+  try {
+    const path = prefetch(reference, what);
+    writeAtomic(memory, path + '\n');
+    return path;
+  } catch (error) {
+    if (!(error instanceof LaunchError)) throw error;
+    let last = '';
+    try {
+      last = readFileSync(memory, 'utf8').trim();
+    } catch {
+      // Never fetched: nothing to fall back to.
+    }
+    if (!isAbsolute(last) || !existsSync(last)) throw error;
+    process.stderr.write(`agent-distro: ${what}: cannot fetch ${printable(reference)}; using ${last}, from the last launch that could\n`);
+    return last;
+  }
+}
+
 const EVALUATE = join(import.meta.dirname, 'evaluate.nix');
 
-function evaluate(file: string, info: Info, what: string): Evaluated {
-  process.env.AGENT_DISTRO_EVALUATE = JSON.stringify({ file, nixpkgs: info.nixpkgs });
-  const text = nix(['eval', '--json', '--impure', '--expr',
-    `import ${JSON.stringify(EVALUATE)} (builtins.fromJSON (builtins.getEnv "AGENT_DISTRO_EVALUATE"))`],
-  `${what}: cannot evaluate ${file}`);
-  delete process.env.AGENT_DISTRO_EVALUATE;
+/**
+ * Evaluate `file`, without network or the user's environment (restrict-eval
+ * also empties getEnv), and reading nothing beyond its directory,
+ * evaluate.nix and `nixpkgs` (null: a profile with packages evaluates them to
+ * null). --impure is only for reading the checkout in place, outside the
+ * store; restrict-eval bounds it.
+ */
+function evaluate(file: string, info: Info, nixpkgs: string | null, what: string): unknown {
+  const allowed = [dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])];
+  const text = nix(['eval', '--json', '--impure', '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '',
+    '--option', 'nix-path', '', ...allowed.flatMap((path) => ['-I', path]), '--expr',
+    `import ${JSON.stringify(EVALUATE)} (${nixJSON({ file, nixpkgs, system: info.system })})`],
+  `${what}: cannot evaluate ${file}`, nixEnvironment(true));
   const value: unknown = JSON.parse(text);
   if (isObject(value)) {
     if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
     const problem = gatewayProblem(value.gateway);
     if (problem) throw new LaunchError(`${what}: ${file}: \`gateway\` ${problem}`);
   }
-  if (!isEvaluated(value)) throw new LaunchError(`${what}: ${file} is not a profile`);
+  if (!isEvaluated(value, (packages) => packages === null || isPackages(packages))) {
+    throw new LaunchError(`${what}: ${file} is not a profile`);
+  }
   return value;
+}
+
+/** Evaluate `file`, fetching nixpkgs and evaluating again only when it has packages. */
+function evaluateWithPackages(file: string, info: Info, cache: string, what: string): Evaluated {
+  const value = evaluate(file, info, null, what) as Evaluated | { packages: null };
+  if (value.packages !== null) return value as Evaluated;
+  const nixpkgs = isAbsolute(info.nixpkgs) ? info.nixpkgs : fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
+  const evaluated = evaluate(file, info, nixpkgs, what);
+  if (!isEvaluated(evaluated)) throw new LaunchError(`${what}: ${file} is not a profile`);
+  return evaluated;
 }
 
 /**
@@ -230,7 +314,9 @@ function evaluate(file: string, info: Info, what: string): Evaluated {
  */
 function evaluated(file: string, info: Info, cache: string, what: string, again: boolean): Evaluated {
   const profiles = join(cache, 'profiles');
-  const key = sha256(JSON.stringify({ file, content: sha256(readFileSync(file)), runtime: import.meta.dirname, nixpkgs: info.nixpkgs }));
+  const key = sha256(JSON.stringify({
+    file, content: sha256(readFileSync(file)), runtime: import.meta.dirname, nixpkgs: info.nixpkgs, system: info.system,
+  }));
   const path = join(profiles, key, 'profile.json');
   if (!again && existsSync(path)) {
     try {
@@ -244,7 +330,7 @@ function evaluated(file: string, info: Info, cache: string, what: string, again:
       if (!(error instanceof SyntaxError)) throw error;
     }
   }
-  const value = evaluate(file, info, what);
+  const value = evaluateWithPackages(file, info, cache, what);
   writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
   sweep(profiles, (name) => name !== key);
   return value;
@@ -255,7 +341,7 @@ function realise(profile: Evaluated, what: string): string[] {
   for (const { name, drvPath, out } of profile.packages) {
     if (existsSync(out)) continue;
     const target = `${drvPath}^*`;
-    const plan = wouldCompile('nix', target, []);
+    const plan = wouldCompile('nix', target, [], nixEnvironment());
     if ('unknown' in plan) {
       throw new LaunchError(`${what}: cannot tell whether package ${name} is in the binary cache (${plan.unknown}); `
         + 'agent-distro never compiles');
@@ -285,16 +371,15 @@ export function resolveProfile(info: Info, selection: Selection, env: NodeJS.Pro
   }
   const { source, origin } = selection;
   if ('builtin' in kind) return { ...kind.builtin, source, origin, builtin: true, plugins: [], paths: [] };
-  nixEnvironment(env);
-  const file = fileAt('path' in kind ? kind.path : prefetch(kind.flake, what), what);
   const cache = cacheRoot(env, what);
+  const file = fileAt('path' in kind ? kind.path : fetched(kind.flake, what, cache), what);
   let profile = evaluated(file, info, cache, what, false);
   // A package's derivation can be collected with its output; evaluate afresh to get it back.
   if (profile.packages.some((p) => !existsSync(p.out) && !existsSync(p.drvPath))) {
     profile = evaluated(file, info, cache, what, true);
   }
   const paths = realise(profile, what);
-  const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : prefetch(entry, what)));
+  const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, what, cache)));
   return {
     name: profile.name, description: profile.description, source, origin,
     builtin: false, plugins, gateway: profile.gateway, paths,

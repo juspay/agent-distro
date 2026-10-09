@@ -5,7 +5,7 @@
 # effect is resolved here (src/profile/resolve.ts) and handed to the launcher
 # in AGENT_DISTRO_PROFILE: a leading positional selector, else the
 # repository's agent-distro.nix, else AI_PROFILE, else the built-in `profile`.
-{ lib, pkgs, writeShellApplication, profile, launchers }:
+{ lib, pkgs, writeShellApplication, profile, launchers, nixpkgsReference ? null }:
 let
   runtime = import ./runtime.nix pkgs;
   discovered = import ./discover-harnesses.nix;
@@ -29,6 +29,7 @@ let
   info = pkgs.writeText "agent-distro-profile-info.json" (builtins.toJSON (runtime.info {
     inherit (profile) name description;
     gateway = profile.gateway or null;
+    nixpkgs = nixpkgsReference;
   }));
   # Each harness's auth scheme, for the chooser's auth column; a gateway
   # harness's probe needs the profile in effect, so the chooser builds it.

@@ -1,6 +1,6 @@
 # Claude's plugin layout and CLI are local to this adapter. Shared sources stay
 # portable; no provider initialization or persistent plugin install is needed.
-{ pkgs, plugins, gateway, package, profileName }:
+{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils;
   claude = package;
@@ -15,7 +15,7 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "claude";
-    inherit gateway profileName;
+    inherit gateway profileName nixpkgs;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${adaptPlugin plugin}"; }) plugins;

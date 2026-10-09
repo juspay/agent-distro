@@ -1,6 +1,7 @@
 /**
  * The profile in effect without a VM or a real nix: discovery up to the git
- * root, precedence, references, the evaluation cache and its upkeep, the
+ * root, precedence, references and their offline fallback, the evaluation's
+ * isolation, cache and upkeep, nixpkgs fetched only for packages, the
  * no-compile policy for packages, and the launch that uses it all. A fake nix
  * on PATH logs every call; evaluate.nix itself runs in the VM tests.
  *
@@ -26,7 +27,9 @@ const temporary = () => mkdtempSync(join(tmpdir(), 'profile-'));
 
 /**
  * A nix that answers from files: `eval` prints `<file>.json` beside the
- * profile it is asked about; `flake prefetch` maps a reference to
+ * profile it is asked about (its packages null when they are not empty and
+ * no nixpkgs was given), keeping its arguments and environment in
+ * `<bin>/eval.json`; `flake prefetch` maps a reference to
  * `<bin>/refs/<reference>` (a JSON answer); `build --dry-run` lists the
  * derivations in `<bin>/miss`; `build --no-link` creates the package's output.
  */
@@ -39,9 +42,15 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');
 const bin = ${JSON.stringify(bin)};
 if (args[0] === 'eval') {
-  const { file } = JSON.parse(process.env.AGENT_DISTRO_EVALUATE);
-  if (!fs.existsSync(file + '.json')) { console.error('error: undefined variable'); process.exit(1); }
-  process.stdout.write(fs.readFileSync(file + '.json', 'utf8'));
+  // import "evaluate.nix" (builtins.fromJSON "<JSON, with \\$ for $>")
+  const expr = args[args.indexOf('--expr') + 1];
+  const literal = expr.slice(expr.indexOf('(builtins.fromJSON ') + 19, -1).replaceAll('\\$', '$');
+  const given = JSON.parse(JSON.parse(literal));
+  fs.writeFileSync(path.join(bin, 'eval.json'), JSON.stringify({ args, given, env: process.env }));
+  if (!fs.existsSync(given.file + '.json')) { console.error('error: undefined variable'); process.exit(1); }
+  const answer = JSON.parse(fs.readFileSync(given.file + '.json', 'utf8'));
+  if (given.nixpkgs === null && answer.packages?.length) answer.packages = null;
+  process.stdout.write(JSON.stringify(answer));
 } else if (args[0] === 'flake' && args[1] === 'prefetch') {
   const answer = path.join(bin, 'refs', encodeURIComponent(args[3]));
   if (!fs.existsSync(answer)) { console.error('error: cannot fetch'); process.exit(1); }
@@ -70,7 +79,25 @@ function reference(name: string, storePath: string, dir?: string) {
 }
 
 const VANILLA = { name: 'vanilla', description: 'Upstream harnesses with your own provider', gateway: null };
-const info = { default: 'vanilla', builtins: [VANILLA], nixpkgs: '/nix/store/00000000000000000000000000000000-nixpkgs' };
+const info = { default: 'vanilla', builtins: [VANILLA], nixpkgs: '/nix/store/00000000000000000000000000000000-nixpkgs', system: 'x86_64-linux' };
+/** What the fake nix last evaluated: its arguments, what it was given and its environment. */
+const lastEvaluation = () => JSON.parse(readFileSync(join(bin, 'eval.json'), 'utf8'));
+
+/** Run `body` collecting what it writes to stderr. */
+function stderrOf(body: () => void): string {
+  const write = process.stderr.write;
+  let written = '';
+  process.stderr.write = ((chunk: string) => {
+    written += chunk;
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    body();
+  } finally {
+    process.stderr.write = write;
+  }
+  return written;
+}
 
 /** An `agent-distro.nix` and what the fake nix evaluates it to. */
 function profileFile(directory: string, evaluated: Record<string, unknown>, text = '{ }') {
@@ -274,8 +301,97 @@ test('packages come from the binary cache or the launch stops naming them', () =
   rmSync(drvPath);
   const evaluations = calls('eval');
   assert.deepEqual(profile.resolveProfile(info, selection, env).paths, [join(out, 'bin')]);
-  assert.equal(calls('eval') - evaluations, 1);
+  // Twice: once to learn it has packages, once with nixpkgs.
+  assert.equal(calls('eval') - evaluations, 2);
   assert.equal(builds() - before, 2);
+});
+
+test('a profile is evaluated restricted, without network or the user\'s environment', () => {
+  const directory = temporary();
+  const file = profileFile(directory, { name: 'isolated' });
+  const config = process.env.NIX_CONFIG;
+  process.env.SECRET = 'hunter2';
+  process.env.NIX_CONFIG = 'access-tokens = github.com=secret';
+  try {
+    resolve({ source: 'positional', origin: directory });
+    // nix's configuration is per command: this process's is untouched.
+    assert.equal(process.env.NIX_CONFIG, 'access-tokens = github.com=secret');
+  } finally {
+    delete process.env.SECRET;
+    if (config === undefined) delete process.env.NIX_CONFIG;
+    else process.env.NIX_CONFIG = config;
+  }
+  const { args, given, env } = lastEvaluation();
+  assert.deepEqual(given, { file, nixpkgs: null, system: 'x86_64-linux' });
+  assert.equal(env.SECRET, undefined, 'the user\'s variables stay out');
+  assert.equal(env.NIX_CONFIG, 'extra-experimental-features = nix-command flakes', 'and so does their NIX_CONFIG');
+  assert.ok(env.PATH, 'nix still has what it needs');
+  const option = (name: string) => args[args.indexOf(name) + 1];
+  assert.equal(option('restrict-eval'), 'true');
+  assert.equal(option('allowed-uris'), '');
+  assert.equal(option('nix-path'), '');
+  const allowed = args.flatMap((arg: string, i: number) => (arg === '-I' ? [args[i + 1]] : []));
+  assert.deepEqual(allowed, [directory, join(src, 'profile')], 'its directory and evaluate.nix, nothing else');
+});
+
+test('nixpkgs is fetched by its locked reference, and only for a profile with packages', () => {
+  const nixpkgs = 'github:NixOS/nixpkgs/0000000000000000000000000000000000000000?narHash=sha256-AAAA%3D';
+  const tree = temporary();
+  reference(nixpkgs, tree);
+  const referenced = { ...info, nixpkgs };
+  const env = { XDG_CACHE_HOME: temporary() };
+  const fetches = () => calls(`flake prefetch --json ${nixpkgs}`);
+  const before = fetches();
+  const bare = temporary();
+  profileFile(bare, { name: 'bare' });
+  profile.resolveProfile(referenced, { source: 'positional', origin: bare }, env);
+  assert.equal(fetches(), before, 'no packages, no nixpkgs');
+  const out = temporary();
+  mkdirSync(join(out, 'bin'));
+  const packaged = temporary();
+  profileFile(packaged, { name: 'packaged', packages: [{ name: 'p', drvPath: join(out, 'p.drv'), out, bin: join(out, 'bin') }] });
+  const evaluations = calls('eval');
+  assert.deepEqual(profile.resolveProfile(referenced, { source: 'positional', origin: packaged }, env).paths, [join(out, 'bin')]);
+  assert.equal(fetches() - before, 1);
+  assert.equal(calls('eval') - evaluations, 2, 'once to learn it has packages, once with nixpkgs');
+  const { args, given } = lastEvaluation();
+  assert.equal(given.nixpkgs, tree);
+  assert.ok(args.includes(tree), 'nixpkgs is readable to the evaluation');
+});
+
+test('without network, a reference uses its last store path, and says so', () => {
+  const tree = temporary();
+  profileFile(tree, { name: 'remembered', plugins: ['git+file:///offline-plugin'] });
+  const pluginTree = temporary();
+  reference('git+file:///offline-profile', tree);
+  reference('git+file:///offline-plugin', pluginTree);
+  const env = { XDG_CACHE_HOME: temporary() };
+  const selection = { source: 'variable', origin: 'git+file:///offline-profile' };
+  assert.equal(stderrOf(() => profile.resolveProfile(info, selection, env)), '');
+  // Nix can no longer fetch either.
+  rmSync(join(bin, 'refs', encodeURIComponent('git+file:///offline-profile')));
+  rmSync(join(bin, 'refs', encodeURIComponent('git+file:///offline-plugin')));
+  let resolved: { name: string; plugins: string[] } = { name: '', plugins: [] };
+  const noted = stderrOf(() => {
+    resolved = profile.resolveProfile(info, selection, env);
+  });
+  assert.equal(resolved.name, 'remembered');
+  assert.deepEqual(resolved.plugins, [pluginTree]);
+  assert.match(noted, new RegExp(`AI_PROFILE=git\\+file:///offline-profile: cannot fetch git\\+file:///offline-profile; using ${tree}, from the last launch that could`));
+  assert.match(noted, /cannot fetch git\+file:\/\/\/offline-plugin; using /);
+  // --list --json too, its JSON intact on stdout.
+  const infoFile = join(temporary(), 'info.json');
+  writeFileSync(infoFile, JSON.stringify(info));
+  const listed = spawnSync(process.execPath, [join(src, 'profile/cli.ts'), 'list', infoFile, JSON.stringify({ profiles: [{ name: 'vanilla', description: '', harnesses: [] }] }), '--json'],
+    { encoding: 'utf8', cwd: temporary(), env: { PATH: process.env.PATH, ...env, AI_PROFILE: 'git+file:///offline-profile' } });
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.equal(JSON.parse(listed.stdout).profile.name, 'remembered');
+  assert.match(listed.stderr, /cannot fetch git\+file:\/\/\/offline-profile; using /);
+  // Gone from the store: nothing to fall back to.
+  rmSync(tree, { recursive: true });
+  assert.throws(() => profile.resolveProfile(info, selection, env), /cannot fetch git\+file:\/\/\/offline-profile:\nerror: cannot fetch/);
+  // Never fetched: likewise.
+  assert.throws(() => resolve({ source: 'variable', origin: 'git+file:///never' }), /cannot fetch git\+file:\/\/\/never:\nerror: cannot fetch/);
 });
 
 test('a launch uses the profile in effect: its plugins replace the built-in ones, with its gateway and packages', () => {

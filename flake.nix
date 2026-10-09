@@ -14,7 +14,8 @@
     let
       inherit (nixpkgs) lib;
       discovered = import ./lib/discover-harnesses.nix;
-      mkLaunchers = import ./lib/mk-launchers.nix;
+      # Launchers name this nixpkgs by reference rather than hold its source.
+      mkLaunchers = args: import ./lib/mk-launchers.nix ({ inherit nixpkgs; } // args);
       mkFlake = import ./lib/mk-flake.nix { inherit nixpkgs; };
       systems = import ./lib/systems.nix;
       # Unfree so harness recipes (lib/harness-pkgs.nix) share this one instance.

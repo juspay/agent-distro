@@ -5,9 +5,14 @@
 #
 # A profile here is built in: its plugins are paths at build time, never the
 # flake references an `agent-distro.nix` read at launch may also name.
-{ pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }) }:
+#
+# `nixpkgs`, the flake input `pkgs` was imported from, lets the launchers name
+# it by a locked reference rather than hold its source
+# (lib/nixpkgs-reference.nix); flake.nix and mkFlake pass their own.
+{ pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }), nixpkgs ? null }:
 let
   inherit (pkgs) lib;
+  nixpkgsReference = import ./nixpkgs-reference.nix pkgs nixpkgs;
   plugins = map
     (plugin:
       if builtins.isString plugin && !(lib.hasPrefix "/" plugin) then
@@ -34,15 +39,18 @@ let
 
   discovery = import ./discover-harnesses.nix;
   harnesses = discovery.ordered;
-  commands = lib.genAttrs harnesses (name: withPackages (import (../harnesses + "/${name}/default.nix") {
-    inherit pkgs plugins gateway;
-    package = sources name pkgs;
-    profileName = profile.name;
-  }));
+  commands = lib.genAttrs harnesses (name:
+    let adapter = import (../harnesses + "/${name}/default.nix"); in
+    withPackages (adapter ({
+      inherit pkgs plugins gateway;
+      package = sources name pkgs;
+      profileName = profile.name;
+      # An adapter that takes no `nixpkgs` gets `pkgs`'s source.
+    } // lib.optionalAttrs (lib.functionArgs adapter ? nixpkgs) { nixpkgs = nixpkgsReference; })));
 
   # The profile's own chooser; the bundle carries it so a fetch of the
   # bundle refreshes the picker along with the harnesses.
-  picker = pkgs.callPackage ./picker.nix { inherit profile; launchers = commands; };
+  picker = pkgs.callPackage ./picker.nix { inherit profile nixpkgsReference; launchers = commands; };
 
 in
 commands // {

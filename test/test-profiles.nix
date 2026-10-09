@@ -4,8 +4,9 @@
 # Stub harnesses that print what they were started with show the plugins and
 # packages each launch got: path and git+file: references, discovery from a
 # nested directory, the precedence of the positional selector, the
-# repository's agent-distro.nix, AI_PROFILE and the built-in profile, and the
-# refusal of a package the binary cache lacks. Then a copy of the Juspay
+# repository's agent-distro.nix, AI_PROFILE and the built-in profile, an
+# evaluation that sees neither the user's environment nor the network, and
+# the refusal of a package the binary cache lacks. Then a copy of the Juspay
 # profile's agent-distro.nix, its github: plugin reference replaced by a local
 # path, runs the real OMP, Codex and Claude Code as the built-in Juspay
 # profile did.
@@ -84,7 +85,9 @@ in
     environment.systemPackages = [ agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla pkgs.python3 pkgs.git koluFixture ] ++ probes;
     # What the profiles' packages evaluate to is already here, as a binary
     # cache would provide it; nothing else is, and nothing can be fetched.
-    system.extraDependencies = [ pkgs.hello pkgs.mcp-nixos ] ++ lib.attrValues plugins;
+    # The nixpkgs source too: launchers name it by a locked reference, which
+    # resolves from the store.
+    system.extraDependencies = [ pkgs.hello pkgs.mcp-nixos pkgs.path ] ++ lib.attrValues plugins;
     nix.settings.substituters = lib.mkForce [ ];
   };
   testScript = ''
@@ -161,6 +164,14 @@ in
         assert launched("cd ~/repo && AGENT_DISTRO_PLUGINS=${plugins.beta} probe-claude")[0] == ["alpha", "beta"]
         # The positional selector is the picker's own: it never reaches the harness.
         assert "/home/testuser/fetched" not in user("probe-agent-distro /home/testuser/fetched claude")
+
+    with subtest("a profile is evaluated without the user's environment or the network"):
+        write("~/nosy/agent-distro.nix", '{ name = "nosy"; description = "[" + builtins.getEnv "SECRET" + "]"; }')
+        assert in_effect("~", "SECRET=hunter2 AI_PROFILE=/home/testuser/nosy")["description"] == "[]"
+        write("~/fetching/agent-distro.nix", '{ name = "fetching"; description = builtins.readFile (builtins.fetchurl "https://example.com/"); }')
+        output = refused("AI_PROFILE=/home/testuser/fetching probe-claude")
+        assert "access to URI 'https://example.com/' is forbidden in restricted mode" in output, output
+        assert "STUB-STARTED" not in output, output
 
     with subtest("packages from the binary cache, and the refusal of one it lacks"):
         write("~/packaged/agent-distro.nix", '{ name = "packaged"; packages = pkgs: [ pkgs.hello ]; }')

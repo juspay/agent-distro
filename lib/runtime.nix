@@ -24,12 +24,14 @@ let
   vanilla = import ../profiles/vanilla/agent-distro.nix;
   # What the resolver knows at build time (src/profile/resolve.ts): the
   # launcher's own profile, which is `vanilla`'s too when it is not vanilla,
-  # and the nixpkgs a profile's `packages` are evaluated against.
-  info = { name, description ? "", gateway }: {
+  # and the nixpkgs a profile's `packages` are evaluated against
+  # (lib/nixpkgs-reference.nix; null: `pkgs`'s own source), for this system.
+  info = { name, description ? "", gateway, nixpkgs ? null }: {
     default = name;
     builtins = [ { inherit name description gateway; } ]
       ++ pkgs.lib.optional (name != vanilla.name) { inherit (vanilla) name description gateway; };
-    nixpkgs = "${pkgs.path}";
+    nixpkgs = if nixpkgs != null then nixpkgs else import ./nixpkgs-reference.nix pkgs null;
+    system = pkgs.stdenv.hostPlatform.system;
   };
 in
 {
@@ -44,10 +46,12 @@ in
   # eval: the profile in effect, its gateway and packages, and the plugins of
   # that profile and of AGENT_DISTRO_PLUGINS. `args` names the adapter
   # (`harness`), the built-in profile's plugins (`profile`, each with its
-  # `description`), its `gateway` and `profileName`; see src/plugin/launch.ts.
-  launchPlugins = { profileName, gateway, ... }@args:
+  # `description`), its `gateway`, `profileName` and `nixpkgs` (the
+  # adapter's, from lib/mk-launchers.nix); see src/plugin/launch.ts.
+  launchPlugins = { profileName, gateway, nixpkgs ? null, ... }@args:
     let
-      json = builtins.removeAttrs args [ "profileName" ] // { info = info { name = profileName; inherit gateway; }; };
+      json = builtins.removeAttrs args [ "profileName" "nixpkgs" ]
+        // { info = info { name = profileName; inherit gateway nixpkgs; }; };
     in
     "${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON json)}";
 }
