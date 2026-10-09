@@ -1,10 +1,10 @@
 # Codex owns marketplace registration, installation, and its persistent state.
 # Portable plugin contents and provider policy stay outside this adapter.
-{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
+{ pkgs, plugins, info, package }:
 let
   inherit (pkgs) lib writeShellApplication runCommand jq;
   codex = package;
-  marketplaceName = "${profileName}-ai";
+  marketplaceName = "${info.default}-ai";
 
   # Codex loads the original directory itself; the description only supplies
   # its validated name, so an invalid manifest fails here as it does for Claude.
@@ -28,7 +28,7 @@ let
   '';
   launchPlugins = (import ../../lib/runtime.nix pkgs).launchPlugins {
     harness = "codex";
-    inherit gateway profileName nixpkgs;
+    inherit info;
     codex = lib.getExe codex;
     marketplace = marketplaceName;
     profile = map (plugin: { description = "${readPlugin plugin}"; }) plugins;
@@ -38,8 +38,6 @@ writeShellApplication {
   name = "codex";
   runtimeInputs = [ jq ];
   derivationArgs.version = codex.version;
-  # `launched` is assigned by the launch's eval.
-  excludeShellChecks = [ "SC2154" ];
   text = builtins.readFile ./session-defaults.sh + lib.optionalString (plugins != [ ]) ''
     # The name stays fixed, but its store path changes between builds. Use the
     # native installer only when that path changes, preserving disabled plugins
@@ -65,8 +63,7 @@ writeShellApplication {
     # The profile in effect and its packages. Per-launch -c overrides: the
     # plugins of a profile other than the built-in one and of
     # AGENT_DISTRO_PLUGINS enabled, the built-in plugins they replace disabled.
-    launch=$(${launchPlugins})
-    eval "$launch"
+    ${launchPlugins}
     eval "set -- $launched \"\$@\""
     exec ${lib.getExe codex} "$@"
   '';

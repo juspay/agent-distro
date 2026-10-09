@@ -1,7 +1,7 @@
 /**
  * The command every launcher runs before its harness; see launch.ts.
  *
- * Usage: node launch-cli.mjs ARGS_JSON [BASE]
+ * Usage: node launch-cli.mjs ARGS_JSON
  *
  * The one runtime module that is JavaScript rather than TypeScript, because it
  * runs before anything is cached: it turns on Node's compile cache under
@@ -19,4 +19,4 @@ if (isAbsolute(base)) {
   enableCompileCache(join(base, 'agent-distro', 'node-compile-cache'));
 }
 const { main } = await import('./launch.ts');
-process.exitCode = await main(process.argv[2], process.argv.slice(3));
+process.exitCode = await main(process.argv[2]);

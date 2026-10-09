@@ -25,12 +25,13 @@ let
   # What the resolver knows at build time (src/profile/resolve.ts): the
   # launcher's own profile, which is `vanilla`'s too when it is not vanilla,
   # and the nixpkgs a profile's `packages` are evaluated against
-  # (lib/nixpkgs-reference.nix; null: `pkgs`'s own source), for this system.
-  info = { name, description ? "", gateway, nixpkgs ? null }: {
-    default = name;
-    builtins = [ { inherit name description gateway; } ]
-      ++ pkgs.lib.optional (name != vanilla.name) { inherit (vanilla) name description gateway; };
-    nixpkgs = if nixpkgs != null then nixpkgs else import ./nixpkgs-reference.nix pkgs null;
+  # (lib/nixpkgs-reference.nix, from the flake input `nixpkgs`), for this
+  # system. lib/mk-launchers.nix builds it once, for every adapter and the picker.
+  info = profile: nixpkgs: {
+    default = profile.name;
+    builtins = map (p: { inherit (p) name description; gateway = p.gateway or null; })
+      ([ profile ] ++ pkgs.lib.optional (profile.name != vanilla.name) vanilla);
+    nixpkgs = import ./nixpkgs-reference.nix pkgs nixpkgs;
     system = pkgs.stdenv.hostPlatform.system;
   };
 in
@@ -42,16 +43,15 @@ in
   readPlugin = plugin: pkgs.runCommand "agent-plugin.json" { } ''
     ${script "plugin/read.ts"} ${plugin} > "$out"
   '';
-  # The command every launcher runs before its harness, printing shell to
-  # eval: the profile in effect, its gateway and packages, and the plugins of
-  # that profile and of AGENT_DISTRO_PLUGINS. `args` names the adapter
-  # (`harness`), the built-in profile's plugins (`profile`, each with its
-  # `description`), its `gateway`, `profileName` and `nixpkgs` (the
-  # adapter's, from lib/mk-launchers.nix); see src/plugin/launch.ts.
-  launchPlugins = { profileName, gateway, nixpkgs ? null, ... }@args:
-    let
-      json = builtins.removeAttrs args [ "profileName" "nixpkgs" ]
-        // { info = info { name = profileName; inherit gateway nixpkgs; }; };
-    in
-    "${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON json)}";
+  # The shell every launcher runs before its harness: the profile in effect,
+  # its gateway and packages, and the plugins of that profile and of
+  # AGENT_DISTRO_PLUGINS, as `launched` and `profile_gateway*`. `args` names
+  # the adapter (`harness`), the built-in profile's plugins (`profile`, each
+  # with its `description`) and the adapter's `info`; see src/plugin/launch.ts.
+  # Captured before eval, so a failed launch stops the launcher; the variables
+  # are declared first, for shellcheck to see what the eval assigns.
+  launchPlugins = args: ''
+    : "''${launched=}" "''${profile_gateway=}" "''${profile_gateway_url=}" "''${profile_gateway_key_env=}" "''${profile_gateway_key_hint=}"
+    launch=$(${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON args)})
+    eval "$launch"'';
 }

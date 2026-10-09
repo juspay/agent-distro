@@ -580,13 +580,13 @@ Create `harnesses/<name>/` with four files:
 | File | Holds |
 | --- | --- |
 | `meta.nix` | title, order, `auth`,[^auth-values] `releaseNotes = version: URL`, and checks |
-| `default.nix` | the adapter, accepting `{ pkgs, plugins, gateway, package, profileName }`[^profile-name] and starting with `runtime.launchPlugins`[^launch-json] |
+| `default.nix` | the adapter, accepting `{ pkgs, plugins, info, package }`[^profile-name] and starting with `runtime.launchPlugins`[^launch-json] |
 | `source.nix` | `{ pkgs }` to package |
 | `README.md` | design notes |
 
 [^auth-values]: `auth = "anthropic" | "openai" | "gateway"`.
-[^profile-name]: The explicit `profileName` argument supports profile-specific registration, such as Codex’s marketplace name.
-[^launch-json]: `plugins`, `gateway` and `profileName` are the built-in profile's; the adapter passes them to `launchPlugins` rather than baking the gateway in, and evaluates what it prints: the plugins and gateway of the profile in effect, which may be one read at launch.
+[^profile-name]: `info` is what the resolver knows of the build; its `default`, the built-in profile's name, supports profile-specific registration, such as Codex’s marketplace name.
+[^launch-json]: `plugins` are the built-in profile's; the adapter passes their descriptions and `info` to `launchPlugins`, whose shell sets `launched` and `profile_gateway*` for the profile in effect, which may be one read at launch.
 
 - **Alongside.** Pins in `npins/`, scripts in `tests/`, and an optional custom updater in `update.py`.
 - **No registration.** Nothing outside this directory needs registration.[^discovery]

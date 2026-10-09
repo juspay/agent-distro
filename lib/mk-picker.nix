@@ -2,4 +2,4 @@
 # consumer can build the picker over one profile's launchers from a plain
 # import, not only through flake.nix. `nixpkgs` is as lib/mk-launchers.nix's.
 { pkgs, profile, launchers, nixpkgs ? null }:
-pkgs.callPackage ./picker.nix { inherit profile launchers; nixpkgsReference = import ./nixpkgs-reference.nix pkgs nixpkgs; }
+pkgs.callPackage ./picker.nix { inherit launchers; info = (import ./runtime.nix pkgs).info profile nixpkgs; }

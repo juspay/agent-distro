@@ -2,13 +2,13 @@
  * Set up one launch: the profile in effect (src/profile/resolve.ts), and the
  * Agent Plugins named by AGENT_DISTRO_PLUGINS on top of it.
  *
- * Run through launch-cli.mjs, as `node launch-cli.mjs ARGS_JSON [BASE]`, by
+ * Run through launch-cli.mjs, as `node launch-cli.mjs ARGS_JSON`, by
  * every harness launcher before it starts its harness.
  *
  * ARGS_JSON is written by a harness launcher at build time: `harness` names the
  * adapter (`src/harness/<harness>.ts`, which exports `adapter`), `profile` lists
- * the built-in profile's plugins as `{ description, ... }` entries, `gateway`
- * and `info` describe that profile (src/profile/resolve.ts), and the rest is
+ * the built-in profile's plugins as `{ description, ... }` entries, `info`
+ * describes that profile (src/profile/resolve.ts), and the rest is
  * the adapter's own. Stdout is shell for the launcher to `eval`: `launched` is
  * what the adapter prints (extra arguments as shell words, or a path),
  * `profile_gateway` the gateway in effect as JSON (empty for none) with its
@@ -74,8 +74,6 @@ export type Launch<A, E extends ProfileEntry> = {
   replaced: ProfilePlugin<E>[];
   /** The variable's plugins, deduplicated, in order; empty when it names none. */
   plugins: LaunchPlugin[];
-  /** Arguments after ARGS_JSON, such as a configuration to extend. */
-  rest: string[];
   /** `${XDG_CACHE_HOME:-~/.cache}/agent-distro`; null when `plugins` and `replaced` are empty. */
   cache: string | null;
   report: Report;
@@ -193,7 +191,7 @@ export function narHash(path: string, { skipGit = false } = {}): string {
   return hash.digest('hex');
 }
 
-const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 
 // Only the default store: a plugin in a store elsewhere is keyed by its
 // contents, like any other directory.
@@ -254,7 +252,7 @@ export function readCached<T>(path: string, valid: (value: unknown) => value is 
   throw new LaunchError(`${VARIABLE}: the cached ${path} is unreadable or corrupt; remove ${clear} and launch again`);
 }
 
-const isStrings = (value: unknown): value is string[] =>
+export const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 
 /** Record a use: the link's own time is when it was last used. */
@@ -448,7 +446,7 @@ export function sweep(directory: string, which: (name: string) => boolean = () =
 export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
   harness: string, adapter: Adapter<A, E>, args: A, value: string | undefined, env: NodeJS.ProcessEnv, report: Report,
   replacement?: string[],
-): Omit<Launch<A, E>, 'rest'> {
+): Launch<A, E> {
   const own = replacement ?? [];
   const names = [...own, ...entries(value)];
   // Nothing to load or take away needs no cache, so it cannot fail for want of one.
@@ -479,10 +477,9 @@ const quote = (value: string) => "'" + value.replace(/'/g, `'"'"'`) + "'";
 
 /**
  * The profile in effect: the one the picker resolved, handed over in
- * AGENT_DISTRO_PROFILE, else this launch's own resolution. A launcher built
- * without `info` has only its built-in profile.
+ * AGENT_DISTRO_PROFILE, else this launch's own resolution.
  */
-function profileInEffect(info: Info | undefined, env: NodeJS.ProcessEnv): Resolved | null {
+function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved {
   const handed = env.AGENT_DISTRO_PROFILE;
   if (handed) {
     let value: unknown;
@@ -494,7 +491,6 @@ function profileInEffect(info: Info | undefined, env: NodeJS.ProcessEnv): Resolv
     if (!isResolved(value)) throw new LaunchError('AGENT_DISTRO_PROFILE is not a resolved profile; unset it');
     return value;
   }
-  if (!info) return null;
   return resolveProfile(info, select(undefined, workingDirectory(), env, info), env);
 }
 
@@ -512,18 +508,17 @@ export function shell(launched: string, gateway: Gateway | null, paths: string[]
   return lines.join('\n') + '\n';
 }
 
-export async function main(argsPath: string, rest: string[]): Promise<number> {
+export async function main(argsPath: string): Promise<number> {
   const args = JSON.parse(readFileSync(argsPath, 'utf8'));
   const report: Report = (message) => process.stderr.write(printable(message) + '\n');
   try {
     const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
     const profile = profileInEffect(args.info, process.env);
     // The built-in profile is the one this launcher was built with.
-    const builtIn = profile === null || (profile.builtin && profile.name === args.info.default);
+    const builtIn = profile.builtin && profile.name === args.info.default;
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
       builtIn ? undefined : profile.plugins);
-    const gateway: Gateway | null = builtIn ? args.gateway ?? null : profile.gateway;
-    process.stdout.write(shell(adapter.launch({ ...launch, rest }), gateway, builtIn ? [] : profile.paths));
+    process.stdout.write(shell(adapter.launch(launch), profile.gateway, profile.paths));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;
     // A cache that cannot be written fails the launch: there is no degraded mode.

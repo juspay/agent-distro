@@ -29,21 +29,17 @@
  * without network uses what is already in the store, and says so.
  */
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, utimesSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Gateway } from '../gateway/models.ts';
-import { cacheRoot, LaunchError, printable, sweep, writeAtomic } from '../plugin/launch.ts';
+import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
+import { cacheRoot, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists } from '../util.ts';
 
 export const FILE = 'agent-distro.nix';
 /** The variable a profile reference falls back to. */
 export const VARIABLE = 'AI_PROFILE';
-
-/** Where the profile in effect came from, as `--list --json` reports it. */
-export type Source = 'positional' | 'repository' | 'variable' | 'builtin';
-export const SOURCES: readonly Source[] = ['positional', 'repository', 'variable', 'builtin'];
 
 /** A profile built into the launcher. */
 export type Builtin = { name: string; description: string; gateway: Gateway | null };
@@ -63,16 +59,11 @@ export type Info = {
   system: string;
 };
 
-/** Which profile, and from where: `origin` is the reference, the file found, or the built-in name. */
-export type Selection = { source: Source; origin: string };
+/** Which profile, and from where. */
+export type Selection = Pick<InEffect, 'source' | 'origin'>;
 
 /** The profile in effect, resolved for this launch. */
-export type Resolved = {
-  name: string;
-  description: string;
-  source: Source;
-  /** The reference, the path to the `agent-distro.nix` found, or the built-in name. */
-  origin: string;
+export type Resolved = InEffect & {
   /** Built into the launcher, so its plugins and packages are the launcher's own. */
   builtin: boolean;
   /** Plugin directories. */
@@ -82,24 +73,18 @@ export type Resolved = {
   paths: string[];
 };
 
-type Package = { name: string; drvPath: string; out: string; bin: string };
-
 /** A cached evaluation of one file: references unresolved, packages unbuilt. */
 type Evaluated = {
   name: string;
   description: string;
   plugins: string[];
   gateway: Gateway | null;
-  packages: Package[];
+  packages: { name: string; drvPath: string; out: string; bin: string }[];
 };
 
-const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === 'string';
-const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
-/** Names are selectors: one shell word, no `/`. */
-const isName = (value: unknown): value is string => isString(value) && /^[^\s/]+$/.test(value);
 // The launcher reads the key with `${!name}`: only a shell variable name is safe.
 const isVariableName = (value: unknown) => isString(value) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 
@@ -122,13 +107,10 @@ export function isResolved(value: unknown): value is Resolved {
     && isStrings(value.plugins) && gatewayProblem(value.gateway) === null && isStrings(value.paths);
 }
 
-const isPackages = (value: unknown): value is Package[] => Array.isArray(value)
-  && value.every((p) => isObject(p) && isString(p.name) && isString(p.drvPath) && isString(p.out) && isString(p.bin));
-
-/** An evaluation; `packages` is null when the profile has some and nixpkgs was not given. */
-function isEvaluated(value: unknown, packages: (value: unknown) => boolean = isPackages): value is Evaluated {
+function isEvaluated(value: unknown): value is Evaluated {
   return isObject(value) && isName(value.name) && isString(value.description) && isStrings(value.plugins)
-    && gatewayProblem(value.gateway) === null && packages(value.packages);
+    && gatewayProblem(value.gateway) === null && Array.isArray(value.packages)
+    && value.packages.every((p) => isObject(p) && isString(p.name) && isString(p.drvPath) && isString(p.out) && isString(p.bin));
 }
 
 /**
@@ -161,11 +143,6 @@ export function select(positional: string | undefined, cwd: string | undefined, 
   if (found) return { source: 'repository', origin: found };
   if (env[VARIABLE]) return { source: 'variable', origin: env[VARIABLE] };
   return { source: 'builtin', origin: info.default };
-}
-
-/** Whether `value` names a profile rather than a harness argument: the picker's rule. */
-export function isReference(value: string, info: Info): boolean {
-  return info.builtins.some((b) => b.name === value) || (!value.startsWith('-') && /[/:]/.test(value));
 }
 
 type Kind = { builtin: Builtin } | { path: string } | { flake: string };
@@ -275,36 +252,28 @@ const EVALUATE = join(import.meta.dirname, 'evaluate.nix');
 /**
  * Evaluate `file`, without network or the user's environment (restrict-eval
  * also empties getEnv), and reading nothing beyond its directory,
- * evaluate.nix and `nixpkgs` (null: a profile with packages evaluates them to
- * null). --impure is only for reading the checkout in place, outside the
- * store; restrict-eval bounds it.
+ * evaluate.nix and nixpkgs. --impure is only for reading the checkout in
+ * place, outside the store; restrict-eval bounds it. Without nixpkgs, a
+ * profile with packages evaluates them to null: only then is nixpkgs fetched
+ * and the file evaluated again.
  */
-function evaluate(file: string, info: Info, nixpkgs: string | null, what: string): unknown {
-  const allowed = [dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])];
-  const text = nix(['eval', '--json', '--impure', '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '',
-    '--option', 'nix-path', '', ...allowed.flatMap((path) => ['-I', path]), '--expr',
-    `import ${JSON.stringify(EVALUATE)} (${nixJSON({ file, nixpkgs, system: info.system })})`],
-  `${what}: cannot evaluate ${file}`, nixEnvironment(true));
-  const value: unknown = JSON.parse(text);
+function evaluate(file: string, info: Info, cache: string, what: string): Evaluated {
+  const run = (nixpkgs: string | null): unknown => JSON.parse(nix(['eval', '--json', '--impure',
+    '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
+    ...[dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])].flatMap((path) => ['-I', path]),
+    '--expr', `import ${JSON.stringify(EVALUATE)} (${nixJSON({ file, nixpkgs, system: info.system })})`],
+  `${what}: cannot evaluate ${file}`, nixEnvironment(true)));
+  let value = run(null);
+  if (isObject(value) && value.packages === null) {
+    value = run(isAbsolute(info.nixpkgs) ? info.nixpkgs : fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache));
+  }
   if (isObject(value)) {
     if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
     const problem = gatewayProblem(value.gateway);
     if (problem) throw new LaunchError(`${what}: ${file}: \`gateway\` ${problem}`);
   }
-  if (!isEvaluated(value, (packages) => packages === null || isPackages(packages))) {
-    throw new LaunchError(`${what}: ${file} is not a profile`);
-  }
+  if (!isEvaluated(value)) throw new LaunchError(`${what}: ${file} is not a profile`);
   return value;
-}
-
-/** Evaluate `file`, fetching nixpkgs and evaluating again only when it has packages. */
-function evaluateWithPackages(file: string, info: Info, cache: string, what: string): Evaluated {
-  const value = evaluate(file, info, null, what) as Evaluated | { packages: null };
-  if (value.packages !== null) return value as Evaluated;
-  const nixpkgs = isAbsolute(info.nixpkgs) ? info.nixpkgs : fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
-  const evaluated = evaluate(file, info, nixpkgs, what);
-  if (!isEvaluated(evaluated)) throw new LaunchError(`${what}: ${file} is not a profile`);
-  return evaluated;
 }
 
 /**
@@ -330,7 +299,7 @@ function evaluated(file: string, info: Info, cache: string, what: string, again:
       if (!(error instanceof SyntaxError)) throw error;
     }
   }
-  const value = evaluateWithPackages(file, info, cache, what);
+  const value = evaluate(file, info, cache, what);
   writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
   sweep(profiles, (name) => name !== key);
   return value;

@@ -12,14 +12,15 @@
 { pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }), nixpkgs ? null }:
 let
   inherit (pkgs) lib;
-  nixpkgsReference = import ./nixpkgs-reference.nix pkgs nixpkgs;
   plugins = map
     (plugin:
       if builtins.isString plugin && !(lib.hasPrefix "/" plugin) then
         throw "Profile \"${profile.name}\" names plugin \"${plugin}\": a flake reference is read at launch, not built in; pass a flake input's path instead."
       else plugin)
     profile.plugins;
-  gateway = profile.gateway or null;
+  runtime = import ./runtime.nix pkgs;
+  # What every launcher and the picker know of this build (src/profile/resolve.ts).
+  info = runtime.info profile nixpkgs;
 
   # What a plugin's MCP servers name by bare command. They reach every harness
   # the same way, so they go on PATH here, around the adapters, rather than
@@ -39,18 +40,14 @@ let
 
   discovery = import ./discover-harnesses.nix;
   harnesses = discovery.ordered;
-  commands = lib.genAttrs harnesses (name:
-    let adapter = import (../harnesses + "/${name}/default.nix"); in
-    withPackages (adapter ({
-      inherit pkgs plugins gateway;
-      package = sources name pkgs;
-      profileName = profile.name;
-      # An adapter that takes no `nixpkgs` gets `pkgs`'s source.
-    } // lib.optionalAttrs (lib.functionArgs adapter ? nixpkgs) { nixpkgs = nixpkgsReference; })));
+  commands = lib.genAttrs harnesses (name: withPackages (import (../harnesses + "/${name}/default.nix") {
+    inherit pkgs plugins info;
+    package = sources name pkgs;
+  }));
 
   # The profile's own chooser; the bundle carries it so a fetch of the
   # bundle refreshes the picker along with the harnesses.
-  picker = pkgs.callPackage ./picker.nix { inherit profile nixpkgsReference; launchers = commands; };
+  picker = pkgs.callPackage ./picker.nix { inherit info; launchers = commands; };
 
 in
 commands // {
@@ -71,7 +68,7 @@ commands // {
     passthru = {
       commands = harnesses;
       # For the Home Manager updater: the Node and tree the launchers use.
-      runtime = import ./runtime.nix pkgs;
+      inherit runtime;
     };
   };
   inherit picker;

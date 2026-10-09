@@ -49,7 +49,8 @@ function profileEntry(root: string, dir: string) {
   return { description, dir };
 }
 
-const claudeArgs = (profile: unknown[] = []) => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile });
+const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', gateway: null }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
+const claudeArgs = (profile: unknown[] = []) => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile, info });
 
 function resolve(value: string, cache: string, profile: unknown[] = [], reports: string[] = [], adapter = claude) {
   return launch.resolve('claude', adapter, claudeArgs(profile), value, { XDG_CACHE_HOME: cache },
@@ -204,7 +205,7 @@ test('a translation is replaced only by name, and the variable wins', () => {
   assert.deepEqual(result.kept.map((p: any) => p.entry.dir), ['/profile/skills']);
   assert.deepEqual(result.replaced.map((p: any) => p.name), ['kolu']);
   assert.deepEqual(result.plugins.map((p: any) => [p.name, p.description.root]), [['extra', extra], ['kolu', late]]);
-  const words = claude.launch({ ...result, rest: [] });
+  const words = claude.launch(result);
   assert.equal(words, ['--plugin-dir /profile/skills', ...result.plugins.map((p: any) => `--plugin-dir ${p.translation}`)].join(' '));
   assert.ok(!words.includes('/profile/kolu'), 'the replaced profile plugin is gone');
   const versioned = plugin('skills');

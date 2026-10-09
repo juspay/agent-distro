@@ -1,5 +1,5 @@
 # OMP owns LiteLLM initialization and portable extension loading.
-{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
+{ pkgs, plugins, info, package }:
 let
   inherit (pkgs) lib writeShellApplication formats gum;
   omp = package;
@@ -17,14 +17,13 @@ let
   };
   launchPlugins = runtime.launchPlugins {
     harness = "omp";
-    inherit gateway profileName nixpkgs;
+    inherit info;
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${plugin}"; }) plugins;
   };
 
   initialization = ''
     # The profile in effect, its gateway and packages, and every plugin's root.
-    launch=$(${launchPlugins})
-    eval "$launch"
+    ${launchPlugins}
     agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.omp/agent}"
     default_layers=("${alwaysDefaults}")
     if [ -n "$profile_gateway" ]; then
@@ -61,8 +60,6 @@ in
 writeShellApplication {
   name = "omp";
   derivationArgs.version = omp.version;
-  # `launched` and `profile_gateway*` are assigned by the launch's eval.
-  excludeShellChecks = [ "SC2154" ];
   text = ''
     ${initialization}
 

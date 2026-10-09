@@ -136,7 +136,7 @@ export class Menu {
   query = '';
   filtering = false;
 
-  constructor(listing: Listing, remembered = '', profile?: Pick<InEffect, 'name' | 'description' | 'source' | 'origin'>) {
+  constructor(listing: Listing, remembered = '', profile?: InEffect) {
     const builtIn = listing.profiles[0];
     this.active = profile ? { ...builtIn, name: profile.name, description: profile.description } : builtIn;
     this.source = sourceText(profile ?? { source: 'builtin', origin: builtIn.name });

@@ -122,17 +122,18 @@ export function withGateway(config: Record<string, unknown>, schema: string, gat
 type LaunchArgs = Inputs & { schema: string; name: string; config: string; profile: ProfileEntry[] };
 
 /**
- * At launch: the session config (the launcher's own, gateway included, as
- * BASE) without the replaced profile plugins and with the variable's, written
+ * At launch: the launcher's session config, before any gateway, without the
+ * replaced profile plugins and with the variable's, written
  * to the cache by content. Prints its path, for OPENCODE_CONFIG.
  */
 export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
-  launch: ({ args, kept, replaced, plugins, rest, cache }) => {
-    if (!plugins.length && !replaced.length) return rest[0];
-    const config = JSON.parse(readFileSync(rest[0], 'utf8'));
+  launch: ({ args, kept, replaced, plugins, cache }) => {
+    const base = join(args.config, 'opencode.json');
+    if (!plugins.length && !replaced.length) return base;
+    const config = JSON.parse(readFileSync(base, 'utf8'));
     const { skills, servers } = sections(config, args.schema);
     const owners: Record<string, string> = {};
     for (const plugin of kept) claim(owners, plugin.description);

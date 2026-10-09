@@ -4,8 +4,8 @@
 # One profile per launch, so the picker chooses a harness. The profile in
 # effect is resolved here (src/profile/resolve.ts) and handed to the launcher
 # in AGENT_DISTRO_PROFILE: a leading positional selector, else the
-# repository's agent-distro.nix, else AI_PROFILE, else the built-in `profile`.
-{ lib, pkgs, writeShellApplication, profile, launchers, nixpkgsReference ? null }:
+# repository's agent-distro.nix, else AI_PROFILE, else the built-in profile.
+{ lib, pkgs, writeShellApplication, launchers, info }:
 let
   runtime = import ./runtime.nix pkgs;
   discovered = import ./discover-harnesses.nix;
@@ -15,7 +15,8 @@ let
   # src/listing.ts types it. `--list --json` adds the profile in effect.
   listing = {
     profiles = [{
-      inherit (profile) name description;
+      # The built-in profile.
+      inherit (lib.head info.builtins) name description;
       harnesses = map
         (harness: {
           name = harness;
@@ -26,11 +27,7 @@ let
     }];
   };
   menu = builtins.toJSON listing;
-  info = pkgs.writeText "agent-distro-profile-info.json" (builtins.toJSON (runtime.info {
-    inherit (profile) name description;
-    gateway = profile.gateway or null;
-    nixpkgs = nixpkgsReference;
-  }));
+  infoFile = pkgs.writeText "agent-distro-profile-info.json" (builtins.toJSON info);
   # Each harness's auth scheme, for the chooser's auth column; a gateway
   # harness's probe needs the profile in effect, so the chooser builds it.
   auth = builtins.toJSON (lib.genAttrs harnesses (harness:
@@ -38,13 +35,13 @@ let
     meta.auth or (throw "harnesses/${harness}/meta.nix has no `auth`; add `auth = \"anthropic\" | \"openai\" | \"gateway\"`.")));
   block = indent: lines: lib.concatMapStrings (line: "\n${indent}${line}") lines;
   arms = block "    " (map (harness: "${harness}) exec ${lib.getExe launchers.${harness}} \"$@\" ;;") harnesses);
-  builtinNames = map (b: b.name) (runtime.info { inherit (profile) name; gateway = null; }).builtins;
+  builtinNames = map (b: b.name) info.builtins;
   quote = lib.escapeShellArg;
   noTty = [ "Set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, use agent-distro <harness>, or run this from a terminal." ];
 in
 writeShellApplication {
   name = "agent-distro";
-  passthru = { inherit listing info; };
+  passthru = { inherit listing; info = infoFile; };
   text = ''
     invalid=${quote "Invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " harnesses}."}
 
@@ -58,8 +55,8 @@ writeShellApplication {
 
     if [ "''${1-}" = --list ]; then
       case "$#:''${2-}" in
-        1:) exec ${runtime.script "profile/cli.ts"} list ${info} ${quote menu} ;;
-        2:--json) exec ${runtime.script "profile/cli.ts"} list ${info} ${quote menu} --json ;;
+        1:) exec ${runtime.script "profile/cli.ts"} list ${infoFile} ${quote menu} ;;
+        2:--json) exec ${runtime.script "profile/cli.ts"} list ${infoFile} ${quote menu} --json ;;
         *) echo "usage: agent-distro --list [--json]" >&2; exit 2 ;;
       esac
     fi
@@ -83,7 +80,7 @@ writeShellApplication {
 
     # The launcher would resolve the same profile, but for the positional
     # selector, which only this command reads.
-    AGENT_DISTRO_PROFILE=$(${runtime.script "profile/cli.ts"} resolve ${info} "$selected_profile")
+    AGENT_DISTRO_PROFILE=$(${runtime.script "profile/cli.ts"} resolve ${infoFile} "$selected_profile")
     export AGENT_DISTRO_PROFILE
 
     # Environment wins over the positional harness.

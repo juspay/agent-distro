@@ -156,15 +156,6 @@ test('precedence: positional, then the repository, then AI_PROFILE, then the bui
   assert.deepEqual(select(undefined, undefined), { source: 'builtin', origin: 'vanilla' });
 });
 
-test('what the picker reads as a profile rather than a harness argument', () => {
-  for (const value of ['vanilla', './repo', '/abs', 'github:juspay/skills', 'nixpkgs/branch', 'git+file:///x']) {
-    assert.ok(profile.isReference(value, info), value);
-  }
-  for (const value of ['--version', '-c', '-x=a:b', 'juspay', 'repo']) {
-    assert.ok(!profile.isReference(value, info), value);
-  }
-});
-
 test('a built-in name needs no nix; anything else that is not a reference is refused', () => {
   const before = calls('');
   assert.deepEqual(resolve({ source: 'variable', origin: 'vanilla' }), {
@@ -405,8 +396,7 @@ test('a launch uses the profile in effect: its plugins replace the built-in ones
   writeFileSync(description, JSON.stringify({ root: kept, version: '1.0.0', manifest: { $schema: SCHEMA, name: 'kept' }, skills: {}, mcpServers: {}, reports: [] }));
   const args = join(temporary(), 'args.json');
   writeFileSync(args, JSON.stringify({
-    harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [{ description, dir: '/built-in/kept' }],
-    gateway: null, info,
+    harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [{ description, dir: '/built-in/kept' }], info,
   }));
   const launch = (cwd: string, env: NodeJS.ProcessEnv = {}) => {
     const result = spawnSync(process.execPath, [join(src, 'plugin/launch-cli.mjs'), args],

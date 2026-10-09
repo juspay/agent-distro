@@ -1,6 +1,6 @@
 # Claude's plugin layout and CLI are local to this adapter. Shared sources stay
 # portable; no provider initialization or persistent plugin install is needed.
-{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
+{ pkgs, plugins, info, package }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils;
   claude = package;
@@ -15,7 +15,7 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "claude";
-    inherit gateway profileName nixpkgs;
+    inherit info;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${adaptPlugin plugin}"; }) plugins;
@@ -24,13 +24,10 @@ in
 writeShellApplication {
   name = "claude";
   derivationArgs.version = claude.version;
-  # `launched` is assigned by the launch's eval.
-  excludeShellChecks = [ "SC2154" ];
   text = ''
     # The profile in effect and its packages, and its plugin dirs, less those
     # AGENT_DISTRO_PLUGINS replaces, then the variable's own.
-    launch=$(${launchPlugins})
-    eval "$launch"
+    ${launchPlugins}
     eval "set -- $launched \"\$@\""
     exec ${lib.getExe claude} "$@"
   '';

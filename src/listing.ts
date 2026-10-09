@@ -44,7 +44,9 @@ export type Profile = {
   harnesses: Harness[];
 };
 
-export type Source = 'positional' | 'repository' | 'variable' | 'builtin';
+/** Where the profile in effect came from, first to last in precedence. */
+export const SOURCES = ['positional', 'repository', 'variable', 'builtin'] as const;
+export type Source = typeof SOURCES[number];
 
 /** The profile in effect, and where it came from. */
 export type InEffect = {
@@ -60,6 +62,9 @@ export type Listing = {
   profiles: Profile[];
   profile?: InEffect;
 };
+
+/** Names are selectors: one shell word, no `/`. */
+export const isName = (value: unknown): value is string => typeof value === 'string' && /^[^\s/]+$/.test(value);
 
 /** Where the profile in effect came from, in a few words. */
 export function sourceText({ source, origin }: Pick<InEffect, 'source' | 'origin'>): string {
@@ -90,11 +95,10 @@ function record(value: unknown, path: string, keys: Record<string, Field>, optio
     // Checked by the caller, against its own fields.
     if (type === 'object') continue;
     if (typeof field !== 'string') throw new Error(`${at} is not a string`);
-    if (type === 'source' && !['positional', 'repository', 'variable', 'builtin'].includes(field)) {
-      throw new Error(`${at} is not positional, repository, variable or builtin`);
+    if (type === 'source' && !(SOURCES as readonly string[]).includes(field)) {
+      throw new Error(`${at} is not ${SOURCES.join(', ')}`);
     }
-    // Names are selectors, joined as `profile/harness` and listed space-separated.
-    if (type === 'name' && !/^[^\s/]+$/.test(field)) throw new Error(`${at} is empty or contains whitespace or /`);
+    if (type === 'name' && !isName(field)) throw new Error(`${at} is empty or contains whitespace or /`);
   }
   const extra = Object.keys(fields).filter((key) => !(key in keys));
   if (extra.length) throw new Error(`${path} has unknown field ${extra[0]}`);

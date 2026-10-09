@@ -1,6 +1,6 @@
 # A session config composes with the user's global and project settings.
 # OpenCode v2 reuses this adapter with its own schema, shape and session setup.
-{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
+{ pkgs, plugins, info, package, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
   opencode = package;
@@ -17,7 +17,7 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "opencode";
-    inherit schema name gateway profileName nixpkgs;
+    inherit schema name info;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     config = "${config}";
@@ -40,13 +40,10 @@ assert builtins.elem schema [ "v1" "v2" ];
 writeShellApplication {
   inherit name;
   derivationArgs.version = opencode.version;
-  # `launched` and `profile_gateway*` are assigned by the launch's eval.
-  excludeShellChecks = [ "SC2154" ];
   text = ''
     # The profile in effect and its packages, and this config, less the
     # plugins that profile or AGENT_DISTRO_PLUGINS replaces, plus their own.
-    launch=$(${launchPlugins} ${config}/opencode.json)
-    eval "$launch"
+    ${launchPlugins}
     config=$launched
     ${initialization}
     if [ "''${OPENCODE_CONFIG+x}" = x ]; then

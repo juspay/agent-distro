@@ -1,5 +1,5 @@
 # Pi's subcommands require resources in settings, not prepended CLI flags.
-{ pkgs, plugins, gateway, package, profileName, nixpkgs ? null }:
+{ pkgs, plugins, info, package }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
   pi = package;
@@ -14,7 +14,7 @@ let
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "pi";
-    inherit gateway profileName nixpkgs;
+    inherit info;
     bash = runtimeShell;
     env = "${coreutils}/bin/env";
     config = "${config}";
@@ -24,15 +24,12 @@ in
 writeShellApplication {
   name = "pi";
   derivationArgs.version = pi.version;
-  # `launched` and `profile_gateway*` are assigned by the launch's eval.
-  excludeShellChecks = [ "SC2154" ];
   text = ''
     # The profile in effect and its packages, and its fragment, less the
     # plugins that profile or AGENT_DISTRO_PLUGINS replaces, plus their own;
     # loading plugins other than the built-in ones fails without a home to
     # merge them into.
-    launch=$(${launchPlugins})
-    eval "$launch"
+    ${launchPlugins}
     fragment=$launched
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
       agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.pi/agent}"
