@@ -10,7 +10,8 @@ let
   # A built-in name selects its bundle; a reference (an absolute path or a
   # flake reference, src/profile/resolve.ts) installs the default bundle and
   # is read at launch.
-  reference = !(available ? ${cfg.profile});
+  # A reference may be a store path, whose context no attribute name can carry.
+  reference = !(available ? ${builtins.unsafeDiscardStringContext cfg.profile});
   bundleName =
     if !reference then cfg.profile
     else if lib.hasPrefix "/" cfg.profile || lib.hasInfix ":" cfg.profile then defaultProfile
