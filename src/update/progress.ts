@@ -58,19 +58,14 @@ export class NixLog {
   private done = -1;
   private total = -1;
   private at = -Infinity;
-  /** The failed result's `detail`: nix's last `error:` line, scrubbed. */
-  private lastError: string | null = null;
+  /** The failed result's `detail`: nix's last `error:` line, scrubbed; null when none. */
+  errorDetail: string | null = null;
   /** Node's type stripping has no parameter properties, so the clock is a field. */
   private readonly now: () => number;
 
   /** `now` is injectable so a test can pin the 500 ms gap. */
   constructor(now: () => number = Date.now) {
     this.now = now;
-  }
-
-  /** The last `error:` line nix printed, for a failed result's `detail`. */
-  get errorDetail(): string | null {
-    return this.lastError;
   }
 
   /** Consume one line of nix's stderr: the event it yields, or null for bookkeeping. */
@@ -112,7 +107,7 @@ export class NixLog {
   /** A text event, remembering nix's last `error:` line for the failed result. */
   private text(text: string): Event {
     const detail = nixErrorDetail(text);
-    if (detail !== null) this.lastError = detail;
+    if (detail !== null) this.errorDetail = detail;
     return { text };
   }
 
