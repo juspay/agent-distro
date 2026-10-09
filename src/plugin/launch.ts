@@ -122,6 +122,7 @@ export function entries(value: string | undefined): string[] {
 }
 
 export { printable } from '../util.ts';
+
 function narString(hash: ReturnType<typeof createHash>, value: string | Buffer) {
   const bytes = typeof value === 'string' ? Buffer.from(value) : value;
   const length = Buffer.alloc(8);
