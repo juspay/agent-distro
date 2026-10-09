@@ -16,6 +16,17 @@ concurrency:
 permissions:
   contents: read
 
+# Shared by the build and the VM shards: both push what they build.
+env:
+  ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+  PUSH_CACHE: >-
+    ${{
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    }}
+
 jobs:
   build:
     strategy:
@@ -26,15 +37,6 @@ jobs:
         # aarch64-linux, so every supported system reaches the cache.
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
-      PUSH_CACHE: >-
-        ${{
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'pull_request' &&
-           github.event.pull_request.head.repo.full_name == github.repository)
-        }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -87,15 +89,76 @@ jobs:
         if: runner.os == 'Linux' && runner.arch == 'X64'
         run: nix build ./doc --no-link -L
 
-      - name: Wrapper package tests
-        # The wrapper tests boot NixOS VMs (x86_64-linux only: the test flake
-        # fixes its system, and ARM runners have no KVM). `nix flake check`
-        # builds the whole checks set. Two VMs at a time: four saturate the
-        # hosted runner's four vCPUs, and GitHub then cancels the step midway
-        # with no error whenever the checks miss the cache.
-        if: runner.os == 'Linux' && runner.arch == 'X64'
-        run: |
-          cd test && nix flake check -L --max-jobs 2
-
       - name: Test the distribution template
         run: bash test/template.sh
+
+  # The wrapper tests boot NixOS VMs (x86_64-linux only: the test flake fixes
+  # its system, and ARM runners have no KVM). One runner fits only two VMs at a
+  # time, so the checks are split round-robin across shards that run in
+  # parallel; the list is read from the flake, so a new check needs no edit.
+  test-plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          github_access_token: ${{ github.token }}
+
+      - name: Split the checks into shards
+        id: plan
+        run: |
+          names=$(cd test && nix eval --json .#checks.x86_64-linux --apply builtins.attrNames)
+          shards=$(jq -c --argjson n 8 '
+            [range($n) as $s
+              | [to_entries[] | select(.key % $n == $s) | ".#checks.x86_64-linux.\(.value)"]
+              | join(" ")]' <<<"$names")
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+
+  test:
+    # After the x86_64-linux build has pushed the launchers to the cache, so
+    # the shards fetch them instead of each building them again.
+    needs: [build, test-plan]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.test-plan.outputs.shards) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          github_access_token: ${{ github.token }}
+          extra_nix_config: |
+            extra-substituters = https://cache.nixos.asia/oss
+            extra-trusted-public-keys = oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=
+
+      - uses: ryanccn/attic-action@5635a15ef0c5462194ffbd05d1daeddc74625c3a # v0.5.0
+        if: env.PUSH_CACHE == 'true'
+        with:
+          endpoint: https://cache.nixos.asia
+          cache: oss
+          token: ${{ secrets.ATTIC_TOKEN }}
+
+      - name: Wrapper package tests
+        # Two VMs at a time: four saturate the hosted runner's four vCPUs, and
+        # GitHub then cancels the step midway with no error whenever the checks
+        # miss the cache.
+        run: |
+          cd test && nix build -L --no-link --max-jobs 2 ${{ matrix.shard }}
+
+  # One fixed context for the ruleset to require, whatever the shard names.
+  tests:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every shard to pass
+        run: |
+          if [ "${{ needs.test.result }}" != success ]; then
+            echo "::error::A wrapper test shard did not pass (${{ needs.test.result }})."
+            exit 1
+          fi

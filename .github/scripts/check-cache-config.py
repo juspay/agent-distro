@@ -19,7 +19,8 @@ for path in ["flake.nix", ".github/workflows/ci.yml"]:
     text = (root / path).read_text()
     for key, value in expected.items():
         found = re.findall(r"^\s*" + re.escape(key) + r"\s*=\s*\"?([^\"\n]+?)\"?;?\s*$", text, re.M)
-        if found != [value]:
+        # CI sets it once per job that installs Nix with the cache.
+        if not found or any(f != value for f in found):
             print(f"{path}: {key} is {found}, lib/cache.nix says {value!r}", file=sys.stderr)
             failed = True
 sys.exit(1 if failed else 0)
