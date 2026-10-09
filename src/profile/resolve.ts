@@ -193,15 +193,22 @@ function nixEnvironment(scrubbed = false): NodeJS.ProcessEnv {
 /** `value` as a Nix expression: JSON in a Nix string, `$` escaped against interpolation. */
 const nixJSON = (value: unknown) => `builtins.fromJSON ${JSON.stringify(JSON.stringify(value)).replaceAll('$', '\\$')}`;
 
-/** Run nix for its stdout; a failure is a LaunchError carrying nix's own message. */
+/**
+ * Run nix for its stdout; a failure is a LaunchError carrying nix's own
+ * message, or, when it printed none, how it exited and its last line of output.
+ */
 function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironment()): string {
   const result = spawnSync('nix', args, { encoding: 'utf8', maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'], env });
   if (result.error) {
     const missing = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
     throw new LaunchError(`${what}: ${missing ? 'nix is not on PATH' : result.error.message}`);
   }
-  if (result.status !== 0) throw new LaunchError(`${what}:\n${result.stderr.trim()}`);
-  return result.stdout;
+  if (result.status === 0) return result.stdout;
+  const message = result.stderr.trim();
+  if (message) throw new LaunchError(`${what}:\n${message}`);
+  const exit = result.signal ? `nix was killed by ${result.signal}` : `nix exited with code ${result.status}`;
+  const last = result.stdout.trim().split('\n').pop();
+  throw new LaunchError(`${what}: ${exit} and printed no error${last ? `; its last output: ${last}` : ''}`);
 }
 
 /** A flake reference's directory in the store: the fetched tree, and its `dir` within it. */

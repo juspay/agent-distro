@@ -30,7 +30,8 @@ const temporary = () => mkdtempSync(join(tmpdir(), 'profile-'));
  * profile it is asked about (its packages null when they are not empty and
  * no nixpkgs was given), keeping its arguments and environment in
  * `<bin>/eval.json`; `flake prefetch` maps a reference to
- * `<bin>/refs/<reference>` (a JSON answer); `build --dry-run` lists the
+ * `<bin>/refs/<reference>` (a JSON answer), and fails printing no error for
+ * `silent:`; `build --dry-run` lists the
  * derivations in `<bin>/miss`; `build --no-link` creates the package's output.
  */
 const bin = temporary();
@@ -53,6 +54,7 @@ if (args[0] === 'eval') {
   process.stdout.write(JSON.stringify(answer));
 } else if (args[0] === 'flake' && args[1] === 'prefetch') {
   const answer = path.join(bin, 'refs', encodeURIComponent(args[3]));
+  if (args[3].startsWith('silent:')) { console.log('fetching\\nhalfway'); process.exit(3); }
   if (!fs.existsSync(answer)) { console.error('error: cannot fetch'); process.exit(1); }
   process.stdout.write(fs.readFileSync(answer, 'utf8'));
 } else if (args[0] === 'build' && args.includes('--dry-run')) {
@@ -202,6 +204,9 @@ test('flake references are fetched: the profile and its plugin references, every
   assert.equal(calls('flake prefetch') - before, 4, 'the profile and its plugin reference, at each launch');
   assert.ok(existsSync(file));
   assert.throws(() => resolve({ source: 'variable', origin: 'github:no/such' }), /AI_PROFILE=github:no\/such: cannot fetch github:no\/such:\nerror: cannot fetch/);
+  // Nix failing without a word still says how it failed.
+  assert.throws(() => resolve({ source: 'variable', origin: 'silent:x' }),
+    /AI_PROFILE=silent:x: cannot fetch silent:x: nix exited with code 3 and printed no error; its last output: halfway$/);
 });
 
 test('the evaluation is cached per content and agent-distro build, and swept when unused', () => {
