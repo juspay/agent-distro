@@ -11,10 +11,10 @@
       "version_upper_bound": null,
       "release_prefix": null,
       "submodules": false,
-      "version": "v18.8.7",
-      "revision": "f261ed9faf16b61880b544f599876bface4ded0d",
-      "url": "https://api.github.com/repos/can1357/oh-my-pi/tarball/refs/tags/v18.8.7",
-      "hash": "sha256-nWuBvVNeJW9rgrSMhx5JP4CjFFJnfuMzjOlaGDCPVUU="
+      "version": "v18.8.9",
+      "revision": "fa5ff4a3a977a28b93d025f4cf50f046e019f18c",
+      "url": "https://api.github.com/repos/can1357/oh-my-pi/tarball/refs/tags/v18.8.9",
+      "hash": "sha256-t3OZP4E0mWFJU0RW3OMcGU2G52p5uasQdVPhITHnZec="
     }
   },
   "version": 8
