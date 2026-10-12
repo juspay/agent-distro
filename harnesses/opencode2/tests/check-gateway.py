@@ -18,7 +18,10 @@ for binary, provider_key, settings_key in [('opencode2', 'providers', 'settings'
     assert provider['env'] == [gateway['keyEnv']]
     assert provider['package'] == '@opencode/ai/providers/openai-compatible'
     assert config['model'] == {'providerID': 'litellm', 'model': gateway['models']['large']}
+    # v2's replacement for v1's small_model, resolved as the top-level model is.
+    assert config['agents']['title']['model'] == {'providerID': 'litellm', 'model': gateway['models']['small']}, config
     assert 'small_model' not in cached
+    assert cached['agents']['title']['model'] == f'litellm/{gateway['models']['small']}'
     machine.succeed('systemctl stop fake-gateway.service')
     assert opencode_config(binary) == config
     fallback = opencode_config(binary, 'XDG_CACHE_HOME=/home/testuser/empty-cache')
