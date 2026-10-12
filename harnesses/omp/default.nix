@@ -28,7 +28,7 @@ let
     default_layers=("${alwaysDefaults}")
     if [ -n "$profile_gateway" ]; then
       if [ "''${JUSPAY:-1}" = "0" ]; then
-        echo 'JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.' >&2
+        echo 'agent-distro omp: warning: JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.' >&2
       fi
       if [ "''${AI_GATEWAY:-1}" != "0" ] && [ "''${JUSPAY:-1}" != "0" ]; then
         # Roles on the gateway's models, and the resolved-model badge (src/harness/omp.ts).

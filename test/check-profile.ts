@@ -378,6 +378,10 @@ test('without network, a reference uses its last store path, and says so', () =>
   reference('git+file:///offline-plugin', pluginTree);
   const env = { XDG_CACHE_HOME: temporary() };
   const selection = { source: 'variable', origin: 'git+file:///offline-profile' };
+  // The first launch says what keeps it waiting; a cached one says nothing.
+  const first = stderrOf(() => profile.resolveProfile(info, selection, env));
+  assert.match(first, /^agent-distro profile: fetching git\+file:\/\/\/offline-profile …$/m);
+  assert.match(first, /^agent-distro profile: evaluating .*agent-distro\.nix …$/m);
   assert.equal(stderrOf(() => profile.resolveProfile(info, selection, env)), '');
   // Nix can no longer fetch either.
   rmSync(join(bin, 'refs', encodeURIComponent('git+file:///offline-profile')));

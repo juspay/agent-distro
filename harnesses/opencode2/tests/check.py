@@ -15,6 +15,6 @@ assert 'litellm' not in resolved.get('providers', {}), resolved
 env['OPENCODE_CONFIG'] = '/does-not-exist'
 result = subprocess.run([binary, '--version'], env=env, capture_output=True,
                         text=True, timeout=90, check=True)
-assert 'replacing OPENCODE_CONFIG' in result.stderr, result.stderr
+assert 'agent-distro opencode: warning: replacing OPENCODE_CONFIG' in result.stderr, result.stderr
 check_inventory()
 assert settings.read_bytes() == preserved

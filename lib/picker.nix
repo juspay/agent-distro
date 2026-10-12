@@ -37,14 +37,14 @@ let
   arms = block "    " (map (harness: "${harness}) exec ${lib.getExe launchers.${harness}} \"$@\" ;;") harnesses);
   builtinNames = map (b: b.name) info.builtins;
   quote = lib.escapeShellArg;
-  noTty = [ "Set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, use agent-distro <harness>, or run this from a terminal." ];
+  noTty = [ "agent-distro picker: error: set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, use agent-distro <harness>, or run this from a terminal." ];
 in
 writeShellApplication {
   name = "agent-distro";
   # Not `info`: NixOS installs a package's `info` as its texinfo output.
   passthru = { inherit listing infoFile; };
   text = ''
-    invalid=${quote "Invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " harnesses}."}
+    invalid=${quote "agent-distro picker: error: invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " harnesses}."}
 
     launch() {
       local target=$1
@@ -58,7 +58,7 @@ writeShellApplication {
       case "$#:''${2-}" in
         1:) exec ${runtime.script "profile/cli.ts"} list ${infoFile} ${quote menu} ;;
         2:--json) exec ${runtime.script "profile/cli.ts"} list ${infoFile} ${quote menu} --json ;;
-        *) echo "usage: agent-distro --list [--json]" >&2; exit 2 ;;
+        *) echo "agent-distro picker: error: usage: agent-distro --list [--json]" >&2; exit 2 ;;
       esac
     fi
 
