@@ -27,6 +27,11 @@
  * Each reference's last store path is remembered under
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/references/`, so a launch
  * without network uses what is already in the store, and says so.
+ *
+ * What can keep a launch waiting says so as it starts (src/log.ts `slow`): an
+ * evaluation the cache misses, a reference fetched for the first time, a
+ * package fetched from the binary cache. Every nix command, and every cache
+ * hit or miss, is logged at debug.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, utimesSync } from 'node:fs';
@@ -34,6 +39,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Gateway } from '../gateway/models.ts';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
 import { cacheRoot, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
+import { log, slow } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists } from '../util.ts';
 
@@ -204,6 +210,7 @@ const nixJSON = (value: unknown) => `builtins.fromJSON ${JSON.stringify(JSON.str
  * message, or, when it printed none, how it exited and its last line of output.
  */
 function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironment()): string {
+  log.profile.debug(`running nix ${args.join(' ')}`);
   const result = spawnSync('nix', args, { encoding: 'utf8', maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'], env });
   if (result.error) {
     const missing = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
@@ -233,7 +240,8 @@ export function prefetch(reference: string, what: string): string {
     const value = JSON.parse(text);
     storePath = value.storePath;
     dir = value.locked?.dir ?? value.original?.dir;
-  } catch {
+  } catch (error) {
+    log.profile.debug(`nix flake prefetch printed unreadable JSON: ${(error as Error).message}`);
     storePath = undefined;
   }
   if (!isString(storePath) || !isAbsolute(storePath)) {
@@ -242,27 +250,38 @@ export function prefetch(reference: string, what: string): string {
   return isString(dir) && dir ? join(storePath, dir) : storePath;
 }
 
+/** The store path `reference` last fetched to, or '' when there is none. */
+function remembered(memory: string): string {
+  try {
+    return readFileSync(memory, 'utf8').trim();
+  } catch (error) {
+    // Never fetched: nothing to fall back to.
+    log.profile.debug(`no remembered store path at ${memory}: ${(error as Error).message}`);
+    return '';
+  }
+}
+
 /**
  * `prefetch`, remembering the store path under the cache; when nix cannot
  * fetch (say, offline past the tarball TTL), the last one, if still in the
- * store, noted on stderr.
+ * store, with a warning. A reference whose last store path is still there is
+ * most likely fresh in nix's own cache, so only one that is not says it is
+ * being fetched.
  */
 function fetched(reference: string, what: string, cache: string): string {
   const memory = join(cache, 'references', sha256(reference));
+  const last = remembered(memory);
+  const stored = isAbsolute(last) && existsSync(last);
   try {
-    const path = prefetch(reference, what);
+    const fetch = () => prefetch(reference, what);
+    const path = stored ? fetch() : slow(log.profile, `fetching ${reference}`, fetch);
     writeAtomic(memory, path + '\n');
     return path;
   } catch (error) {
     if (!(error instanceof LaunchError)) throw error;
-    let last = '';
-    try {
-      last = readFileSync(memory, 'utf8').trim();
-    } catch {
-      // Never fetched: nothing to fall back to.
-    }
-    if (!isAbsolute(last) || !existsSync(last)) throw error;
-    process.stderr.write(`agent-distro: ${what}: cannot fetch ${printable(reference)}; using ${last}, from the last launch that could\n`);
+    if (!stored) throw error;
+    log.profile.warn(`${what}: cannot fetch ${reference}; using ${last}, from the last launch that could`);
+    log.profile.debug(error.message);
     return last;
   }
 }
@@ -314,13 +333,15 @@ function evaluated(file: string, info: Info, cache: string, what: string, again:
       if (isEvaluated(value)) {
         const now = new Date();
         utimesSync(dirname(path), now, now);
+        log.profile.debug(`cache hit: ${path}`);
         return value;
       }
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
     }
   }
-  const value = evaluate(file, info, cache, what);
+  log.profile.debug(`cache ${again ? 'bypassed' : 'miss'}: ${path}`);
+  const value = slow(log.profile, `evaluating ${file}`, () => evaluate(file, info, cache, what));
   writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
   sweep(profiles, (name) => name !== key);
   return value;
@@ -331,16 +352,18 @@ function realise(profile: Evaluated, what: string): string[] {
   for (const { name, drvPath, out } of profile.packages) {
     if (existsSync(out)) continue;
     const target = `${drvPath}^*`;
-    const plan = wouldCompile('nix', target, [], nixEnvironment());
-    if ('unknown' in plan) {
-      throw new LaunchError(`${what}: cannot tell whether package ${name} is in the binary cache (${plan.unknown}); `
-        + 'agent-distro never compiles');
-    }
-    if (plan.names) {
-      throw new LaunchError(`${what}: package ${name} is not in the binary cache (would build ${plan.names}); `
-        + 'agent-distro never compiles');
-    }
-    nix(['build', '--no-link', target], `${what}: cannot fetch package ${name}`);
+    slow(log.profile, `fetching package ${name} from the binary cache`, () => {
+      const plan = wouldCompile('nix', target, [], nixEnvironment(), log.profile);
+      if ('unknown' in plan) {
+        throw new LaunchError(`${what}: cannot tell whether package ${name} is in the binary cache (${plan.unknown}); `
+          + 'agent-distro never compiles');
+      }
+      if (plan.names) {
+        throw new LaunchError(`${what}: package ${name} is not in the binary cache (would build ${plan.names}); `
+          + 'agent-distro never compiles');
+      }
+      nix(['build', '--no-link', target], `${what}: cannot fetch package ${name}`);
+    });
   }
   return profile.packages.map((p) => p.bin);
 }

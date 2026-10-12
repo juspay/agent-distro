@@ -109,7 +109,7 @@ function install(home: string, codex: string, source: string, marketplace: strin
     const built = join(scratch, 'plugins', 'cache', marketplace);
     if (result.status !== 0 || !existsSync(join(built, name))) {
       const detail = (result.stderr || String(result.error ?? `no ${name} in its cache`)).trim();
-      throw new LaunchError(`Codex: cannot install ${id}: ${detail}`);
+      throw new LaunchError(`cannot install ${id}: ${detail}`);
     }
     mkdirSync(join(home, 'plugins', 'cache'), { recursive: true });
     try {

@@ -13,6 +13,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { sourceText, type Listing } from '../listing.ts';
+import { log } from '../log.ts';
 import { LaunchError, printable } from '../plugin/launch.ts';
 import { isSystemError } from '../util.ts';
 import { resolveProfile, select, workingDirectory, type Info, type Resolved } from './resolve.ts';
@@ -47,7 +48,7 @@ if (import.meta.main) {
     process.exitCode = run(process.argv.slice(2));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;
-    process.stderr.write(`agent-distro: ${printable((error as Error).message)}\n`);
+    log.profile.error((error as Error).message);
     process.exitCode = 1;
   }
 }

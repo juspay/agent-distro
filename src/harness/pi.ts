@@ -20,6 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { Gateway } from '../gateway/models.ts';
+import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
@@ -95,7 +96,7 @@ export function writeConfig(out: string, argsPath: string) {
     const description = readDescription(path);
     claim(owners, description);
     const fragment = pluginFragment(description, out, args,
-      (message) => process.stderr.write(`${description.root}: ${message}\n`));
+      (message) => log.pi.warn(`${description.root}: ${message}`));
     skills.push(...fragment.skills);
     Object.assign(servers, fragment.mcpServers);
   }
@@ -265,7 +266,7 @@ function run(argv: string[]): number {
       writeConfig(rest[0], rest[1]);
     } catch (error) {
       if (!(error instanceof Invalid)) throw error;
-      process.stderr.write(error.message + '\n');
+      log.pi.error(error.message);
       return 1;
     }
     return 0;
@@ -275,10 +276,10 @@ function run(argv: string[]): number {
     mergeState(rest[0], rest[1], rest[2], rest[3]);
   } catch (error) {
     if (isSystemError(error)) {
-      process.stderr.write(`Pi: warning: cannot merge user configuration: ${error.message}\n`);
+      log.pi.warn(`cannot merge user configuration: ${error.message}`);
       return rest[0] === '--check' ? 2 : 0;
     }
-    process.stderr.write(`Pi: invalid configuration; no files changed: ${(error as Error).message}\n`);
+    log.pi.error(`invalid configuration; no files changed: ${(error as Error).message}`);
     return 1;
   }
   return 0;

@@ -23,6 +23,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { WriteStream } from 'node:tty';
 import { parseArgs } from 'node:util';
 import { parseListing, sourceText, type InEffect, type Listing, type Profile } from '../listing.ts';
+import { log } from '../log.ts';
 import { isResolved } from '../profile/resolve.ts';
 import { probe, spec, type Io, type Scheme, type Status } from './auth.ts';
 
@@ -435,8 +436,8 @@ function draw(menu: Menu, fd: number, style: Style): Promise<string | undefined>
     // Either step can fail on a terminal already gone; the other still runs.
     restore = () => {
       restore = () => {};
-      try { input.setRawMode(false); } catch {}
-      try { writeSync(fd, '\x1b[?25h\x1b[?1049l'); } catch {}
+      try { input.setRawMode(false); } catch (error) { log.picker.debug(`cannot leave raw mode: ${(error as Error).message}`); }
+      try { writeSync(fd, '\x1b[?25h\x1b[?1049l'); } catch (error) { log.picker.debug(`cannot restore the terminal: ${(error as Error).message}`); }
     };
     input.on('keypress', onKey);
     // A terminal that goes away (its PTY hung up) quits.
@@ -475,7 +476,7 @@ async function plain(menu: Menu): Promise<string> {
 }
 
 function usage(message: string): never {
-  process.stderr.write(`choose.ts: ${message}\nusage: choose.ts MENU_JSON [--auth AUTH_JSON] [--profile RESOLVED_JSON] [--remembered HARNESS]\n`);
+  log.picker.error(`${message}\nusage: choose.ts MENU_JSON [--auth AUTH_JSON] [--profile RESOLVED_JSON] [--remembered HARNESS]`);
   process.exit(2);
 }
 

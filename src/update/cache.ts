@@ -5,6 +5,7 @@
  * take effect.
  */
 import { spawnSync } from 'node:child_process';
+import { log } from '../log.ts';
 
 export type Cache = { url: string; key: string; usable: boolean };
 
@@ -21,20 +22,27 @@ export function cacheUsable(trusted: boolean, substituters: string, keys: string
   return words(substituters).map(trim).includes(trim(url)) && words(keys).includes(key);
 }
 
+/** What `nix ARGS` prints, or null, warned with nix's own error, when it fails. */
 function output(nix: string, args: string[]): string | null {
-  const result = spawnSync(nix, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  return result.status === 0 ? result.stdout : null;
+  log.update.debug(`running ${nix} ${args.join(' ')}`);
+  const result = spawnSync(nix, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.status === 0) return result.stdout;
+  const detail = result.error?.message ?? (result.stderr.trim() || `exit ${result.status ?? result.signal}`);
+  log.update.warn(`${nix} ${args.join(' ')} failed: ${detail}`);
+  return null;
 }
 
 /** Each configured cache, and whether this user's nix would use it. */
 export function checkCaches(nix: string, substituters: Record<string, string>): Cache[] {
   let trusted = false;
+  const text = output(nix, ['store', 'info', '--json']);
   try {
-    const info = JSON.parse(output(nix, ['store', 'info', '--json']) ?? 'null');
+    const info = text === null ? null : JSON.parse(text);
     // Nix 2.34 reports a boolean; older releases 1. A local (single-user) store
     // has no daemon to distrust us and may omit the field.
-    trusted = info.trusted === true || info.trusted === 1 || (info.trusted == null && info.url !== 'daemon');
-  } catch {
+    trusted = info !== null && (info.trusted === true || info.trusted === 1 || (info.trusted == null && info.url !== 'daemon'));
+  } catch (error) {
+    log.update.warn(`nix store info printed unreadable JSON: ${(error as Error).message}`);
     trusted = false;
   }
   const show = (setting: string) => output(nix, ['config', 'show', setting]) ?? '';

@@ -20,6 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname } from 'node:path';
 import { Document, isAlias, isMap, isScalar, isSeq, parse, parseDocument, type YAMLMap } from 'yaml';
 import type { Gateway } from '../gateway/models.ts';
+import { log } from '../log.ts';
 import type { Adapter, ProfileEntry } from '../plugin/launch.ts';
 import { shellQuote } from '../plugin/launcher.ts';
 import { decodeUtf8, isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -158,9 +159,9 @@ if (import.meta.main) {
     if (isSystemError(error)) {
       // The defaults are a convenience; an agent directory the wrapper cannot
       // write must not stop the harness from launching.
-      process.stderr.write(`omp: warning: cannot fill config defaults in ${config}: ${error.message}\n`);
+      log.omp.warn(`cannot fill config defaults in ${config}: ${error.message}`);
     } else {
-      process.stderr.write(`omp: cannot fill config defaults in ${config}: ${(error as Error).message}\n`);
+      log.omp.error(`cannot fill config defaults in ${config}: ${(error as Error).message}`);
       process.exitCode = 1;
     }
   }

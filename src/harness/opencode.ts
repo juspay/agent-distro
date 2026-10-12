@@ -13,6 +13,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
@@ -83,11 +84,11 @@ function main(out: string, argsPath: string) {
       claim(owners, description);
     } catch (error) {
       if (!(error instanceof LaunchError)) throw error;
-      process.stderr.write(error.message + '\n');
+      log.opencode.error(error.message);
       process.exit(1);
     }
     const fragment = pluginFragment(description, out, args,
-      (message) => process.stderr.write(`${description.root}: ${message}\n`));
+      (message) => log.opencode.warn(`${description.root}: ${message}`));
     if (fragment.skills) skillsPaths.push(fragment.skills);
     Object.assign(servers, fragment.servers);
   }

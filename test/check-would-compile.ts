@@ -102,7 +102,7 @@ async function run(nix: string, { progress = false } = {}) {
     substituters: {}, periodSeconds: 21600, offsetSeconds: 7200,
   }, {
     summary: () => {},
-    note: (line) => notes.push(line),
+    note: (_level, message) => notes.push(message),
     result: (result) => results.push(result),
     progress: () => {},
   }, progress ? new NixLog() : undefined);
