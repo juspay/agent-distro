@@ -62,7 +62,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, null> = {
     const override = (value: string) => words.push('-c', shellQuote(value));
     const settable = (name: string, action: string) => {
       if (!name.includes('.')) return true;
-      report(`Codex: cannot ${action} plugin ${JSON.stringify(name)} for one launch: its name contains "."`);
+      report(`cannot ${action} plugin ${JSON.stringify(name)} for one launch: its name contains "."`);
       return false;
     };
     for (const plugin of replaced) {
@@ -83,7 +83,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, null> = {
 
 export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
   const home = env.CODEX_HOME || (env.HOME ? join(env.HOME, '.codex') : '');
-  if (!home) throw new LaunchError('Codex: cannot install plugins: CODEX_HOME and HOME are unset');
+  if (!home) throw new LaunchError('cannot install plugins: CODEX_HOME and HOME are unset');
   return home;
 }
 

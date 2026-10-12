@@ -9,10 +9,10 @@
 
   agent-distro gateway: warning: $profile_gateway_key_env is not set.
 
-  Create an API key at: $profile_gateway_url/dashboard
-  $profile_gateway_key_hint
+    Create an API key at: $profile_gateway_url/dashboard
+    $profile_gateway_key_hint
 
-  Tip: export $profile_gateway_key_env=... to skip this prompt next time.
+    Tip: export $profile_gateway_key_env=... to skip this prompt next time.
 
   MSG
     if [ ! -t 0 ]; then

@@ -58,7 +58,7 @@ function claim(owners: Record<string, string>, description: Description) {
   const plugin = description.manifest.name;
   for (const name of Object.keys(description.mcpServers)) {
     if (Object.hasOwn(owners, name)) {
-      throw new LaunchError(`OpenCode: MCP server ${JSON.stringify(name)} is declared by both `
+      throw new LaunchError(`MCP server ${JSON.stringify(name)} is declared by both `
         + `plugins ${JSON.stringify(owners[name])} and ${JSON.stringify(plugin)}`);
     }
     owners[name] = plugin;

@@ -58,7 +58,7 @@ writeShellApplication {
       case "$#:''${2-}" in
         1:) exec ${runtime.script "profile/cli.ts"} list ${infoFile} ${quote menu} ;;
         2:--json) exec ${runtime.script "profile/cli.ts"} list ${infoFile} ${quote menu} --json ;;
-        *) echo "agent-distro picker: error: usage: agent-distro --list [--json]" >&2; exit 2 ;;
+        *) echo "agent-distro picker: usage: agent-distro --list [--json]" >&2; exit 2 ;;
       esac
     fi
 

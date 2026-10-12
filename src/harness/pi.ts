@@ -79,7 +79,7 @@ function claim(owners: Record<string, string>, description: Description, Failure
   const plugin = description.manifest.name;
   for (const name of Object.keys(description.mcpServers)) {
     if (Object.hasOwn(owners, name)) {
-      throw new Failure(`Pi: MCP server ${JSON.stringify(name)} is declared by both `
+      throw new Failure(`MCP server ${JSON.stringify(name)} is declared by both `
         + `plugins ${JSON.stringify(owners[name])} and ${JSON.stringify(plugin)}`);
     }
     owners[name] = plugin;
@@ -232,7 +232,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
     // Pi reads plugins only from its agent directory; without one they would
     // be dropped without a word.
     if (!process.env.PI_CODING_AGENT_DIR && !process.env.HOME) {
-      throw new LaunchError('Pi: cannot load AGENT_DISTRO_PLUGINS: HOME and PI_CODING_AGENT_DIR are unset');
+      throw new LaunchError('cannot load AGENT_DISTRO_PLUGINS: HOME and PI_CODING_AGENT_DIR are unset');
     }
     const base: Fragment = JSON.parse(readFileSync(join(args.config, 'config.json'), 'utf8'));
     const owners: Record<string, string> = {};
