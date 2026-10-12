@@ -89,7 +89,8 @@ for (const schema of ['v1', 'v2'] as const) {
       assert.equal(argv[argv.indexOf('--config') + 1], '-');
       assert.equal(readFileSync(curl + '.stdin', 'utf8'), 'header = "Authorization: Bearer test\\"key\\\\value"\n');
       assert.equal(selected, cache);
-      assert.equal(warning, '');
+      // Discovery says it is asking the gateway, and nothing more.
+      assert.match(warning, /^agent-distro gateway: discovering \S+ models at \S+ …\n$/);
       const saved = readFileSync(cache, 'utf8');
       assert.ok(!saved.includes(key));
       assert.deepEqual(new Set(Object.keys(JSON.parse(saved)[providerKey].litellm.models)), new Set(['served', 'large', 'small']));
@@ -98,14 +99,14 @@ for (const schema of ['v1', 'v2'] as const) {
       [selected, warning] = invoke();
       assert.equal(selected, cache);
       assert.ok(warning.includes(`cached model list from ${cache}`), warning);
-      assert.equal(warning.trimEnd().split('\n').length, 1, warning);
+      assert.equal(warning.trimEnd().split('\n').filter((line) => !line.endsWith(' …')).length, 1, warning);
       assert.ok(!warning.includes(key));
       assert.equal(readFileSync(cache, 'utf8'), saved);
       rmSync(cache);
       [selected, warning] = invoke();
       assert.equal(selected, base);
       assert.ok(warning.includes(`two profile aliases from ${base}`), warning);
-      assert.equal(warning.trimEnd().split('\n').length, 1, warning);
+      assert.equal(warning.trimEnd().split('\n').filter((line) => !line.endsWith(' …')).length, 1, warning);
 
       // An answer we cannot use falls back the same way, and writes nothing.
       rmSync(curl + '.down');
