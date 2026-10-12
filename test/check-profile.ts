@@ -286,17 +286,22 @@ test('packages come from the binary cache or the launch stops naming them', () =
   // Not in the store and nothing to compile: fetched with nix build --no-link.
   const builds = () => calls('build --no-link');
   const before = builds();
-  assert.deepEqual(profile.resolveProfile(info, selection, env).paths, [join(out, 'bin')]);
+  const fetching = stderrOf(() => {
+    assert.deepEqual(profile.resolveProfile(info, selection, env).paths, [join(out, 'bin')]);
+  });
+  assert.match(fetching, /^agent-distro profile: fetching package pkg-1\.0 from the binary cache …$/m);
   assert.equal(builds() - before, 1);
   // Present: nothing to do.
   profile.resolveProfile(info, selection, env);
   assert.equal(builds() - before, 1);
-  // A cache miss stops the launch, naming the package, and builds nothing.
+  // A cache miss stops the launch, naming the package, and builds nothing;
+  // nothing is said to be fetched before the dry run has found it cached.
   rmSync(out, { recursive: true });
   writeFileSync(join(bin, 'miss'), '/nix/store/22222222222222222222222222222222-uncached-1.0.drv');
   try {
-    assert.throws(() => profile.resolveProfile(info, selection, env),
-      /package pkg-1\.0 is not in the binary cache \(would build uncached-1\.0\); agent-distro never compiles/);
+    const missed = stderrOf(() => assert.throws(() => profile.resolveProfile(info, selection, env),
+      /package pkg-1\.0 is not in the binary cache \(would build uncached-1\.0\); agent-distro never compiles/));
+    assert.ok(!missed.includes('fetching package'), missed);
     assert.equal(builds() - before, 1);
   } finally {
     rmSync(join(bin, 'miss'));
