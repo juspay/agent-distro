@@ -352,18 +352,19 @@ function realise(profile: Evaluated, what: string): string[] {
   for (const { name, drvPath, out } of profile.packages) {
     if (existsSync(out)) continue;
     const target = `${drvPath}^*`;
-    slow(log.profile, `fetching package ${name} from the binary cache`, () => {
-      const plan = wouldCompile('nix', target, [], nixEnvironment(), log.profile);
-      if ('unknown' in plan) {
-        throw new LaunchError(`${what}: cannot tell whether package ${name} is in the binary cache (${plan.unknown}); `
-          + 'agent-distro never compiles');
-      }
-      if (plan.names) {
-        throw new LaunchError(`${what}: package ${name} is not in the binary cache (would build ${plan.names}); `
-          + 'agent-distro never compiles');
-      }
-      nix(['build', '--no-link', target], `${what}: cannot fetch package ${name}`);
-    });
+    // The dry run first: only a package that the cache does have is announced
+    // as being fetched.
+    const plan = wouldCompile('nix', target, [], nixEnvironment(), log.profile);
+    if ('unknown' in plan) {
+      throw new LaunchError(`${what}: cannot tell whether package ${name} is in the binary cache (${plan.unknown}); `
+        + 'agent-distro never compiles');
+    }
+    if (plan.names) {
+      throw new LaunchError(`${what}: package ${name} is not in the binary cache (would build ${plan.names}); `
+        + 'agent-distro never compiles');
+    }
+    slow(log.profile, `fetching package ${name} from the binary cache`,
+      () => nix(['build', '--no-link', target], `${what}: cannot fetch package ${name}`));
   }
   return profile.packages.map((p) => p.bin);
 }
