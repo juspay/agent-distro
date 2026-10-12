@@ -87,7 +87,10 @@ export function main(base: string, cache: string, curl: string, keyEnv: string, 
   const url = atPath(provider, shape.url);
   log.gateway.debug(`gateway ${url}, key in $${keyEnv}`);
   try {
-    const names = slow(log.gateway, `discovering ${shape.label} models at ${url}`, () => served(curl, url, keyEnv));
+    // Discovery runs on every gateway launch and curl is capped at a few
+    // seconds, so it only says so at debug: an info line would print each time.
+    const names = slow(log.gateway, `discovering ${shape.label} models at ${url}`,
+      () => served(curl, url, keyEnv), 'debug');
     for (const name of names) addModel(provider.models, name, shape);
     mkdirSync(dirname(cache), { recursive: true });
     // Concurrent launches must never see a partially written config.
