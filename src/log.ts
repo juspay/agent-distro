@@ -19,15 +19,21 @@
  * call site never escapes text that only reaches stderr.
  *
  * AGENT_DISTRO_LOG sets the level: silent, error, warn, info (the default),
- * debug or trace. The tag names the component; `log.<tag>` is its logger.
+ * debug or trace. The tag names the component; `log.<tag>` is its logger. A
+ * value no level matches warns once and falls back to info; `unknown` holds it
+ * so a process that starts others can pass them the level it settled on
+ * instead of having each repeat that warning.
  *
  * `slow` wraps work that can keep a person waiting. Nearly everything here is
  * synchronous (spawnSync), and a timer cannot interrupt a synchronous call to
  * say it is taking long, so for a synchronous `fn` the start line is printed
  * before it runs: call sites wrap only work known to be slow, once a cache has
- * missed (an evaluation not cached, a reference not in the store, a build).
- * An `async` function instead gets the start line only if it has not settled
- * after NOTICE_MS. Either way the time taken is logged at debug.
+ * missed (an evaluation not cached, a reference not in the store, a build
+ * the dry run found in the cache). Work that is bounded and runs every launch
+ * passes `notice: 'debug'` instead, which only records the time taken.
+ * An `async` function gets the start line only if it has not settled after
+ * NOTICE_MS; a plain function returning a promise is timed as it settles.
+ * Either way the time taken is logged at debug.
  */
 import { fstatSync } from 'node:fs';
 import { formatWithOptions, styleText } from 'node:util';
@@ -101,17 +107,21 @@ export function createLogger({ stream = process.stderr, env = process.env, journ
   const asked = env[VARIABLE];
   const level: Level = asked === undefined || asked === '' ? 'info'
     : (LEVELS as readonly string[]).includes(asked) ? asked as Level : 'info';
+  // The value this process could not use, for a caller that passes the level
+  // on to the processes it starts, so they do not repeat the warning below.
+  const unknown = asked && level !== asked ? asked : null;
   const root = createConsola({
     level: level === 'silent' ? -1 : level,
     // Every message, even a repeated one: consola otherwise folds repeats.
     throttle: 0,
     reporters: [{ log: (object) => void stream.write(format(object, stream, toJournal)) }],
   });
-  if (asked && level !== asked) root.warn(`unknown ${VARIABLE}=${asked}; using info (${LEVELS.join(', ')})`);
+  if (unknown) root.warn(`unknown ${VARIABLE}=${unknown}; using info (${LEVELS.join(', ')})`);
   const tag = (name: string) => root.withTag(name);
   return {
     root,
     level,
+    unknown,
     profile: tag('profile'),
     update: tag('update'),
     gateway: tag('gateway'),
@@ -133,18 +143,29 @@ const AsyncFunction = (async () => {}).constructor;
 
 const seconds = (since: number) => `${((performance.now() - since) / 1000).toFixed(1)}s`;
 
-/** Run `fn`, telling a person waiting on it what it is; see the head of this file. */
-export function slow<T>(logger: Logger, label: string, fn: () => T): T {
+const thenable = (value: unknown): value is PromiseLike<unknown> =>
+  typeof (value as PromiseLike<unknown> | null | undefined)?.then === 'function';
+
+/**
+ * Run `fn`, telling a person waiting on it what it is; see the head of this
+ * file. `notice` is the level of that line: `debug` for work that is bounded
+ * and runs on every launch, where only the time taken is worth recording.
+ */
+export function slow<T>(logger: Logger, label: string, fn: () => T, notice: 'info' | 'debug' = 'info'): T {
   const since = performance.now();
+  const start = () => notice === 'info' ? logger.start(`${label} …`) : logger.debug(`${label} …`);
   const done = () => logger.debug(`${label}: done in ${seconds(since)}`);
-  if (!(fn instanceof AsyncFunction)) {
-    logger.start(`${label} …`);
-    const result = fn();
+  // Only an `async` function can be left to the timer: a synchronous call
+  // blocks the loop, so nothing could print its notice while it runs.
+  const timer = fn instanceof AsyncFunction ? setTimeout(start, NOTICE_MS) : (start(), undefined);
+  const result = fn();
+  // A plain function may still return a promise: time what it returned.
+  if (!thenable(result)) {
+    clearTimeout(timer);
     done();
     return result;
   }
-  const timer = setTimeout(() => logger.start(`${label} …`), NOTICE_MS);
-  return (fn() as Promise<unknown>).finally(() => {
+  return Promise.resolve(result).finally(() => {
     clearTimeout(timer);
     done();
   }) as T;

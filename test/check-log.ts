@@ -86,12 +86,16 @@ test('each level shows itself and everything more severe', () => {
   assert.deepEqual(LEVELS, ['silent', 'error', 'warn', 'info', 'debug', 'trace']);
 });
 
-test('an unknown level is info, with one warning', () => {
+test('an unknown level is info, with one warning, and is named for the processes this one starts', () => {
   const text = everything({ AGENT_DISTRO_LOG: 'loud' });
   assert.equal(text.split('\n')[0], 'agent-distro: warning: unknown AGENT_DISTRO_LOG=loud; using info '
     + '(silent, error, warn, info, debug, trace)');
   assert.equal(text.split('\n').filter((line) => line.includes('unknown')).length, 1);
   assert.ok(text.includes('agent-distro profile: i\n') && !text.includes(': d\n'), text);
+  const { stream } = sink();
+  assert.equal(createLogger({ stream, env: { AGENT_DISTRO_LOG: 'loud' } }).unknown, 'loud');
+  assert.equal(createLogger({ stream, env: { AGENT_DISTRO_LOG: 'debug' } }).unknown, null);
+  assert.equal(createLogger({ stream, env: {} }).unknown, null);
 });
 
 test('on the journal: each line starts with its sd-daemon priority', () => {
@@ -163,4 +167,24 @@ test('slow: an async call says so only once it has taken NOTICE_MS', async () =>
   assert.equal(text(), '');
   await slow(log.gateway, 'waiting', async () => new Promise((resolve) => setTimeout(resolve, NOTICE_MS + 200)));
   assert.equal(text(), 'agent-distro gateway: waiting …\n');
+});
+
+test('slow: a plain function returning a promise is timed as it settles', async () => {
+  const { stream, text } = sink();
+  const log = createLogger({ stream, env: { AGENT_DISTRO_LOG: 'debug' } });
+  const answer = Promise.withResolvers<string>();
+  const settled = slow(log.gateway, 'asking', () => answer.promise);
+  assert.equal(text(), 'agent-distro gateway: asking …\n');
+  setTimeout(() => answer.resolve('a'), 50);
+  assert.equal(await settled, 'a');
+  assert.match(text().split('\n')[1], /^agent-distro gateway: asking: done in 0\.\ds$/);
+});
+
+test("slow: notice 'debug' records only the time taken", () => {
+  const { stream, text } = sink();
+  assert.equal(slow(createLogger({ stream, env: {} }).gateway, 'discovering', () => 1, 'debug'), 1);
+  assert.equal(text(), '');
+  const loud = sink();
+  slow(createLogger({ stream: loud.stream, env: { AGENT_DISTRO_LOG: 'debug' } }).gateway, 'discovering', () => 1, 'debug');
+  assert.equal(loud.text().split('\n')[0], 'agent-distro gateway: discovering …');
 });

@@ -48,7 +48,7 @@ import {
 import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
-import { log } from '../log.ts';
+import { log, VARIABLE as LOG_VARIABLE } from '../log.ts';
 import { sourceText } from '../listing.ts';
 import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
 import type { Gateway } from '../gateway/models.ts';
@@ -508,13 +508,17 @@ export function shell(launched: string, gateway: Gateway | null, paths: string[]
     `profile_gateway_key_env=${quote(gateway?.keyEnv ?? '')}`,
     `profile_gateway_key_hint=${quote(gateway?.keyHint ?? '')}`,
   ];
+  // This launch has warned about a level it could not use; the gateway and
+  // harness scripts it runs next inherit the one it fell back to instead of
+  // repeating that warning, once each.
+  if (log.unknown) lines.push(`${LOG_VARIABLE}=${quote(log.level)}`, `export ${LOG_VARIABLE}`);
   if (paths.length) lines.push(`PATH=${quote(paths.join(':'))}"\${PATH:+:$PATH}"`, 'export PATH');
   return lines.join('\n') + '\n';
 }
 
 /** What a launch says about itself: the profile at info when one was chosen here, the rest at debug. */
 function describe<A extends { profile: E[] }, E extends ProfileEntry>(
-  harness: string, profile: Resolved, launch: Launch<A, E>, launched: string,
+  harness: string, profile: Resolved, builtIn: boolean, launch: Launch<A, E>, launched: string,
 ) {
   if (profile.source === 'repository' || profile.source === 'variable') {
     log.profile.info(`using ${profile.name} (${sourceText(profile)})`);
@@ -522,7 +526,9 @@ function describe<A extends { profile: E[] }, E extends ProfileEntry>(
   log.profile.debug(`profile ${profile.name}, ${sourceText(profile)}`);
   for (const plugin of launch.kept) log.plugin.debug(`${plugin.description.root}: built in, as ${plugin.name}`);
   for (const plugin of launch.replaced) log.plugin.debug(`${plugin.description.root}: built in, replaced`);
-  const own = new Set(profile.builtin ? [] : profile.plugins.map((entry) => realpath(entry)));
+  // `main` passes a profile's own plugins as the replacement unless this
+  // launcher was built with that profile; the same condition names them here.
+  const own = new Set(builtIn ? [] : profile.plugins.map((entry) => realpath(entry)));
   for (const plugin of launch.plugins) {
     const from = own.has(plugin.description.root) ? `profile ${profile.name}` : VARIABLE;
     log.plugin.debug(`${plugin.description.root}: from ${from}, as ${plugin.name}, translated at ${plugin.translation}`);
@@ -536,20 +542,25 @@ function describe<A extends { profile: E[] }, E extends ProfileEntry>(
 export async function main(argsPath: string): Promise<number> {
   const args = JSON.parse(readFileSync(argsPath, 'utf8'));
   const report: Report = (message) => log.plugin.warn(message);
+  // The failure is reported by the component it comes from, as `--list`
+  // reports the same profile failure, not by whichever harness was launched.
+  let logger = log.profile;
   try {
-    const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
     const profile = profileInEffect(args.info, process.env);
+    logger = log.plugin;
+    const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
     // The built-in profile is the one this launcher was built with.
     const builtIn = profile.builtin && profile.name === args.info.default;
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
       builtIn ? undefined : profile.plugins);
+    logger = log.harness(args.harness);
     const launched = adapter.launch(launch);
-    describe(args.harness, profile, launch, launched);
+    describe(args.harness, profile, builtIn, launch, launched);
     process.stdout.write(shell(launched, profile.gateway, profile.paths));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;
     // A cache that cannot be written fails the launch: there is no degraded mode.
-    log.harness(args.harness).error((error as Error).message);
+    logger.error((error as Error).message);
     return 1;
   }
   return 0;
