@@ -367,6 +367,8 @@ test('a checkout that changes while it is translated is translated again', () =>
 test('a new runtime is a new translator', () => {
   const copy = join(temporary(), 'src');
   cpSync(src, copy, { recursive: true });
+  // Its dependencies, beside it as in the runtime tree.
+  symlinkSync(join(src, '../node_modules'), join(copy, '../node_modules'));
   return import(join(copy, 'plugin/launch.ts')).then(async (other) => {
     const { adapter: otherClaude } = await import(join(copy, 'harness/claude.ts'));
     const cache = temporary();

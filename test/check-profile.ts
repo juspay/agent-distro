@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -249,6 +249,8 @@ test('the evaluation is cached per content and agent-distro build, and swept whe
   // Another agent-distro build evaluates afresh.
   const copy = join(temporary(), 'src');
   cpSync(src, copy, { recursive: true });
+  // Its dependencies, beside it as in the runtime tree.
+  symlinkSync(join(src, '../node_modules'), join(copy, '../node_modules'));
   return import(join(copy, 'profile/resolve.ts')).then((other) => {
     other.resolveProfile(info, selection, env);
     assert.equal(evaluations() - start, 5);
