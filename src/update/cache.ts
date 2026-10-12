@@ -22,20 +22,24 @@ export function cacheUsable(trusted: boolean, substituters: string, keys: string
   return words(substituters).map(trim).includes(trim(url)) && words(keys).includes(key);
 }
 
-/** What `nix ARGS` prints, or null, warned with nix's own error, when it fails. */
-function output(nix: string, args: string[]): string | null {
+/** What `nix ARGS` prints, or null, with nix's own error noted in `failures`, when it fails. */
+function output(nix: string, args: string[], failures: string[]): string | null {
   log.update.debug(`running ${nix} ${args.join(' ')}`);
   const result = spawnSync(nix, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.status === 0) return result.stdout;
   const detail = result.error?.message ?? (result.stderr.trim() || `exit ${result.status ?? result.signal}`);
-  log.update.warn(`${nix} ${args.join(' ')} failed: ${detail}`);
+  log.update.debug(`${nix} ${args.join(' ')} failed: ${detail}`);
+  failures.push(`${nix} ${args.join(' ')}: ${detail}`);
   return null;
 }
 
 /** Each configured cache, and whether this user's nix would use it. */
 export function checkCaches(nix: string, substituters: Record<string, string>): Cache[] {
   let trusted = false;
-  const text = output(nix, ['store', 'info', '--json']);
+  // A nix that cannot answer fails every call below for the same reason, so
+  // the warning names the first failure once rather than one per command.
+  const failures: string[] = [];
+  const text = output(nix, ['store', 'info', '--json'], failures);
   try {
     const info = text === null ? null : JSON.parse(text);
     // Nix 2.34 reports a boolean; older releases 1. A local (single-user) store
@@ -45,8 +49,9 @@ export function checkCaches(nix: string, substituters: Record<string, string>): 
     log.update.warn(`nix store info printed unreadable JSON: ${(error as Error).message}`);
     trusted = false;
   }
-  const show = (setting: string) => output(nix, ['config', 'show', setting]) ?? '';
+  const show = (setting: string) => output(nix, ['config', 'show', setting], failures) ?? '';
   const known = show('substituters') + ' ' + show('trusted-substituters');
   const keys = show('trusted-public-keys');
+  if (failures.length) log.update.warn(`cannot read nix's configuration: ${failures[0]}`);
   return Object.entries(substituters).map(([url, key]) => ({ url, key, usable: cacheUsable(trusted, known, keys, url, key) }));
 }
