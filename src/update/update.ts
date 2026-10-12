@@ -17,7 +17,8 @@
  * Messages go through src/log.ts, tagged `update`, except what is UI rather
  * than a log: nix's own stderr, passed through, and a plain run's summary,
  * which stays on stdout as it always has. The history log keeps its last
- * HISTORY_LINES lines; a scheduled run first cuts launchd's update.log to its
+ * HISTORY_LINES lines, trimmed when it has grown past them (see
+ * `appendHistory`); a scheduled run first cuts launchd's update.log to its
  * last UPDATE_LOG_BYTES, since launchd never rotates it.
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -51,6 +52,11 @@ type Config = {
 
 /** The history log keeps this many lines, the newest. */
 export const HISTORY_LINES = 1000;
+/**
+ * Trimming rewrites the whole file, so it waits until there is this much per
+ * line to rewrite: a generous budget for one `<timestamp> <profile> <event>`.
+ */
+export const HISTORY_LINE_BYTES = 200;
 /** A scheduled run cuts launchd's update.log to this many bytes, the newest. */
 export const UPDATE_LOG_BYTES = 1024 * 1024;
 
@@ -221,17 +227,38 @@ export function wouldCompile(
   return { names: names.slice(0, 3).join(',') };
 }
 
-/** Append `line` to the history log, keeping its last HISTORY_LINES lines. */
+/**
+ * Append `line` to the history log, keeping about its last HISTORY_LINES
+ * lines. The append itself is one O_APPEND write, which another updater's
+ * append cannot interleave with. Trimming has to read and rewrite the file,
+ * so it happens only once the file has grown a margin past that many lines,
+ * and only for whoever takes the lock: a run that finds it taken appends and
+ * leaves the trimming to the next one.
+ */
 export function appendHistory(history: string, line: string) {
   appendFileSync(history, line);
-  const lines = readFileSync(history, 'utf8').split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  if (lines.length <= HISTORY_LINES) return;
-  const temporary = writeTemporary(dirname(history), '.history-', lines.slice(-HISTORY_LINES).join('\n') + '\n');
+  const size = statSync(history, { throwIfNoEntry: false })?.size ?? 0;
+  if (size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
+  const lock = history + '.trimming';
+  let held: number;
   try {
-    renameSync(temporary, history);
+    held = openSync(lock, 'wx');
+  } catch {
+    return;
+  }
+  try {
+    const lines = readFileSync(history, 'utf8').split('\n');
+    if (lines.at(-1) === '') lines.pop();
+    if (lines.length <= HISTORY_LINES) return;
+    const temporary = writeTemporary(dirname(history), '.history-', lines.slice(-HISTORY_LINES).join('\n') + '\n');
+    try {
+      renameSync(temporary, history);
+    } finally {
+      rmSync(temporary, { force: true });
+    }
   } finally {
-    rmSync(temporary, { force: true });
+    closeSync(held);
+    rmSync(lock, { force: true });
   }
 }
 

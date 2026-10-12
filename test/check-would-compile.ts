@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { update, wouldCompile, appendHistory, truncateLog, HISTORY_LINES } = await import(join(process.argv[2], 'update/update.ts'));
+const { update, wouldCompile, appendHistory, truncateLog, HISTORY_LINES, HISTORY_LINE_BYTES } = await import(join(process.argv[2], 'update/update.ts'));
 const { NixLog } = await import(join(process.argv[2], 'update/progress.ts'));
 import type { Result } from '../src/update/update.ts';
 const work = mkdtempSync(join(tmpdir(), 'would-compile-'));
@@ -213,14 +213,19 @@ test('no error: line means no detail on a failed result', async () => {
   assert.deepEqual(result.results, [{ result: 'failed', reason: 'nix build exit 1' }]);
 });
 
-test('the history log keeps its last HISTORY_LINES lines', () => {
+test('the history log keeps its last HISTORY_LINES lines, trimmed past a margin', () => {
   const history = join(work, 'trimmed-history.log');
+  // Short lines: HISTORY_LINES of them are nowhere near the size that trimming waits for.
   writeFileSync(history, Array.from({ length: HISTORY_LINES }, (_, i) => `old ${i}\n`).join(''));
+  appendHistory(history, 'new\n');
+  assert.equal(readFileSync(history, 'utf8').split('\n').length - 1, HISTORY_LINES + 1);
+  const pad = 'x'.repeat(HISTORY_LINE_BYTES);
+  writeFileSync(history, Array.from({ length: HISTORY_LINES }, (_, i) => `old ${i} ${pad}\n`).join(''));
   appendHistory(history, 'new\n');
   const lines = readFileSync(history, 'utf8').split('\n');
   assert.equal(lines.pop(), '');
   assert.equal(lines.length, HISTORY_LINES);
-  assert.equal(lines[0], 'old 1');
+  assert.equal(lines[0], `old 1 ${pad}`);
   assert.equal(lines.at(-1), 'new');
 });
 

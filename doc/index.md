@@ -280,7 +280,7 @@ nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13Ei
 | Full run output, Linux | `journalctl --user -u agent-distro-update` |
 | Full run output, macOS | `~/.local/state/agent-distro/<source>/update.log` |
 
-[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 vanilla updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. It keeps its last 1000 lines, and a scheduled run on macOS cuts `update.log` to its last 1 MB.
+[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 vanilla updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. It is trimmed back to its last 1000 lines once it has grown past them, and a scheduled run on macOS cuts `update.log` to its last 1 MB.
 
 ### Diagnostics
 
@@ -300,7 +300,7 @@ To see the nix commands run, the cache hits and misses, each plugin and where it
 AGENT_DISTRO_LOG=debug claude
 ```
 
-`AGENT_DISTRO_LOG=silent` hides everything but the harness's own output. Colors follow `NO_COLOR` and `FORCE_COLOR`. Updater output is in the journal or `update.log`; see [Troubleshooting](#troubleshooting), and `journalctl --user -u agent-distro-update -p warning` for its warnings and errors alone.
+`AGENT_DISTRO_LOG` sets the level of agent-distro's own messages, so `AGENT_DISTRO_LOG=silent` leaves only the harness's output and the few warnings the launcher scripts themselves print (a missing gateway key, a replaced harness configuration file, a `PATH` collision), which are always shown. Colors follow `NO_COLOR` and `FORCE_COLOR`. Updater output is in the journal or `update.log`; see [Troubleshooting](#troubleshooting), and `journalctl --user -u agent-distro-update -p warning` for its warnings and errors alone.
 
 ## Build your own distribution
 
