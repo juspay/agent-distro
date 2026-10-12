@@ -143,19 +143,19 @@ type Build = { status: number | null; signal: NodeJS.Signals | null; error?: Err
  * bytes it fetches; everything else nix says is re-emitted, so its errors still
  * reach the user.
  */
-function loggedBuild(nix: string, args: string[], log: NixLog, report: Report): Promise<Build> {
+function loggedBuild(nix: string, args: string[], nixLog: NixLog, report: Report): Promise<Build> {
   const { promise, resolve } = Promise.withResolvers<Build>();
   const build = spawn(nix, [...args, '--log-format', 'internal-json'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const lines = build.stderr && createInterface({ input: build.stderr, crlfDelay: Infinity });
   lines?.on('line', (line) => {
-    const event = log.line(line);
+    const event = nixLog.line(line);
     if (event === null) return;
     if ('text' in event) process.stderr.write(event.text);
     else report.progress(event.progress.done, event.progress.total);
   });
   build.on('error', (error) => resolve({ status: null, signal: null, error }));
   build.on('close', (status, signal) => {
-    const held = log.flush();
+    const held = nixLog.flush();
     if (held) report.progress(held.done, held.total);
     resolve({ status, signal });
   });
@@ -255,10 +255,10 @@ export function truncateLog(path: string, bytes = UPDATE_LOG_BYTES) {
 }
 
 /**
- * One update; the exit status. A skip is not a failure. `log` reads the bytes
+ * One update; the exit status. A skip is not a failure. `nixLog` reads the bytes
  * of the build's stderr, which only a `--progress` run asks nix to write.
  */
-export async function update(config: Config, report: Report = plain, log?: NixLog): Promise<number> {
+export async function update(config: Config, report: Report = plain, nixLog?: NixLog): Promise<number> {
   const { profile, state, history, nix } = config;
   mkdirSync(state, { recursive: true });
   const current = join(state, 'current');
@@ -306,7 +306,7 @@ export async function update(config: Config, report: Report = plain, log?: NixLo
   if (typeof ref !== 'string' || !ref) {
     const detail = nixErrorDetail(metadata.stderr);
     // Under `--progress` the JSON result carries the cause; the plain note appends it.
-    const suffix = !log && detail ? `: ${detail}` : '';
+    const suffix = !nixLog && detail ? `: ${detail}` : '';
     report.note('error', `${profile} update failed (cannot resolve ${config.flake})${suffix}`);
     record('failed: cannot resolve flake');
     report.result({ result: 'failed', reason: 'cannot resolve flake', ...(detail ? { detail } : {}) });
@@ -322,8 +322,8 @@ export async function update(config: Config, report: Report = plain, log?: NixLo
   const previous = old ? versions(old) : null;
   const args = ['build', target, ...options, '--out-link', current];
   log.update.debug(`running ${nix} ${args.join(' ')}`);
-  const build: Build = log
-    ? await loggedBuild(nix, args, log, report)
+  const build: Build = nixLog
+    ? await loggedBuild(nix, args, nixLog, report)
     : spawnSync(nix, args, { stdio: 'inherit' });
   if (build.error || build.status !== 0) {
     // As bash reports it: 127 for a nix that is gone (say, garbage-collected),
@@ -334,7 +334,7 @@ export async function update(config: Config, report: Report = plain, log?: NixLo
     if (build.error) report.note('error', `cannot run ${nix}: ${build.error.message}`);
     report.note('error', `${profile} update failed (exit ${status})`);
     record(`failed: nix build exit ${status}`);
-    const detail = log?.errorDetail ?? null;
+    const detail = nixLog?.errorDetail ?? null;
     report.result({ result: 'failed', reason: `nix build exit ${status}`, ...(detail ? { detail } : {}) });
     return status;
   }

@@ -5,12 +5,12 @@
  * Usage: node check-would-compile.ts SRC
  */
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { update, wouldCompile } = await import(join(process.argv[2], 'update/update.ts'));
+const { update, wouldCompile, appendHistory, truncateLog, HISTORY_LINES } = await import(join(process.argv[2], 'update/update.ts'));
 const { NixLog } = await import(join(process.argv[2], 'update/progress.ts'));
 import type { Result } from '../src/update/update.ts';
 const work = mkdtempSync(join(tmpdir(), 'would-compile-'));
@@ -211,4 +211,25 @@ test('no error: line means no detail on a failed result', async () => {
   const result = await run(nix, { progress: true });
   assert.equal(result.status, 1);
   assert.deepEqual(result.results, [{ result: 'failed', reason: 'nix build exit 1' }]);
+});
+
+test('the history log keeps its last HISTORY_LINES lines', () => {
+  const history = join(work, 'trimmed-history.log');
+  writeFileSync(history, Array.from({ length: HISTORY_LINES }, (_, i) => `old ${i}\n`).join(''));
+  appendHistory(history, 'new\n');
+  const lines = readFileSync(history, 'utf8').split('\n');
+  assert.equal(lines.pop(), '');
+  assert.equal(lines.length, HISTORY_LINES);
+  assert.equal(lines[0], 'old 1');
+  assert.equal(lines.at(-1), 'new');
+});
+
+test('update.log is cut to its last bytes, from a whole line', () => {
+  const log = join(work, 'update.log');
+  writeFileSync(log, 'first line\n' + 'x'.repeat(30) + '\nkept line\n');
+  truncateLog(log, 20);
+  assert.equal(readFileSync(log, 'utf8'), 'kept line\n');
+  truncateLog(log, 20);
+  assert.equal(statSync(log).size, 10);
+  truncateLog(join(work, 'absent.log'), 20);
 });

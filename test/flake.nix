@@ -147,6 +147,19 @@
             ${runtime.node} ${./check-picker-auth.ts} ${runtime.tree}/src
             touch "$out"
           '';
+          # src/log.ts alone: the line format, levels, the journal prefix,
+          # escaping, tags and `slow`.
+          log = pkgs.runCommand "log-check" { } ''
+            ${runtime.node} ${./check-log.ts} ${runtime.tree}/src
+            touch "$out"
+          '';
+          # Stdout stays a protocol channel at AGENT_DISTRO_LOG=trace: the
+          # launch's shell, `--list --json`, model discovery's path and
+          # `--progress` JSON still parse.
+          log-stdout = pkgs.runCommand "log-stdout-check" { } ''
+            ${runtime.node} ${./check-log-stdout.ts} ${runtime.tree}/src ${./fixtures/my-skills}
+            touch "$out"
+          '';
           # The bytes a `--progress` run reports, from the internal-json stderr
           # of a real `nix build` captured on a CI machine.
           update-progress = pkgs.runCommand "update-progress-check" { } ''
