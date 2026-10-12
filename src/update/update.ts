@@ -59,6 +59,11 @@ export const HISTORY_LINES = 1000;
 export const HISTORY_LINE_BYTES = 200;
 /** A scheduled run cuts launchd's update.log to this many bytes, the newest. */
 export const UPDATE_LOG_BYTES = 1024 * 1024;
+/** How long an append waits for the history lock before writing without it. */
+export const LOCK_WAIT_MS = 2000;
+/** A history lock this old is from a run that was killed holding it. */
+export const LOCK_STALE_MS = 10 * 60 * 1000;
+const LOCK_RETRY_MS = 50;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -228,25 +233,48 @@ export function wouldCompile(
 }
 
 /**
+ * Take `lock`, waiting up to LOCK_WAIT_MS for whoever holds it, or null when
+ * it is still held. A process killed while holding one leaves the file
+ * behind, so a lock older than LOCK_STALE_MS is taken away from it.
+ */
+function takeLock(lock: string): number | null {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      return openSync(lock, 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const held = statSync(lock, { throwIfNoEntry: false });
+    if (held && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
+      rmSync(lock, { force: true });
+      continue;
+    }
+    if (Date.now() >= deadline) return null;
+    // Nothing to await: the updater's callers are synchronous.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
+  }
+}
+
+/**
  * Append `line` to the history log, keeping about its last HISTORY_LINES
- * lines. The append itself is one O_APPEND write, which another updater's
- * append cannot interleave with. Trimming has to read and rewrite the file,
- * so it happens only once the file has grown a margin past that many lines,
- * and only for whoever takes the lock: a run that finds it taken appends and
- * leaves the trimming to the next one.
+ * lines.
+ *
+ * Both the append and the trimming hold `<history>.trimming`, so the
+ * read-rewrite of a trim can never drop a line another run appended in the
+ * meantime. An append that waits out LOCK_WAIT_MS writes without the lock
+ * rather than lose the event, and trims nothing. Trimming itself reads and
+ * rewrites the whole file, so it waits until the file has grown a margin past
+ * HISTORY_LINES.
  */
 export function appendHistory(history: string, line: string) {
-  appendFileSync(history, line);
-  const size = statSync(history, { throwIfNoEntry: false })?.size ?? 0;
-  if (size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
   const lock = history + '.trimming';
-  let held: number;
+  const held = takeLock(lock);
   try {
-    held = openSync(lock, 'wx');
-  } catch {
-    return;
-  }
-  try {
+    appendFileSync(history, line);
+    if (held === null) return;
+    const size = statSync(history, { throwIfNoEntry: false })?.size ?? 0;
+    if (size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
     const lines = readFileSync(history, 'utf8').split('\n');
     if (lines.at(-1) === '') lines.pop();
     if (lines.length <= HISTORY_LINES) return;
@@ -257,8 +285,10 @@ export function appendHistory(history: string, line: string) {
       rmSync(temporary, { force: true });
     }
   } finally {
-    closeSync(held);
-    rmSync(lock, { force: true });
+    if (held !== null) {
+      closeSync(held);
+      rmSync(lock, { force: true });
+    }
   }
 }
 

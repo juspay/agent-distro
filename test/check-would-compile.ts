@@ -5,12 +5,12 @@
  * Usage: node check-would-compile.ts SRC
  */
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { update, wouldCompile, appendHistory, truncateLog, HISTORY_LINES, HISTORY_LINE_BYTES } = await import(join(process.argv[2], 'update/update.ts'));
+const { update, wouldCompile, appendHistory, truncateLog, HISTORY_LINES, HISTORY_LINE_BYTES, LOCK_WAIT_MS, LOCK_STALE_MS } = await import(join(process.argv[2], 'update/update.ts'));
 const { NixLog } = await import(join(process.argv[2], 'update/progress.ts'));
 import type { Result } from '../src/update/update.ts';
 const work = mkdtempSync(join(tmpdir(), 'would-compile-'));
@@ -222,6 +222,48 @@ test('the history log keeps its last HISTORY_LINES lines, trimmed past a margin'
   const pad = 'x'.repeat(HISTORY_LINE_BYTES);
   writeFileSync(history, Array.from({ length: HISTORY_LINES }, (_, i) => `old ${i} ${pad}\n`).join(''));
   appendHistory(history, 'new\n');
+  const lines = readFileSync(history, 'utf8').split('\n');
+  assert.equal(lines.pop(), '');
+  assert.equal(lines.length, HISTORY_LINES);
+  assert.equal(lines[0], `old 1 ${pad}`);
+  assert.equal(lines.at(-1), 'new');
+});
+
+/** A history log of HISTORY_LINES long lines: past the size trimming waits for. */
+function fullHistory(name: string): [string, string] {
+  const history = join(work, name);
+  const pad = 'x'.repeat(HISTORY_LINE_BYTES);
+  writeFileSync(history, Array.from({ length: HISTORY_LINES }, (_, i) => `old ${i} ${pad}\n`).join(''));
+  return [history, pad];
+}
+
+test('an append another run holds the lock for keeps the event, and trims nothing', () => {
+  const [history] = fullHistory('held-history.log');
+  const lock = history + '.trimming';
+  const other = openSync(lock, 'wx');
+  const since = Date.now();
+  try {
+    appendHistory(history, 'new\n');
+  } finally {
+    closeSync(other);
+    rmSync(lock, { force: true });
+  }
+  // It waited for the lock, then wrote without it rather than lose the event.
+  assert.ok(Date.now() - since >= LOCK_WAIT_MS, String(Date.now() - since));
+  const lines = readFileSync(history, 'utf8').split('\n');
+  assert.equal(lines.pop(), '');
+  assert.equal(lines.length, HISTORY_LINES + 1);
+  assert.equal(lines.at(-1), 'new');
+});
+
+test('a lock left behind by a killed run is taken away once it is stale', () => {
+  const [history, pad] = fullHistory('stale-history.log');
+  const lock = history + '.trimming';
+  writeFileSync(lock, '');
+  const old = new Date(Date.now() - LOCK_STALE_MS - 60_000);
+  utimesSync(lock, old, old);
+  appendHistory(history, 'new\n');
+  assert.equal(existsSync(lock), false);
   const lines = readFileSync(history, 'utf8').split('\n');
   assert.equal(lines.pop(), '');
   assert.equal(lines.length, HISTORY_LINES);
