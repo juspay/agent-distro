@@ -23,8 +23,8 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync,
-  truncateSync, writeFileSync,
+  appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync,
+  renameSync, rmSync, statSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { constants } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -262,9 +262,17 @@ function takeLock(lock: string): number | null {
  * worth it. The caller holds the lock.
  */
 function trimHistory(history: string) {
-  const size = statSync(history, { throwIfNoEntry: false })?.size ?? 0;
-  if (size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
-  const lines = readFileSync(history, 'utf8').split('\n');
+  // One descriptor throughout: a size read from the path and a read of the
+  // path are two different files if the log is rotated between them.
+  const fd = openSync(history, 'r');
+  let text: string;
+  try {
+    if (fstatSync(fd).size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
+    text = readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+  const lines = text.split('\n');
   if (lines.at(-1) === '') lines.pop();
   if (lines.length <= HISTORY_LINES) return;
   const temporary = writeTemporary(dirname(history), '.history-', lines.slice(-HISTORY_LINES).join('\n') + '\n');
@@ -301,18 +309,28 @@ export function appendHistory(history: string, line: string) {
  * launchd holds it open for appending, so it cannot be replaced.
  */
 export function truncateLog(path: string, bytes = UPDATE_LOG_BYTES) {
-  const size = statSync(path, { throwIfNoEntry: false })?.size ?? 0;
-  if (size <= bytes) return;
-  const tail = Buffer.alloc(bytes);
-  const fd = openSync(path, 'r');
+  let fd: number;
   try {
+    fd = openSync(path, 'r+');
+  } catch (error) {
+    // Nothing written yet, nothing to cut.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  // Everything through this one descriptor: the path could name another file
+  // by the time the bytes are read back or written.
+  try {
+    const size = fstatSync(fd).size;
+    if (size <= bytes) return;
+    const tail = Buffer.alloc(bytes);
     readSync(fd, tail, 0, bytes, size - bytes);
+    const newline = tail.indexOf('\n');
+    const kept = newline === -1 ? tail : tail.subarray(newline + 1);
+    writeSync(fd, kept, 0, kept.length, 0);
+    ftruncateSync(fd, kept.length);
   } finally {
     closeSync(fd);
   }
-  const newline = tail.indexOf('\n');
-  truncateSync(path, 0);
-  appendFileSync(path, newline === -1 ? tail : tail.subarray(newline + 1));
 }
 
 /**
