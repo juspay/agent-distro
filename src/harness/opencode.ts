@@ -107,6 +107,9 @@ export function withGateway(config: Record<string, unknown>, schema: string, gat
         package: '@opencode/ai/providers/openai-compatible', settings: { baseURL: url },
       },
     };
+    // v2's replacement for v1's small_model: upstream's migration puts it on
+    // the hidden title agent.
+    result.agents = { title: { model: 'litellm/' + gateway.models.small } };
   } else {
     result.provider = {
       litellm: {
