@@ -136,7 +136,7 @@ export function createLogger({ stream = process.stderr, env = process.env, journ
     opencode: tag('opencode'),
     pi: tag('pi'),
     /** A harness's logger, by adapter name; a harness without one of its own gets one. */
-    harness: (name: string) => tag(name),
+    harness: tag,
   };
 }
 

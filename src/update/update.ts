@@ -257,33 +257,37 @@ function takeLock(lock: string): number | null {
 }
 
 /**
+ * Cut the history log back to its last HISTORY_LINES lines, reading and
+ * rewriting it whole, so only a file that has grown a margin past them is
+ * worth it. The caller holds the lock.
+ */
+function trimHistory(history: string) {
+  const size = statSync(history, { throwIfNoEntry: false })?.size ?? 0;
+  if (size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
+  const lines = readFileSync(history, 'utf8').split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  if (lines.length <= HISTORY_LINES) return;
+  const temporary = writeTemporary(dirname(history), '.history-', lines.slice(-HISTORY_LINES).join('\n') + '\n');
+  try {
+    renameSync(temporary, history);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+/**
  * Append `line` to the history log, keeping about its last HISTORY_LINES
- * lines.
- *
- * Both the append and the trimming hold `<history>.trimming`, so the
- * read-rewrite of a trim can never drop a line another run appended in the
- * meantime. An append that waits out LOCK_WAIT_MS writes without the lock
- * rather than lose the event, and trims nothing. Trimming itself reads and
- * rewrites the whole file, so it waits until the file has grown a margin past
- * HISTORY_LINES.
+ * lines. Both the append and the trim hold `<history>.trimming`, so a trim's
+ * read-rewrite can never drop a line another run appended meanwhile. An
+ * append that waits the lock out writes anyway, rather than lose the event,
+ * and leaves the trimming to the next run.
  */
 export function appendHistory(history: string, line: string) {
   const lock = history + '.trimming';
   const held = takeLock(lock);
   try {
     appendFileSync(history, line);
-    if (held === null) return;
-    const size = statSync(history, { throwIfNoEntry: false })?.size ?? 0;
-    if (size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
-    const lines = readFileSync(history, 'utf8').split('\n');
-    if (lines.at(-1) === '') lines.pop();
-    if (lines.length <= HISTORY_LINES) return;
-    const temporary = writeTemporary(dirname(history), '.history-', lines.slice(-HISTORY_LINES).join('\n') + '\n');
-    try {
-      renameSync(temporary, history);
-    } finally {
-      rmSync(temporary, { force: true });
-    }
+    if (held !== null) trimHistory(history);
   } finally {
     if (held !== null) {
       closeSync(held);
