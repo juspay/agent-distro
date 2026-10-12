@@ -429,19 +429,25 @@ test('a launch uses the profile in effect: its plugins replace the built-in ones
   writeFileSync(args, JSON.stringify({
     harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [{ description, dir: '/built-in/kept' }], info,
   }));
+  let noticed = '';
   const launch = (cwd: string, env: NodeJS.ProcessEnv = {}) => {
     const result = spawnSync(process.execPath, [join(src, 'plugin/launch-cli.mjs'), args],
       { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, XDG_CACHE_HOME: temporary(), ...env } });
     assert.equal(result.status, 0, result.stderr);
+    noticed = result.stderr;
     const output = spawnSync(BASH, ['-euc', `${result.stdout} printf '%s\\n' "$launched" "$profile_gateway" "\${AGENT_DISTRO_PROFILE-unset}"`],
       { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: env.AGENT_DISTRO_PROFILE ?? '' } });
     assert.equal(output.status, 0, output.stderr);
     return output.stdout.split('\n');
   };
-  // Outside the repository: the built-in profile, as the launcher was built.
+  // Outside the repository: the built-in profile, as the launcher was built,
+  // and nothing said about it.
   assert.deepEqual(launch(temporary()), ['--plugin-dir /built-in/kept', '', 'unset', '']);
-  // Inside it: the repository's plugin alone, and its gateway.
+  assert.equal(noticed, '');
+  // Inside it: the repository's plugin alone, and its gateway. The one line a
+  // plain launch prints names the profile and the website.
   const [launched, handedGateway, handed] = launch(join(repo));
+  assert.match(noticed, /^agent-distro profile: using repo \(from .*agent-distro\.nix\) · https:\/\/agent-distro\.nixos\.asia$/m);
   assert.match(launched, /^--plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out$/);
   assert.equal(JSON.parse(handedGateway).keyHint, 'hint');
   assert.equal(handed, 'unset', 'the hand-over never reaches the harness');

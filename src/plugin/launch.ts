@@ -35,10 +35,12 @@
  * the last of a name wins.
  *
  * A launch names the profile in effect on stderr when a repository's
- * `agent-distro.nix` or AI_PROFILE chose it, worded as `--list` words it, since
- * that changes plugins, PATH and gateway silently otherwise. At debug it also
- * logs each plugin directory and where it came from, the PATH additions, the
- * gateway, and the arguments it hands the harness.
+ * `agent-distro.nix` or AI_PROFILE chose it, worded as `--list` words it and
+ * followed by the website (`SITE`), since that line is the only one a plain
+ * launch prints and the change to plugins, PATH and gateway is silent
+ * otherwise. At debug it also logs each plugin directory and where it came
+ * from, the PATH additions, the gateway, and the arguments it hands the
+ * harness.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -48,7 +50,7 @@ import {
 import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
-import { log, VARIABLE as LOG_VARIABLE } from '../log.ts';
+import { log, SITE, VARIABLE as LOG_VARIABLE } from '../log.ts';
 import { sourceText } from '../listing.ts';
 import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
 import type { Gateway } from '../gateway/models.ts';
@@ -521,7 +523,7 @@ function describe<A extends { profile: E[] }, E extends ProfileEntry>(
   harness: string, profile: Resolved, builtIn: boolean, launch: Launch<A, E>, launched: string,
 ) {
   if (profile.source === 'repository' || profile.source === 'variable') {
-    log.profile.info(`using ${profile.name} (${sourceText(profile)})`);
+    log.profile.info(`using ${profile.name} (${sourceText(profile)}) · ${SITE}`);
   }
   log.profile.debug(`profile ${profile.name}, ${sourceText(profile)}`);
   for (const plugin of launch.kept) log.plugin.debug(`${plugin.description.root}: built in, as ${plugin.name}`);

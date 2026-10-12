@@ -289,7 +289,7 @@ Every message agent-distro prints goes to stderr as `agent-distro <component>: â
 By default a launch prints a line only when something chose a profile for you, a repository's `agent-distro.nix` or `AI_PROFILE`, worded as `--list` words it:
 
 ```text
-agent-distro profile: using repo (from /home/me/repo/agent-distro.nix)
+agent-distro profile: using repo (from /home/me/repo/agent-distro.nix) Â· https://agent-distro.nixos.asia
 ```
 
 and when something will take a while, such as evaluating a profile for the first time or fetching its packages. The built-in profile, or one you named, prints nothing.

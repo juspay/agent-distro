@@ -155,9 +155,9 @@ in
         def stderr_of(command):
             return user(f"{{ {command}; }} 2>&1 >/dev/null")
         repo = stderr_of("cd ~/repo && probe-claude")
-        assert "agent-distro profile: using repo (from /home/testuser/repo/agent-distro.nix)\n" in repo, repo
+        assert "agent-distro profile: using repo (from /home/testuser/repo/agent-distro.nix) · https://agent-distro.nixos.asia\n" in repo, repo
         variable = stderr_of("AI_PROFILE=/home/testuser/elsewhere probe-claude")
-        assert "agent-distro profile: using elsewhere (from AI_PROFILE=/home/testuser/elsewhere)\n" in variable, variable
+        assert "agent-distro profile: using elsewhere (from AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n" in variable, variable
         # The built-in profile, and a positional choice, say nothing.
         builtin = stderr_of("probe-claude")
         assert "agent-distro" not in builtin, builtin
