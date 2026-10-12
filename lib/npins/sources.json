@@ -1,5 +1,11 @@
 {
   "pins": {
+    "consola": {
+      "type": "Url",
+      "url": "https://registry.npmjs.org/consola/-/consola-3.4.2.tgz",
+      "unpack": true,
+      "hash": "sha256-2Y+09CEdrLE+b32sNcAZDQRQ7ZXlq9JXoRYtvYlFHxA="
+    },
     "yaml": {
       "type": "Url",
       "url": "https://registry.npmjs.org/yaml/-/yaml-2.9.1.tgz",

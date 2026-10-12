@@ -40,7 +40,7 @@ assert roles == {'default': 'litellm/open-large', 'slow': 'litellm/open-large',
 missing = subprocess.run(['omp', '--version'], env={k: v for k, v in env.items() if k != 'LITELLM_API_KEY'},
                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
 assert missing.returncode != 0, missing
-assert 'LITELLM_API_KEY is not set.' in missing.stderr and 'Requires Juspay VPN to access the dashboard' in missing.stderr, missing.stderr
+assert 'agent-distro gateway: warning: LITELLM_API_KEY is not set.' in missing.stderr and 'Requires Juspay VPN to access the dashboard' in missing.stderr, missing.stderr
 
 # Codex: every skill under its plugin's name, and both plugins' servers.
 loaded = codex_support.loaded_skills()

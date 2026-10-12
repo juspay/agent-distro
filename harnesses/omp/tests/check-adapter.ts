@@ -76,7 +76,7 @@ for (const [name, before, after] of cases) {
     const result = fill(config);
     if (after === null) {
       assert.equal(result.status, 1, result.stderr);
-      assert.match(result.stderr, /^omp: cannot fill config defaults in /);
+      assert.match(result.stderr, /^agent-distro omp: error: cannot fill config defaults in /);
       assert.equal(readFileSync(config, 'utf8'), before);
     } else {
       assert.equal(result.status, 0, result.stderr);
@@ -139,7 +139,7 @@ test('an unwritable agent directory only warns', () => {
   try {
     const result = fill(join(directory, 'config.yml'));
     // Root ignores the mode; the warning is only checked where it applies.
-    if (process.getuid?.() !== 0) assert.match(result.stderr, /^omp: warning: cannot fill config defaults/);
+    if (process.getuid?.() !== 0) assert.match(result.stderr, /^agent-distro omp: warning: cannot fill config defaults/);
     assert.equal(result.status, 0, result.stderr);
   } finally {
     chmodSync(directory, 0o700);

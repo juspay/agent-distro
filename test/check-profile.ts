@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -249,6 +249,8 @@ test('the evaluation is cached per content and agent-distro build, and swept whe
   // Another agent-distro build evaluates afresh.
   const copy = join(temporary(), 'src');
   cpSync(src, copy, { recursive: true });
+  // Its dependencies, beside it as in the runtime tree.
+  symlinkSync(join(src, '../node_modules'), join(copy, '../node_modules'));
   return import(join(copy, 'profile/resolve.ts')).then((other) => {
     other.resolveProfile(info, selection, env);
     assert.equal(evaluations() - start, 5);
@@ -284,17 +286,22 @@ test('packages come from the binary cache or the launch stops naming them', () =
   // Not in the store and nothing to compile: fetched with nix build --no-link.
   const builds = () => calls('build --no-link');
   const before = builds();
-  assert.deepEqual(profile.resolveProfile(info, selection, env).paths, [join(out, 'bin')]);
+  const fetching = stderrOf(() => {
+    assert.deepEqual(profile.resolveProfile(info, selection, env).paths, [join(out, 'bin')]);
+  });
+  assert.match(fetching, /^agent-distro profile: fetching package pkg-1\.0 from the binary cache …$/m);
   assert.equal(builds() - before, 1);
   // Present: nothing to do.
   profile.resolveProfile(info, selection, env);
   assert.equal(builds() - before, 1);
-  // A cache miss stops the launch, naming the package, and builds nothing.
+  // A cache miss stops the launch, naming the package, and builds nothing;
+  // nothing is said to be fetched before the dry run has found it cached.
   rmSync(out, { recursive: true });
   writeFileSync(join(bin, 'miss'), '/nix/store/22222222222222222222222222222222-uncached-1.0.drv');
   try {
-    assert.throws(() => profile.resolveProfile(info, selection, env),
-      /package pkg-1\.0 is not in the binary cache \(would build uncached-1\.0\); agent-distro never compiles/);
+    const missed = stderrOf(() => assert.throws(() => profile.resolveProfile(info, selection, env),
+      /package pkg-1\.0 is not in the binary cache \(would build uncached-1\.0\); agent-distro never compiles/));
+    assert.ok(!missed.includes('fetching package'), missed);
     assert.equal(builds() - before, 1);
   } finally {
     rmSync(join(bin, 'miss'));
@@ -378,6 +385,10 @@ test('without network, a reference uses its last store path, and says so', () =>
   reference('git+file:///offline-plugin', pluginTree);
   const env = { XDG_CACHE_HOME: temporary() };
   const selection = { source: 'variable', origin: 'git+file:///offline-profile' };
+  // The first launch says what keeps it waiting; a cached one says nothing.
+  const first = stderrOf(() => profile.resolveProfile(info, selection, env));
+  assert.match(first, /^agent-distro profile: fetching git\+file:\/\/\/offline-profile …$/m);
+  assert.match(first, /^agent-distro profile: evaluating .*agent-distro\.nix …$/m);
   assert.equal(stderrOf(() => profile.resolveProfile(info, selection, env)), '');
   // Nix can no longer fetch either.
   rmSync(join(bin, 'refs', encodeURIComponent('git+file:///offline-profile')));
@@ -418,19 +429,25 @@ test('a launch uses the profile in effect: its plugins replace the built-in ones
   writeFileSync(args, JSON.stringify({
     harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [{ description, dir: '/built-in/kept' }], info,
   }));
+  let noticed = '';
   const launch = (cwd: string, env: NodeJS.ProcessEnv = {}) => {
     const result = spawnSync(process.execPath, [join(src, 'plugin/launch-cli.mjs'), args],
       { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, XDG_CACHE_HOME: temporary(), ...env } });
     assert.equal(result.status, 0, result.stderr);
+    noticed = result.stderr;
     const output = spawnSync(BASH, ['-euc', `${result.stdout} printf '%s\\n' "$launched" "$profile_gateway" "\${AGENT_DISTRO_PROFILE-unset}"`],
       { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: env.AGENT_DISTRO_PROFILE ?? '' } });
     assert.equal(output.status, 0, output.stderr);
     return output.stdout.split('\n');
   };
-  // Outside the repository: the built-in profile, as the launcher was built.
+  // Outside the repository: the built-in profile, as the launcher was built,
+  // and nothing said about it.
   assert.deepEqual(launch(temporary()), ['--plugin-dir /built-in/kept', '', 'unset', '']);
-  // Inside it: the repository's plugin alone, and its gateway.
+  assert.equal(noticed, '');
+  // Inside it: the repository's plugin alone, and its gateway. The one line a
+  // plain launch prints names the profile and the website.
   const [launched, handedGateway, handed] = launch(join(repo));
+  assert.match(noticed, /^agent-distro profile: using repo \(from .*agent-distro\.nix\) · https:\/\/agent-distro\.nixos\.asia$/m);
   assert.match(launched, /^--plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out$/);
   assert.equal(JSON.parse(handedGateway).keyHint, 'hint');
   assert.equal(handed, 'unset', 'the hand-over never reaches the harness');

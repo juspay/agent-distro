@@ -151,6 +151,19 @@ in
         assert launched("probe-claude") == ([], "")
         assert in_effect() == {"name": "vanilla", "description": "${vanilla.description}", "source": "builtin", "origin": "vanilla"}
 
+    with subtest("a launch names a profile the directory or AI_PROFILE chose, on stderr"):
+        def stderr_of(command):
+            return user(f"{{ {command}; }} 2>&1 >/dev/null")
+        repo = stderr_of("cd ~/repo && probe-claude")
+        assert "agent-distro profile: using repo (from /home/testuser/repo/agent-distro.nix) · https://agent-distro.nixos.asia\n" in repo, repo
+        variable = stderr_of("AI_PROFILE=/home/testuser/elsewhere probe-claude")
+        assert "agent-distro profile: using elsewhere (from AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n" in variable, variable
+        # The built-in profile, and a positional choice, say nothing.
+        builtin = stderr_of("probe-claude")
+        assert "agent-distro" not in builtin, builtin
+        positional = stderr_of("probe-agent-distro /home/testuser/elsewhere claude")
+        assert "agent-distro profile: using" not in positional, positional
+
     with subtest("precedence: positional, repository, AI_PROFILE, built-in"):
         other = "AI_PROFILE=/home/testuser/elsewhere"
         assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/fetched claude")[0] == ["gamma", "delta"]

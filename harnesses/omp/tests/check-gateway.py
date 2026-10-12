@@ -7,7 +7,7 @@ assert "hideThinkingBlock: true" in opted_out, opted_out
 assert "modelRoles" not in opted_out, opted_out
 
 deprecated = machine.succeed(f"su - testuser -c 'env -u {gateway['keyEnv']} JUSPAY=0 omp --version </dev/null 2>&1'")
-assert deprecated.count("JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.") == 1, deprecated
+assert deprecated.count("agent-distro omp: warning: JUSPAY=0 is deprecated; use AI_GATEWAY=0 instead.") == 1, deprecated
 assert machine.succeed(f"cat {CONFIG}") == opted_out
 
 # First launch: this is also what seeds the config asserted on below.

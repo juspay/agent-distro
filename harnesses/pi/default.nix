@@ -45,7 +45,7 @@ writeShellApplication {
       ${runtime.script "harness/pi.ts"} merge-state --check "$agent_dir" "$fragment" "''${gateway[@]}" || status=$?
       if [ "$status" = 1 ]; then exit 1; fi
       if [ "$status" = 2 ] && [ "$fragment" != ${config}/config.json ]; then
-        echo 'Pi: cannot load AGENT_DISTRO_PLUGINS: the agent directory cannot be written.' >&2
+        echo 'agent-distro pi: error: cannot load AGENT_DISTRO_PLUGINS: the agent directory cannot be written.' >&2
         exit 1
       fi
       if [ "$status" = 0 ]; then
@@ -59,7 +59,7 @@ writeShellApplication {
         ${runtime.script "harness/pi.ts"} merge-state --merge "$agent_dir" "$fragment" "''${gateway[@]}"
       fi
     else
-      echo 'Pi: warning: HOME and PI_CODING_AGENT_DIR are unset; skipping config merges.' >&2
+      echo 'agent-distro pi: warning: HOME and PI_CODING_AGENT_DIR are unset; skipping config merges.' >&2
     fi
     exec ${lib.getExe pi} "$@"
   '';

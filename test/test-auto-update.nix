@@ -114,7 +114,7 @@ in
     machine.wait_for_unit("home-manager-testuser.service")
     machine.wait_for_unit("user@1000.service")
     activation = machine.succeed("journalctl -u home-manager-testuser.service --no-pager")
-    assert "warning: agent-distro PATH collision for ${collision}: /run/current-system/sw/bin/${collision}; bare ${collision} runs /home/testuser/.nix-profile/bin/${collision}" in activation, activation
+    assert "agent-distro shims: warning: PATH collision for ${collision}: /run/current-system/sw/bin/${collision}; bare ${collision} runs /home/testuser/.nix-profile/bin/${collision}" in activation, activation
     for name in ${builtins.toJSON (builtins.tail commands)}:
         assert "PATH collision for " + name not in activation, activation
 
@@ -154,7 +154,7 @@ in
     first = machine.succeed("readlink -f " + state).strip()
     assert first.startswith("/nix/store/"), first
     stamp = state.rsplit("/", 1)[0] + "/last-success"
-    journal_has("agent-distro: vanilla updated nothing -> " + first)
+    journal_has("agent-distro update: vanilla updated nothing -> " + first)
     events.append("updated: Claude Code 2.0, Codex 1.0+abc123")
     check_history()
     for name in ${builtins.toJSON commands}:
@@ -165,12 +165,12 @@ in
     machine.succeed(systemctl("start agent-distro-update.service"))
     second = machine.succeed("readlink -f " + state).strip()
     assert second.startswith("/nix/store/") and second != first, second
-    journal_has("agent-distro: vanilla updated " + first + " -> " + second)
+    journal_has("agent-distro update: vanilla updated " + first + " -> " + second)
     events.append("updated: Codex 1.0+abc123 → 1.1+def456")
     check_history()
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    journal_has("agent-distro: vanilla unchanged (" + second + ")")
+    journal_has("agent-distro update: vanilla unchanged (" + second + ")")
     check_history()
     # A changed bundle can retain every harness version.
     machine.succeed(user("cp ${fixtureSame}/flake.nix ~/update-flake/flake.nix"))
@@ -207,7 +207,7 @@ in
     machine.wait_until_succeeds(systemctl("is-failed agent-distro-update.service"))
     retries = machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value"))
     assert retries.strip().endswith("3"), retries
-    journal_has("agent-distro: vanilla update failed")
+    journal_has("agent-distro update: error: vanilla update failed")
     events.extend(["failed: nix build exit 1"] * 3)
     check_history()
     assert machine.succeed("cat " + stamp).strip() == successful_update
@@ -259,7 +259,7 @@ in
     machine.succeed(user("cp ${uncached}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    journal_has("agent-distro: vanilla update skipped: bundle not fully cached yet (would build uncached-agents)")
+    journal_has("agent-distro update: warning: vanilla update skipped: bundle not fully cached yet (would build uncached-agents)")
     events.append("skipped: bundle not fully cached yet (would build uncached-agents)")
     check_history()
     assert machine.succeed("readlink -f " + state).strip() == before
@@ -269,11 +269,11 @@ in
     check_history()
     # A cache the daemon would ignore skips before any build, and activation warns once.
     warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${unusableCache}/activate 2>&1"))
-    assert warning.count("agent-distro cannot use cache file:///not-configured") == 1, warning
+    assert warning.count("agent-distro update: warning: cannot use cache file:///not-configured") == 1, warning
     machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    journal_has("agent-distro: vanilla update skipped: cache file:///not-configured not usable")
+    journal_has("agent-distro update: warning: vanilla update skipped: cache file:///not-configured not usable")
     events.append("skipped: cache file:///not-configured not usable; add it to nix.settings substituters/trusted-public-keys")
     check_history()
     assert machine.succeed("readlink -f " + state).strip() == before

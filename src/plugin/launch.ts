@@ -33,6 +33,14 @@
  * Plugins are matched by manifest name, never by version: a plugin on the
  * variable replaces the profile's plugin of the same name, and on the variable
  * the last of a name wins.
+ *
+ * A launch names the profile in effect on stderr when a repository's
+ * `agent-distro.nix` or AI_PROFILE chose it, worded as `--list` words it and
+ * followed by the website (`SITE`), since that line is the only one a plain
+ * launch prints and the change to plugins, PATH and gateway is silent
+ * otherwise. At debug it also logs each plugin directory and where it came
+ * from, the PATH additions, the gateway, and the arguments it hands the
+ * harness.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -42,6 +50,8 @@ import {
 import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
+import { log, SITE, VARIABLE as LOG_VARIABLE } from '../log.ts';
+import { sourceText } from '../listing.ts';
 import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
 import type { Gateway } from '../gateway/models.ts';
 import { resolveProfile, select, workingDirectory, isResolved, type Info, type Resolved } from '../profile/resolve.ts';
@@ -62,6 +72,8 @@ export type LaunchPlugin = {
   name: string;
   key: string;
   description: Description;
+  /** Where it was named, as `resolve` labels it: `profile` or AGENT_DISTRO_PLUGINS. */
+  from: string;
   /** The adapter's cached translation; never written to after it is returned. */
   translation: string;
 };
@@ -346,7 +358,7 @@ export function translate(
     const reports = readCached(join(directory, 'reports.json'), isStrings, clear);
     const description = readCached(join(directory, 'description.json'), isDescription, clear);
     for (const message of reports) report(`${entry}: ${message}`);
-    return { name: description.manifest.name, key, description, translation: join(directory, 'out') };
+    return { name: description.manifest.name, key, description, from: label, translation: join(directory, 'out') };
   };
 
   // A checkout can change while it is read; it is hashed again afterwards,
@@ -491,7 +503,7 @@ function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved {
 }
 
 /** The shell a launcher evaluates; see the head of this file. */
-export function shell(launched: string, gateway: Gateway | null, paths: string[]): string {
+export function shell(launched: string, gateway: Gateway | null, paths: string[], logLevel: string | null = null): string {
   const lines = [
     `launched=${quote(launched)}`,
     'unset AGENT_DISTRO_PROFILE',
@@ -500,25 +512,56 @@ export function shell(launched: string, gateway: Gateway | null, paths: string[]
     `profile_gateway_key_env=${quote(gateway?.keyEnv ?? '')}`,
     `profile_gateway_key_hint=${quote(gateway?.keyHint ?? '')}`,
   ];
+  // The level this launch settled on after warning about the one it was given:
+  // the gateway and harness scripts it runs next take that one as it is,
+  // rather than repeating the warning, once each.
+  if (logLevel) lines.push(`${LOG_VARIABLE}=${quote(logLevel)}`, `export ${LOG_VARIABLE}`);
   if (paths.length) lines.push(`PATH=${quote(paths.join(':'))}"\${PATH:+:$PATH}"`, 'export PATH');
   return lines.join('\n') + '\n';
 }
 
+/** What a launch says about itself: the profile at info when one was chosen here, the rest at debug. */
+function describe<A extends { profile: E[] }, E extends ProfileEntry>(
+  harness: string, profile: Resolved, launch: Launch<A, E>, launched: string,
+) {
+  if (profile.source === 'repository' || profile.source === 'variable') {
+    log.profile.info(`using ${profile.name} (${sourceText(profile)}) · ${SITE}`);
+  }
+  log.profile.debug(`profile ${profile.name}, ${sourceText(profile)}`);
+  for (const plugin of launch.kept) log.plugin.debug(`${plugin.description.root}: built in, as ${plugin.name}`);
+  for (const plugin of launch.replaced) log.plugin.debug(`${plugin.description.root}: built in, replaced`);
+  for (const plugin of launch.plugins) {
+    const from = plugin.from === 'profile' ? `profile ${profile.name}` : plugin.from;
+    log.plugin.debug(`${plugin.description.root}: from ${from}, as ${plugin.name}, translated at ${plugin.translation}`);
+  }
+  for (const path of profile.paths) log.profile.debug(`PATH gains ${path}`);
+  if (profile.gateway) log.gateway.debug(`gateway ${profile.gateway.url}, key in $${profile.gateway.keyEnv}`);
+  else log.gateway.debug('no gateway');
+  log.harness(harness).debug(`harness arguments: ${launched}`);
+}
+
 export async function main(argsPath: string): Promise<number> {
   const args = JSON.parse(readFileSync(argsPath, 'utf8'));
-  const report: Report = (message) => process.stderr.write(printable(message) + '\n');
+  const report: Report = (message) => log.plugin.warn(message);
+  // The failure is reported by the component it comes from, as `--list`
+  // reports the same profile failure, not by whichever harness was launched.
+  let logger = log.profile;
   try {
-    const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
     const profile = profileInEffect(args.info, process.env);
+    logger = log.plugin;
+    const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
     // The built-in profile is the one this launcher was built with.
     const builtIn = profile.builtin && profile.name === args.info.default;
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
       builtIn ? undefined : profile.plugins);
-    process.stdout.write(shell(adapter.launch(launch), profile.gateway, profile.paths));
+    logger = log.harness(args.harness);
+    const launched = adapter.launch(launch);
+    describe(args.harness, profile, launch, launched);
+    process.stdout.write(shell(launched, profile.gateway, profile.paths, log.unknown ? log.level : null));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;
     // A cache that cannot be written fails the launch: there is no degraded mode.
-    process.stderr.write(`agent-distro: ${printable((error as Error).message)}\n`);
+    logger.error((error as Error).message);
     return 1;
   }
   return 0;

@@ -75,9 +75,9 @@ for (const schema of ['v1', 'v2'] as const) {
         + `[ -e "$0.down" ] && exit 7\n[ -e "$0.body" ] && exec cat "$0.body"\necho '{"data":[{"id":"served"}]}'\n`);
       chmodSync(curl, 0o755);
 
-      const invoke = () => {
+      const invoke = (env: Record<string, string> = {}) => {
         const result = spawnSync(process.execPath, [join(src, 'gateway/models.ts'), base, cache, curl, 'TEST_KEY', shape],
-          { encoding: 'utf8', env: { ...process.env, TEST_KEY: key } });
+          { encoding: 'utf8', env: { ...process.env, TEST_KEY: key, ...env } });
         assert.equal(result.status, 0, result.stderr);
         return [result.stdout.trim(), result.stderr];
       };
@@ -89,7 +89,9 @@ for (const schema of ['v1', 'v2'] as const) {
       assert.equal(argv[argv.indexOf('--config') + 1], '-');
       assert.equal(readFileSync(curl + '.stdin', 'utf8'), 'header = "Authorization: Bearer test\\"key\\\\value"\n');
       assert.equal(selected, cache);
+      // Discovery runs on every launch, so it says nothing unless asked.
       assert.equal(warning, '');
+      assert.match(invoke({ AGENT_DISTRO_LOG: 'debug' })[1], /^agent-distro gateway: discovering \S+ models at \S+ …$/m);
       const saved = readFileSync(cache, 'utf8');
       assert.ok(!saved.includes(key));
       assert.deepEqual(new Set(Object.keys(JSON.parse(saved)[providerKey].litellm.models)), new Set(['served', 'large', 'small']));

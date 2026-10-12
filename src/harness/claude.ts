@@ -20,6 +20,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { log } from '../log.ts';
 import type { Adapter, ProfileEntry, Report } from '../plugin/launch.ts';
 import { launcher, shellQuote } from '../plugin/launcher.ts';
 import type { Description } from '../plugin/read.ts';
@@ -89,5 +90,5 @@ if (import.meta.main) {
   const [out, argsPath] = process.argv.slice(2);
   const args: Inputs & { description: string } = JSON.parse(readFileSync(argsPath, 'utf8'));
   const description = readDescription(args.description);
-  writePlugin(description, out, args, (message) => process.stderr.write(`${description.root}: ${message}\n`));
+  writePlugin(description, out, args, (message) => log.claude.warn(`${description.root}: ${message}`));
 }

@@ -49,6 +49,7 @@ Here the terminal is in a repository whose `agent-distro.nix` is the Juspay prof
 | `AI_PROFILE` | `vanilla`, or a profile [reference](#profiles) | The profile when the repository has none[^profile-fallback] |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 | `AGENT_DISTRO_PLUGINS` | `:`-separated plugin directories | Loads more plugins for that launch; see [Plugins at launch](#plugins-at-launch) |
+| `AGENT_DISTRO_LOG` | `silent`, `error`, `warn`, `info` (default), `debug`, `trace` | How much agent-distro says on stderr; see [Diagnostics](#diagnostics) |
 
 [^var-names]: Names unchanged for script compatibility.
 [^non-interactive]: Also usable in scripts and non-interactive shells.
@@ -279,7 +280,27 @@ nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13Ei
 | Full run output, Linux | `journalctl --user -u agent-distro-update` |
 | Full run output, macOS | `~/.local/state/agent-distro/<source>/update.log` |
 
-[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 vanilla updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing.
+[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 vanilla updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. It is trimmed back to its last 1000 lines once it has grown past them, and a scheduled run on macOS cuts `update.log` to its last 1 MB.
+
+### Diagnostics
+
+Every message agent-distro prints goes to stderr as `agent-distro <component>: …`, with `warning:` or `error:` when it is one. Stdout is never used for messages: launchers and tools read it.
+
+By default a launch prints a line only when something chose a profile for you, a repository's `agent-distro.nix` or `AI_PROFILE`, worded as `--list` words it:
+
+```text
+agent-distro profile: using repo (from /home/me/repo/agent-distro.nix) · https://agent-distro.nixos.asia
+```
+
+and when something will take a while, such as evaluating a profile for the first time or fetching its packages. The built-in profile, or one you named, prints nothing.
+
+To see the nix commands run, the cache hits and misses, each plugin and where it came from, the PATH additions, the gateway and the arguments handed to the harness:
+
+```sh
+AGENT_DISTRO_LOG=debug claude
+```
+
+`AGENT_DISTRO_LOG` sets the level of agent-distro's own messages, so `AGENT_DISTRO_LOG=silent` leaves only the harness's output and the few warnings the launcher scripts themselves print (a missing gateway key, a replaced harness configuration file, a `PATH` collision), which are always shown. Colors follow `NO_COLOR` and `FORCE_COLOR`. Updater output is in the journal or `update.log`; see [Troubleshooting](#troubleshooting), and `journalctl --user -u agent-distro-update -p warning` for its warnings and errors alone.
 
 ## Build your own distribution
 

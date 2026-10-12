@@ -13,6 +13,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { log } from '../log.ts';
 import { cacheRoot, LaunchError, printable } from '../plugin/launch.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isDirectory, isFile, isSystemError } from '../util.ts';
@@ -25,13 +26,13 @@ const USAGE = `usage: check-profile [${FILE}]`;
 function run(argv: string[]): number {
   const [infoPath, cachesPath, ...rest] = argv;
   if (rest.length > 1) {
-    process.stderr.write(`${USAGE}\n`);
+    log.profile.error(USAGE);
     return 2;
   }
   const given = resolve(rest[0] ?? FILE);
   const file = isDirectory(given) ? join(given, FILE) : given;
   if (!isFile(file)) {
-    process.stderr.write(`check-profile: no ${FILE} at ${given}\n${USAGE}\n`);
+    log.profile.error(`no ${FILE} at ${given}\n${USAGE}`);
     return 2;
   }
   const info: Info = JSON.parse(readFileSync(infoPath, 'utf8'));
@@ -66,7 +67,7 @@ if (import.meta.main) {
     process.exitCode = run(process.argv.slice(2));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;
-    process.stderr.write(`check-profile: ${printable((error as Error).message)}\n`);
+    log.profile.error((error as Error).message);
     process.exitCode = 1;
   }
 }

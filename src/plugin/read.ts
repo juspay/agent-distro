@@ -13,6 +13,7 @@
 import { BlockList, isIPv4, isIPv6 } from 'node:net';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { log } from '../log.ts';
 import { decodeUtf8, isDirectory, isFile, lexists, realpath } from '../util.ts';
 
 export type Author = { name?: string; email?: string; url?: string };
@@ -433,11 +434,11 @@ export function isDescription(value: unknown): value is Description {
 if (import.meta.main) {
   const plugin = process.argv[2];
   try {
-    const description = readPlugin(plugin, (message) => process.stderr.write(`${plugin}: ${message}\n`));
+    const description = readPlugin(plugin, (message) => log.plugin.warn(`${plugin}: ${message}`));
     process.stdout.write(JSON.stringify(description, null, 2) + '\n');
   } catch (error) {
     if (!(error instanceof Fatal)) throw error;
-    process.stderr.write(`${plugin}: invalid Agent Plugin: ${error.message}\n`);
+    log.plugin.error(`${plugin}: invalid Agent Plugin: ${error.message}`);
     process.exitCode = 1;
   }
 }

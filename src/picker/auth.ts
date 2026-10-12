@@ -14,6 +14,8 @@
  * oh-my-pi 18.7.0, Pi 1.0.4, OpenCode 1.18.35 and OpenCode v2 2.0.24.
  */
 
+import { log } from '../log.ts';
+
 export type Env = NodeJS.ProcessEnv;
 
 /** A harness's auth scheme, as its meta.nix declares it. */
@@ -82,13 +84,15 @@ function json(path: string, io: Io): Source<unknown> {
   let text: string | undefined;
   try {
     text = io.read(path);
-  } catch {
+  } catch (error) {
+    log.picker.debug(`auth probe: cannot read ${path}: ${(error as Error).message}`);
     return { unreadable: true };
   }
   if (text === undefined) return { missing: true };
   try {
     return { value: JSON.parse(text) };
-  } catch {
+  } catch (error) {
+    log.picker.debug(`auth probe: ${path} is not JSON: ${(error as Error).message}`);
     return { unreadable: true };
   }
 }
@@ -134,6 +138,7 @@ function ompStore(env: Env, io: Io): Source<string[]> {
     } catch (error) {
       // A store OMP has not written a credential to yet is "not signed in".
       if (error instanceof Error && error.message.includes('no such table')) return { value: [] };
+      log.picker.debug(`auth probe: cannot read ${path}: ${(error as Error).message}`);
       unreadable = true;
     }
   }
@@ -228,7 +233,8 @@ function idTokenEmail(token: unknown): string | undefined {
     const claims = record(JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')));
     const email = claims?.email;
     return typeof email === 'string' && email ? email : undefined;
-  } catch {
+  } catch (error) {
+    log.picker.debug(`auth probe: the id_token does not decode: ${(error as Error).message}`);
     return undefined;
   }
 }
@@ -281,7 +287,8 @@ export function probe(spec: Spec, env: Env, io: Io): Status | undefined {
         status = spec.provider ? provider(spec.provider, env, io) : undefined;
         break;
     }
-  } catch {
+  } catch (error) {
+    log.picker.debug(`auth probe ${spec.scheme} failed: ${(error as Error).message}`);
     return undefined;
   }
   // Once, for every scheme: the items are drawn on the terminal as they are.

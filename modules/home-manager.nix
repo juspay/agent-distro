@@ -155,7 +155,7 @@ in
             [ -n "$collision" ] || collision=$candidate
           done
           if [ -n "$collision" ]; then
-            printf 'warning: agent-distro PATH collision for %s: %s; bare %s runs %s\n' "$name" "$collision" "$name" "$winner" >&2
+            printf 'agent-distro shims: warning: PATH collision for %s: %s; bare %s runs %s\n' "$name" "$collision" "$name" "$winner" >&2
           fi
         done
       ) || true

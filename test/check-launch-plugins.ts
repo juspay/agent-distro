@@ -279,11 +279,11 @@ test('a corrupt cache names the directory to remove', () => {
   const escaped = run(root, { XDG_CACHE_HOME: cache });
   assert.equal(escaped.status, 0, escaped.stderr);
   assert.ok(!escaped.stderr.includes('\x1b'), escaped.stderr);
-  assert.match(escaped.stderr, /\\x1b\]0;title\\x07/);
+  assert.match(escaped.stderr, /^agent-distro plugin: warning: .*\\x1b\]0;title\\x07/m);
   writeFileSync(join(target, 'description.json'), '{"root": 1}');
   const result = run(root, { XDG_CACHE_HOME: cache });
   assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, new RegExp(`^agent-distro: AGENT_DISTRO_PLUGINS: the cached .*description\\.json is unreadable or corrupt; remove ${directory} and launch again`));
+  assert.match(result.stderr, new RegExp(`^agent-distro plugin: error: AGENT_DISTRO_PLUGINS: the cached .*description\\.json is unreadable or corrupt; remove ${directory} and launch again`));
   writeFileSync(join(target, 'description.json'), '{');
   assert.equal(run(root, { XDG_CACHE_HOME: cache }).status, 1);
 });
@@ -301,7 +301,7 @@ test('an entry that is not a directory fails the launch naming it', () => {
   const missing = join(temporary(), 'missing');
   const result = run(`${plugin('fine')}:${missing}`);
   assert.equal(result.status, 1, result.stderr);
-  assert.equal(result.stderr, `agent-distro: AGENT_DISTRO_PLUGINS: ${missing} is not a directory\n`);
+  assert.equal(result.stderr, `agent-distro plugin: error: AGENT_DISTRO_PLUGINS: ${missing} is not a directory\n`);
   const file = join(temporary(), 'file');
   writeFileSync(file, '');
   assert.match(run(file).stderr, /is not a directory/);
@@ -323,7 +323,7 @@ test('the cache directory must be absolute and writable', () => {
   writeFileSync(blocked, '');
   const unwritable = run(plugin('uncached'), { XDG_CACHE_HOME: blocked });
   assert.equal(unwritable.status, 1, unwritable.stderr);
-  assert.match(unwritable.stderr, /^agent-distro: .*ENOTDIR/);
+  assert.match(unwritable.stderr, /^agent-distro plugin: error: .*ENOTDIR/);
   const homeless = run(plugin('homeless'), { XDG_CACHE_HOME: undefined, HOME: undefined });
   assert.equal(homeless.status, 1, homeless.stderr);
   assert.match(homeless.stderr, /XDG_CACHE_HOME and HOME are unset/);
@@ -367,6 +367,8 @@ test('a checkout that changes while it is translated is translated again', () =>
 test('a new runtime is a new translator', () => {
   const copy = join(temporary(), 'src');
   cpSync(src, copy, { recursive: true });
+  // Its dependencies, beside it as in the runtime tree.
+  symlinkSync(join(src, '../node_modules'), join(copy, '../node_modules'));
   return import(join(copy, 'plugin/launch.ts')).then(async (other) => {
     const { adapter: otherClaude } = await import(join(copy, 'harness/claude.ts'));
     const cache = temporary();

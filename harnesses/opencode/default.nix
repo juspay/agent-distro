@@ -47,7 +47,7 @@ writeShellApplication {
     config=$launched
     ${initialization}
     if [ "''${OPENCODE_CONFIG+x}" = x ]; then
-      echo 'warning: agent-distro is replacing OPENCODE_CONFIG.' >&2
+      echo 'agent-distro opencode: warning: replacing OPENCODE_CONFIG.' >&2
     fi
     export OPENCODE_CONFIG="$config"
     ${sessionDefaults}

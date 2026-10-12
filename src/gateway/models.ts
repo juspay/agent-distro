@@ -7,10 +7,14 @@
  * CACHE, and prints the config to use: CACHE, or BASE when discovery has never
  * succeeded. SHAPE (a JSON file) says where the provider, its URL and its
  * models live in this harness's config.
+ *
+ * Discovery asks the network, so it says so as it starts (src/log.ts `slow`);
+ * a failure is a warning naming the fallback, with curl's own error at debug.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { log, slow } from '../log.ts';
 import { decodeUtf8, isFile, isSystemError, writeTemporary } from '../util.ts';
 
 /** A profile's gateway, as its agent-distro.nix declares it. */
@@ -55,7 +59,10 @@ function served(curl: string, url: string, keyEnv: string): string[] {
     ['--fail', '--silent', '--show-error', '--connect-timeout', '2', '--max-time', '5', '--config', '-', url + '/models'],
     { input: `header = "${header}"\n`, maxBuffer: Infinity });
   if (response.error) throw response.error;
-  if (response.status !== 0) throw new Unavailable(`curl exited with ${response.status ?? response.signal}`);
+  if (response.status !== 0) {
+    const detail = response.stderr.toString().trim();
+    throw new Unavailable(`curl exited with ${response.status ?? response.signal}${detail ? `: ${detail}` : ''}`);
+  }
   let text: string;
   try {
     text = decodeUtf8(response.stdout);
@@ -78,8 +85,13 @@ export function main(base: string, cache: string, curl: string, keyEnv: string, 
   const shape: Shape = JSON.parse(readFileSync(shapePath, 'utf8'));
   const provider = atPath(config, shape.provider);
   const url = atPath(provider, shape.url);
+  log.gateway.debug(`gateway ${url}, key in $${keyEnv}`);
   try {
-    for (const name of served(curl, url, keyEnv)) addModel(provider.models, name, shape);
+    // Discovery runs on every gateway launch and curl is capped at a few
+    // seconds, so it only says so at debug: an info line would print each time.
+    const names = slow(log.gateway, `discovering ${shape.label} models at ${url}`,
+      () => served(curl, url, keyEnv), 'debug');
+    for (const name of names) addModel(provider.models, name, shape);
     mkdirSync(dirname(cache), { recursive: true });
     // Concurrent launches must never see a partially written config.
     const temporary = writeTemporary(dirname(cache), '.models-', JSON.stringify(config, null, 2));
@@ -94,7 +106,8 @@ export function main(base: string, cache: string, curl: string, keyEnv: string, 
     if (!(error instanceof Unavailable || error instanceof SyntaxError || isSystemError(error))) throw error;
     const fallback = isFile(cache) ? cache : base;
     const source = fallback === cache ? 'cached model list' : 'two profile aliases';
-    process.stderr.write(`${shape.label}: gateway model discovery failed; using ${source} from ${fallback}\n`);
+    log.gateway.warn(`${shape.label}: model discovery failed; using ${source} from ${fallback}`);
+    log.gateway.debug(`model discovery: ${(error as Error).message}`);
   }
   process.stdout.write((isFile(cache) ? cache : base) + '\n');
 }
