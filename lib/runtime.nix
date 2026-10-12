@@ -1,7 +1,8 @@
 # The runtime TypeScript tree (src/), run by Node's native type stripping: no
-# package.json, bundler or tsc. Its one dependency, `yaml`, is an npm tarball
-# pinned in lib/npins and linked as node_modules/yaml beside src/: ES modules
-# resolve bare specifiers by walking up node_modules directories (NODE_PATH is
+# package.json, bundler or tsc. Its two dependencies, `yaml` and `consola`
+# (src/log.ts, which imports only `consola/core`), are npm tarballs pinned in
+# lib/npins and linked under node_modules beside src/: ES modules resolve bare
+# specifiers by walking up node_modules directories (NODE_PATH is
 # CommonJS-only), so the copy, not a symlink to the source, is what runs.
 pkgs:
 let
@@ -13,10 +14,12 @@ let
   # derivation fetched at build time, so evaluation never needs the registry.
   # Its hash is Nix's of the unpacked tree, not npm's `integrity`.
   yaml = (import ./npins).yaml { inherit pkgs; };
+  consola = (import ./npins).consola { inherit pkgs; };
   tree = pkgs.runCommand "agent-distro-runtime" { } ''
     mkdir -p "$out/node_modules"
     cp -r ${../src} "$out/src"
     ln -s ${yaml} "$out/node_modules/yaml"
+    ln -s ${consola} "$out/node_modules/consola"
   '';
   # The command line that runs one module, e.g. `script "plugin/read.ts"`.
   script = module: "${node} ${tree}/src/${module}";
