@@ -49,7 +49,6 @@ plugins = installed_plugins()
 for installed_id in [p + '@' + marketplace for p in expected]:
     assert plugins[installed_id]['installed'] and plugins[installed_id]['enabled'], plugins
 
-
 # Removing a plugin also stays in effect until a different build is launched.
 # Run this after the preservation checks: Codex's explicit remove command
 # deletes that plugin's own configuration, including its MCP preferences.
@@ -110,23 +109,29 @@ assert 'launch-fixture' not in json.dumps(json.loads(upstream('plugin', 'marketp
 # Unset, the profile's plugins are exactly what loads.
 assert_skills(launcher)
 
+# A plugin's stdio MCP server runs in the launch directory (doc/index.md).
+if 'acme.spec-fixture' in expected:
+    spec = os.environ['AGENT_DISTRO_TEST_SPEC']
+    for plugins in (None, spec):
+        with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as records:
+            launch = os.path.realpath(launch)
+            # The listing is what the assertions below read.
+            result = run('mcp', 'list', '--json', plugins=plugins)
+            assert result.stdout.strip(), result
+            servers = {entry['name']: entry for entry in json.loads(result.stdout)}
+            assert servers['placeholders']['transport']['command'].endswith('bin/acme.spec-fixture-0-placeholders'), servers
+            for name in ['placeholders', 'explicit-cwd']:
+                installed = next(codex_home.glob(f'plugins/cache/*/acme.spec-fixture/*/bin/acme.spec-fixture-*-{name}'))
+                subprocess.run([str(installed)], cwd=str(installed.parents[1]),
+                               env=os.environ | {'FIXTURE_RECORDS': records, 'AGENT_DISTRO_CWD': launch},
+                               stdin=subprocess.DEVNULL, timeout=60)
+            placeholders = json.loads(Path(records, 'placeholders.json').read_text())
+            assert placeholders['cwd'] == launch, placeholders
+            # A plugin's own `cwd` is its author's instruction, and still wins.
+            explicit = json.loads(Path(records, 'explicit-cwd.json').read_text())
+            assert explicit['cwd'] == os.path.join(os.path.realpath(spec), 'share'), explicit
+
 invalid = 'model = [\n'
 config.write_text(invalid)
 assert run('--version', launcher=launcher).returncode != 0
 assert config.read_text() == invalid
-
-# A plugin's stdio MCP server runs in the launch directory (doc/index.md).
-if 'mcp-only' in expected:
-    fixture = os.environ['AGENT_DISTRO_TEST_MCP']
-    for plugins in (None, fixture):
-        with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as records:
-            launch = os.path.realpath(launch)
-            listing = json.loads(run('mcp', 'list', '--json', plugins=plugins, check=True).stdout)
-            server = next(entry for entry in listing if entry['name'] == 'bare')
-            assert server['transport']['command'] == './bin/mcp-only-0-bare', server
-            installed = next(codex_home.glob('plugins/cache/agent-distro-*/mcp-only/*/bin/mcp-only-0-bare'))
-            subprocess.run([str(installed)], cwd=str(installed.parents[1]),
-                           env=os.environ | {'FIXTURE_RECORDS': records, 'AGENT_DISTRO_CWD': launch},
-                           stdin=subprocess.DEVNULL, timeout=60)
-            record = json.loads(Path(records, 'bare.json').read_text())
-            assert record['cwd'] == launch, record

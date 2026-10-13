@@ -48,7 +48,12 @@ if 'acme.spec-fixture' in expected:
             here = os.getcwd()
             os.chdir(launch)
             try:
-                listing = json.loads(run('mcp', 'list', '--json', overrides=overrides))
+                # `pi mcp list` exits non-zero while any server is down, and this
+                # profile's remote fixture points at a dead port: the listing is
+                # what the assertions below read.
+                result = subprocess.run(['pi', 'mcp', 'list', '--json'], env=env | overrides,
+                                        text=True, capture_output=True, timeout=120)
+                listing = json.loads(result.stdout)
             finally:
                 os.chdir(here)
             server = next(entry for entry in listing['servers'] if entry['name'] == 'placeholders')

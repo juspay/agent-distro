@@ -51,7 +51,6 @@ let
         environment.variables = lib.optionalAttrs gateway { ${profile.gateway.keyEnv} = "test-api-key"; }
           // { AGENT_DISTRO_TEST_PLUGIN = "${./fixtures/launch-plugin}"; }
           // { AGENT_DISTRO_TEST_SPEC = "${./fixtures/spec-plugin}"; }
-          // { AGENT_DISTRO_TEST_MCP = "${./fixtures/mcp-only}"; }
           // lib.optionalAttrs (builtins.elem "koluLaunch" requires) {
             AGENT_DISTRO_TEST_KOLU = if koluPlugin == null then throw "koluLaunch checks need koluPlugin" else "${koluPlugin}";
           }
