@@ -105,9 +105,16 @@ demo:
 # picks its own slice of ./test's checks. With neither variable set it runs
 # them all in one `nix flake check`, which is the local spelling.
 
+# `[linux]` alone, and it must be: `just` on a lane parses the whole justfile,
+# and a dependency on a recipe this platform pruned is an unknown dependency —
+# so a root naming the Linux-only `test` and `site` is itself Linux-only. The
+# darwin lane still runs the four recipes enabled there: odu drops the edges it
+# cannot honour, and a node it does not schedule posts no status. odu resolves
+# the pipeline with `just --dump`, which prunes the same way, so the coordinator
+# has to be on a platform where this root is enabled.
+
 # The pipeline: odu expands these leaves and runs each with `just --no-deps`.
 [linux]
-[macos]
 [parallel]
 [metadata("ci")]
 ci: flake picker test test-template scripts site
