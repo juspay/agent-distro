@@ -1,0 +1,20 @@
+nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/test-update-flake.py
+..../tmp/odu/agent-distro/2038002-2237193-517891b7/.github/scripts/update-sources.sh: line 17: jq: command not found
+E
+======================================================================
+ERROR: test_yaml_repin_stays_on_its_major (__main__.UpdateFlakeTests.test_yaml_repin_stays_on_its_major)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/odu/agent-distro/2038002-2237193-517891b7/.github/scripts/test-update-flake.py", line 73, in test_yaml_repin_stays_on_its_major
+    subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nix/store/kxdkzc079hlg9ifg4lhjvyi2w7qwpshx-python3-3.13.14/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['bash', '/tmp/odu/agent-distro/2038002-2237193-517891b7/.github/scripts/update-sources.sh']' returned non-zero exit status 127.
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.172s
+
+FAILED (errors=1)
+error: recipe `scripts` failed on line 85 with exit code 1

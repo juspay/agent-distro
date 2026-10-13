@@ -78,11 +78,13 @@ picker: flake
 template: flake
     bash test/template.sh
 
-# The workflow's own scripts, and their unit tests.
+# The workflow's own scripts, and their unit tests. `test-update-flake.py`
+# drives `update-sources.sh`, which reads its pins with jq, so that node gets
+# jq from nixpkgs too.
 [linux]
 [macos]
 scripts:
-    nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/test-update-flake.py
+    nix shell --accept-flake-config nixpkgs#python3 nixpkgs#jq -c python3 .github/scripts/test-update-flake.py
     nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/test-ca-index.py
     nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/check-cache-config.py
 
