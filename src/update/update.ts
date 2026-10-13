@@ -48,8 +48,8 @@ type Config = {
   nix: string;
   /** Binary cache URL → public key. */
   substituters: Record<string, string>;
-  /** Where the content-addressed bundles are indexed; default CA_INDEX. */
-  caIndex?: string;
+  /** Base URL of the content-addressed index (lib/ca-index.nix, via mkUpdater). */
+  caIndex: string;
   /** The launchd schedule: one period per run, phased onto the first hour. */
   periodSeconds: number;
   offsetSeconds: number;
@@ -71,12 +71,10 @@ export const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_RETRY_MS = 50;
 
 /**
- * Where this distribution publishes the content-addressed bundles of the
- * revisions CI built, one `<rev>/<system>/<profile>.json` of `{"ia": …, "ca": …}`
- * each. A config may name another index; the tests do.
+ * The index is one request on the update's path; a hanging one must not become
+ * the path. Where the index is is `config.caIndex`: mkUpdater writes the one
+ * location lib/ca-index.nix states, so nothing repeats it here.
  */
-const CA_INDEX = 'https://raw.githubusercontent.com/juspay/agent-distro/ca-index';
-/** The index is one request on the update's path; a hanging one must not become the path. */
 const INDEX_TIMEOUT_MS = 30_000;
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -273,8 +271,8 @@ function systemOf(nix: string): string {
  */
 async function published(nix: string, config: Config, revision: string): Promise<Indexed | null> {
   const system = systemOf(nix);
-  if (!revision || !system) return null;
-  const url = `${config.caIndex ?? CA_INDEX}/${revision}/${system}/${config.profile}.json`;
+  if (!revision || !system || !config.caIndex) return null;
+  const url = `${config.caIndex.replace(/\/+$/, '')}/${revision}/${system}/${config.profile}.json`;
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
     if (!response.ok) {
@@ -573,11 +571,21 @@ async function scheduled(config: Config): Promise<number> {
   }
 }
 
+/**
+ * Warn about the caches this user's nix will not honour. What an unusable
+ * cache costs depends on the others: with a usable one the update proceeds
+ * through it, and only with none — the same test `update` makes — does it take
+ * the published content-addressed bundle, and skip where none is published.
+ */
 function cacheWarnings(config: Config): number {
-  for (const cache of checkCaches(config.nix, config.substituters)) {
+  const caches = checkCaches(config.nix, config.substituters);
+  const usable = caches.some((cache) => cache.usable);
+  for (const cache of caches) {
     if (cache.usable) continue;
-    log.update.warn(`cannot use cache ${cache.url}; updates fetch the content-addressed bundle instead, `
-      + 'and skip where none is published for the revision. '
+    log.update.warn(`cannot use cache ${cache.url}; `
+      + (usable
+        ? 'updates use the caches nix will honour. '
+        : 'updates fetch the content-addressed bundle instead, and skip where none is published for the revision. ')
       + 'Add it to nix.settings substituters and trusted-public-keys.');
   }
   return 0;

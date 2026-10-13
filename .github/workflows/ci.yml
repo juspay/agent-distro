@@ -150,7 +150,13 @@ jobs:
         # one), so a run that pushed meanwhile is rebased under this one rather
         # than contested; the branch is created by whichever system gets there
         # first.
-        if: env.PUSH_CACHE == 'true'
+        #
+        # Only outside a pull request: `github.sha` there is the merge commit
+        # GitHub made for the run, which no updater can lock — entries for it
+        # would be read by nobody, forever. The rewrite and the launcher run on
+        # pull requests all the same; only this push waits for a commit that
+        # lands on a branch.
+        if: env.PUSH_CACHE == 'true' && github.event_name != 'pull_request'
         env:
           REV: ${{ github.sha }}
           INDEX: ${{ runner.temp }}/ca-index

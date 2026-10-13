@@ -72,6 +72,7 @@
         defaultProfile = default;
         defaultFlake = "github:juspay/agent-distro";
         cache = import ./lib/cache.nix;
+        caIndex = import ./lib/ca-index.nix;
       };
       apps = lib.genAttrs systems (system: {
         default = { type = "app"; program = lib.getExe pickers.${system}; };
@@ -91,6 +92,7 @@
       lib = import ./lib/api.nix {
         inherit nixpkgs mkLaunchers mkFlake;
         cache = import ./lib/cache.nix;
+        caIndex = import ./lib/ca-index.nix;
       };
       # Resolved profile data, for the tests and for third parties.
       inherit profiles;

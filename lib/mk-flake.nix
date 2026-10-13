@@ -6,7 +6,8 @@ let
   # points back at this builder so the returned distribution can build further
   # flake outputs the same way.
   # `profile` is an `agent-distro.nix`, or the attribute set one holds.
-  build = { profile, systems ? import ./systems.nix, cache ? import ./cache.nix }@args:
+  build = { profile, systems ? import ./systems.nix, cache ? import ./cache.nix
+    , caIndex ? import ./ca-index.nix }@args:
     let
       profile = if builtins.isAttrs args.profile then args.profile else import args.profile;
       checked = import ./validate-profile.nix profile;
@@ -25,7 +26,7 @@ let
       homeManagerModules.default = import ../modules/home-manager.nix {
         bundles = nixpkgs.lib.mapAttrs (_: ps: { ${checked.name} = ps.${checked.name}; }) packages;
         defaultProfile = checked.name;
-        inherit cache;
+        inherit cache caIndex;
       };
       apps = nixpkgs.lib.mapAttrs
         (_: nixpkgs.lib.mapAttrs
@@ -34,7 +35,7 @@ let
             program = nixpkgs.lib.getExe package;
           }))
         runnable;
-      lib = import ./api.nix { inherit nixpkgs mkLaunchers cache; mkFlake = build; };
+      lib = import ./api.nix { inherit nixpkgs mkLaunchers cache caIndex; mkFlake = build; };
     };
 in
 build

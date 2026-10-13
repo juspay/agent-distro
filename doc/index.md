@@ -244,7 +244,7 @@ Or keep the cache-only updates, but drive them yourself:
 - **Scheduling is yours.** The updater schedules nothing itself, so run it on your own cadence.[^scheduled-flag]
 - **Setup is yours.** Create the `stateDirectory` yourself, and run `--cache-warnings` once to surface an unusable cache.[^no-outlink]
 
-[^updater-no-compile]: Never compiling; it passes nix only `substituters`.
+[^updater-no-compile]: Never compiling: it hands nix `substituters`, and where this user's nix will not honour them, the revision's published content-addressed bundle instead.
 [^scheduled-flag]: It checks the UTC boundary only when you pass `--scheduled`, as the module's launchd does.
 [^no-outlink]: The updater replaces `<state>/current` directly, so there is no out-link pruning for the consumer to do.
 
@@ -276,6 +276,8 @@ https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<
 
 `<rev>` is the revision CI built, which is what an updater looks its own entry up by; `latest/` names the newest bundle a system published, with the revision that wrote it so a consumer can tell whether what it has is what this names. Only a push to `main` writes `latest/`, so a pull request's build never moves it, and each system moves only its own file.
 
+This index is agent-distro's. A distribution that publishes its own bundles names it with `caIndex` (`services.agent-distro.caIndex`, or `mkFlake`'s `caIndex`); its revisions are not in this index, and an entry that is not there leaves the update skipped.[^ca-index]
+
 `ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Anyone can do the same by hand, with the `ca` path the index names:
 
 ```sh
@@ -289,6 +291,7 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
 [^cache-setting]: `cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`.
+[^ca-index]: Where the index lives is stated once, in [lib/ca-index.nix](https://github.com/juspay/agent-distro/blob/main/lib/ca-index.nix): `mkUpdater` reads it, and `.github/scripts/check-cache-config.py` keeps this page and the workflow's push equal to it.
 [^untrusted]: Nothing more is needed when you are a trusted Nix user or run a single-user install. Otherwise the daemon ignores the updater's request unless your system config already lists the cache.
 [^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable and no content-addressed bundle is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
 
@@ -351,12 +354,12 @@ The template is a repository that is both an Agent Plugins directory and a profi
 - **Update.** `nix flake update agent-distro`.
 
 ```nix
-agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; }
+agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; caIndex ? …; }
 # profile: an agent-distro.nix, or the attribute set it holds
 # → packages.<system>: every harness, default picker, and <profile.name> bundle
 #   (a bundle's bin/ carries its harness commands and `agent-distro`, its own picker)
 #   apps.<system>: every harness and default picker; homeManagerModules.default;
-#   lib: the same eight-name library attrset this flake exposes
+#   lib: the same nine-name library attrset this flake exposes
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → every harness launcher, plus picker and bundle (the bundle's bin/ also holds
@@ -368,10 +371,10 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 
 - **Outputs.** `mkFlake` returns `packages`,[^mkflake-packages] `apps`, `homeManagerModules.default`, and the same `lib` attrset `flake.nix` exposes; add other outputs with `//`.
 - **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. A repository's `agent-distro.nix`, `AI_PROFILE` or a positional reference still replace it for a launch, as they replace `vanilla`; `vanilla` stays accepted by name.
-- **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache. Push your own builds to a cache and pass it, or your users' updates are skipped.[^cache-only]
+- **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache, and `caIndex`, the base URL of the index of the content-addressed bundles you publish ([The binary cache](#binary-cache)), defaulting to agent-distro's. Push your own builds to a cache and pass it, and name your own index if you publish one, or your users' updates are skipped.[^cache-only]
 
 [^mkflake-packages]: Every harness, the default picker, and the `<profile.name>` bundle, which carries its own picker as `bin/agent-distro`.
-[^cache-only]: The Home Manager updater only installs what that cache holds and never compiles.
+[^cache-only]: The Home Manager updater only installs what that cache holds, or the content-addressed bundle your index names, and never compiles.
 
 For NixOS, with your distribution bound as `distro`:
 
@@ -418,7 +421,7 @@ agent-distro.lib.mkShims { pkgs; bundle; stateDirectory; profile ? null; }
 #   `commands`); anything else is an eval error naming the problem. A `profile`
 #   reference is exported as AI_PROFILE unless the environment sets one.
 
-agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; }
+agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; caIndex ? …; }
 # → { config = <the generated JSON file>; command = [ node update.ts config ];
 #   program = <a writeShellApplication running `command "$@"`>; }. The Home
 #   Manager module's systemd ExecStart, launchd ProgramArguments (`++ ["--scheduled"]`)

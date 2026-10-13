@@ -99,7 +99,7 @@ async function run(nix: string, { progress = false } = {}) {
   const notes: string[] = [];
   const status = await update({
     profile: 'p', flake: 'path:/fixture', state, history, nix,
-    substituters: {}, periodSeconds: 21600, offsetSeconds: 7200,
+    substituters: {}, caIndex: 'https://example.invalid/ca-index', periodSeconds: 21600, offsetSeconds: 7200,
   }, {
     summary: () => {},
     note: (_level, message) => notes.push(message),

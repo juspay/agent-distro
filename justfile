@@ -3,14 +3,20 @@ default:
     @just --list
 
 # Run the wrapper integration tests (NixOS VMs; Linux with KVM)
+[linux]
 test:
-    cd test && nix flake check -L
+    # Cap how many VMs run at once — a `nix flake check` left to itself boots
+    # one per check and each wants gigabytes. Raise VM_JOBS on a bigger box.
+    cd test && nix flake check -L --max-jobs {{ env('VM_JOBS', '4') }}
 
 # Build a fresh template against this checkout and a tiny local plugin
+[linux]
+[macos]
 test-template:
     bash test/template.sh
 
 # Build the website into result-site
+[linux]
 site:
     nix build ./doc -o result-site
 
@@ -25,7 +31,7 @@ demo:
     nix shell nixpkgs#ffmpeg -c ffmpeg -v error -y \
         -framerate 50 -i doc/frames/frame-text-%05d.png \
         -framerate 50 -i doc/frames/frame-cursor-%05d.png \
-        -filter_complex "color=c=0x171717:s=1400x460:r=50[bg];[bg][0]overlay=30:30:shortest=1[t];[t][1]overlay=30:30,fps=20,split[a][b];[a]palettegen=max_colors=32[p];[b]paletteuse=dither=none" \
+        -filter_complex "color=c=0x171717:s=1400x460:r=50[bg];[bg][0]overlay=30:30:shortest=1[t];[t][1]overlay=30:30,fps=20,split[a][b];[a]palettegen=max_colors=32[p];[b][p]paletteuse=dither=none" \
         doc/demo.gif
     nix shell nixpkgs#ffmpeg -c ffmpeg -v error -y \
         -ss 7 -i doc/demo.gif -frames:v 1 doc/demo.png
@@ -39,26 +45,26 @@ demo:
 #
 # odu (github.com/juspay/odu) discovers the one recipe tagged [metadata("ci")],
 # expands its dependency graph, and runs every (recipe × platform) as a node on
-# a lane host, one commit status each. These recipes mirror
-# .github/workflows/ci.yml, so a change is checked without waiting on the
-# GitHub queue — the workflow stays what pushes the content-addressed bundles
-# and the ca-index branch, because ATTIC_TOKEN lives there.
+# a lane host, one commit status each. The nodes are the recipes above, so each
+# check keeps one definition: this section is what *runs* them, not a second
+# spelling of any of them.
 #
-# A lane host has nix, git and bash but no python3 (the workflow's scripts use
-# its runner's own), so those recipes take python3 from nixpkgs.
+# It mirrors .github/workflows/ci.yml so a change is checked without waiting on
+# the GitHub queue; the workflow stays what pushes the content-addressed
+# bundles and the ca-index branch, because ATTIC_TOKEN lives there. A lane host
+# has nix, git and bash but no python3 (the workflow's scripts use its runner's
+# own), so the script node takes theirs from nixpkgs; `test` caps its VMs, and
+# `site` and `test` are Linux-only, as the workflow's own steps are.
 #
-# Dependency edges order work rather than express requirements: the VM checks
-# start once the picker build has warmed the store for them, instead of racing
-# it for CPU and store locks. A `[linux]` recipe is pruned from a darwin lane
-# (and from odu's status list there): the VM checks fix x86_64-linux, and a
-# darwin lane has no KVM, so both belong to the Linux lane.
+# Dependency edges order work rather than express requirements: `picker` waits
+# for the wide flake build instead of racing it for CPU and store locks.
 
 # The pipeline: odu expands these leaves and runs each with `just --no-deps`.
 [linux]
 [macos]
 [parallel]
 [metadata("ci")]
-ci: flake picker template scripts website vm
+ci: flake picker test test-template scripts site
 
 # Every flake output, so a new one cannot silently escape CI.
 [linux]
@@ -72,30 +78,10 @@ flake:
 picker: flake
     nix build --print-build-logs .#default
 
-# The distribution template, built against this checkout.
-[linux]
-[macos]
-template: flake
-    bash test/template.sh
-
-# The workflow's own scripts, and their unit tests. `test-update-flake.py`
-# drives `update-sources.sh`, which reads its pins with jq, so that node gets
-# jq from nixpkgs too.
+# The workflow's own scripts, and their unit tests.
 [linux]
 [macos]
 scripts:
     nix shell --accept-flake-config nixpkgs#python3 nixpkgs#jq -c python3 .github/scripts/test-update-flake.py
     nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/test-ca-index.py
     nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/check-cache-config.py
-
-# The site build, as the workflow runs it for a doc change.
-[linux]
-website:
-    nix build ./doc --no-link -L
-
-# The wrapper checks, VMs included. `--max-jobs` caps how many VMs run at once:
-# a lane host has many cores but bounded memory, and a `nix flake check` left to
-# itself would boot one per check.
-[linux]
-vm: picker
-    cd test && nix flake check -L --max-jobs 4

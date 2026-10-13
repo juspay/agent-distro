@@ -10,7 +10,13 @@
 # machine-readable — one JSON object per line, `{"progress":{"done":…,"total":…}}`
 # while nix fetches and then one `{"result":…}` — and every human message on
 # stderr. Nothing else changes; the history log and the exit codes are the same.
-{ pkgs, bundle, flake, profile, stateDirectory, history, nix, substituters }:
+#
+# `caIndex` is where the updater reads which content-addressed bundle CI
+# published for the revision it is on (lib/ca-index.nix); a distribution that
+# publishes its own passes its own base, or its revs are looked up in this
+# one's index and found absent.
+{ pkgs, bundle, flake, profile, stateDirectory, history, nix, substituters
+, caIndex ? (import ./ca-index.nix).rawBase }:
 let
   inherit (pkgs) lib;
   # Fail fast on the wrong kind of bundle: `runtime` arrived with the TypeScript
@@ -21,7 +27,7 @@ let
   # src/update/update.ts is the updater, cache check and history log; the
   # bundle supplies the Node and runtime tree its own launchers already use.
   config = pkgs.writeText "agent-distro-update.json" (builtins.toJSON {
-    inherit profile flake substituters nix;
+    inherit profile flake substituters nix caIndex;
     state = stateDirectory;
     inherit history;
     periodSeconds = schedule.updatePeriodSeconds;
