@@ -111,16 +111,30 @@ jobs:
         # The rewrite replaces the store paths embedded in every file, which
         # for a Mach-O also invalidates its ad-hoc signature; arm64 macOS then
         # kills the binary on exec. Running one launcher from the rewritten
-        # bundle is the only way to know a user can still run it.
+        # bundle is the only way to know a user can still run it, and comparing
+        # the bytes of what ran is what says whether the rewrite reached it.
         if: env.PUSH_CACHE == 'true'
         env:
           REV: ${{ github.sha }}
           INDEX: ${{ runner.temp }}/ca-index
         run: |
           set -eu
-          bundle=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["ca"])' \
-            "$INDEX/$REV/$(nix config show system)/vanilla.json")
-          echo "content-addressed bundle: $bundle"
+          entry="$INDEX/$REV/$(nix config show system)/vanilla.json"
+          where() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$entry" "$1"; }
+          bundle=$(where ca)
+          echo "content-addressed bundle: $bundle (from $(where ia))"
+          # The launcher is a script: its shebang names the binary that runs
+          # first, and a store path embedded in a file is what the rewrite
+          # replaces.
+          interpreter() { sed -n '1s/^#!//p' "$1/bin/claude" | awk '{print $1}'; }
+          before=$(interpreter "$(where ia)")
+          after=$(interpreter "$bundle")
+          echo "launcher interpreter: $before -> $after"
+          if cmp -s "$before" "$after"; then
+            echo "the rewrite left the interpreter's bytes alone"
+          else
+            echo "the rewrite rewrote the interpreter: $(cmp -l "$before" "$after" 2>/dev/null | wc -l) bytes differ"
+          fi
           "$bundle/bin/claude" --version
 
       - name: Push the content-addressed index

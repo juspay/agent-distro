@@ -119,8 +119,10 @@ in
         assert "ca-fixture" in user("$(readlink -f /home/testuser/state/current)/bin/claude --version")
         # `versions` came out of the content-addressed bundle.
         assert "updated: Claude Code 1.2.3" in history(), history()
-        # A repeat is unchanged, and copies nothing.
-        assert "vanilla unchanged (" + ca + ")" in update("${config "http://127.0.0.1:${toString okPort}"}")
+        # A repeat is unchanged, and copies nothing — under `--progress`, where
+        # the copy is asked for nix's own progress on stderr.
+        output = update("${config "http://127.0.0.1:${toString okPort}"} --progress")
+        assert '"result":"unchanged","bundle":"' + ca + '"' in output, output
 
     with subtest("the index publishes no revision: the old skip, reworded"):
         output = update("${config "http://127.0.0.1:${toString missingPort}"}")
