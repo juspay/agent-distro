@@ -1,7 +1,7 @@
 # OMP owns LiteLLM initialization and portable extension loading.
 { pkgs, plugins, info, package }:
 let
-  inherit (pkgs) lib writeShellApplication formats gum runCommand writeText runtimeShell coreutils;
+  inherit (pkgs) lib writeShellApplication formats gum;
   omp = package;
 
   ensureApiKey = import ../../lib/gateway-key.nix { inherit gum; };
@@ -9,18 +9,6 @@ let
   # choices. src/harness/omp.ts round-trips the YAML to retain comments and
   # quoted values.
   runtime = import ../../lib/runtime.nix pkgs;
-  # OMP reads a plugin's `mcp.json` itself and starts its stdio servers in the
-  # plugin root, as the spec requires. A built-in plugin's servers must run in
-  # the launch directory like every other plugin's, so OMP is handed a copy
-  # whose servers go through generated launchers — the same translation the
-  # adapter applies to AGENT_DISTRO_PLUGINS at launch.
-  adaptPlugin = plugin: runCommand "omp-plugin" { } ''
-    ${runtime.script "plugin/write-spec-plugin.ts"} "$out" ${writeText "omp-plugin-args.json" (builtins.toJSON {
-      bash = runtimeShell;
-      env = "${coreutils}/bin/env";
-      description = "${runtime.readPlugin plugin}";
-    })}
-  '';
   # Thinking blocks are transcript content, not the thinking-level indicator;
   # hide them for every profile, gateway or not. A user-set value, including
   # `false`, is never replaced.
@@ -30,9 +18,7 @@ let
   launchPlugins = runtime.launchPlugins {
     harness = "omp";
     inherit info;
-    bash = runtimeShell;
-    env = "${coreutils}/bin/env";
-    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${adaptPlugin plugin}"; }) plugins;
+    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${runtime.specPlugin plugin}"; }) plugins;
   };
 
   initialization = ''

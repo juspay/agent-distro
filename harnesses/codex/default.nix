@@ -2,30 +2,18 @@
 # Portable plugin contents and provider policy stay outside this adapter.
 { pkgs, plugins, info, package }:
 let
-  inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils jq;
+  inherit (pkgs) lib writeShellApplication runCommand jq;
   codex = package;
   marketplaceName = "${info.default}-ai";
 
   runtime = import ../../lib/runtime.nix pkgs;
-  inherit (runtime) readPlugin script;
-  # Codex reads the plugin's own `mcp.json` and starts its stdio servers in the
-  # plugin root, as the spec requires. A built-in plugin's servers must run in
-  # the launch directory like every other plugin's, so the marketplace carries a
-  # copy whose servers go through generated launchers — the same translation the
-  # adapter applies to AGENT_DISTRO_PLUGINS at launch.
-  adaptPlugin = plugin: runCommand "codex-plugin" { } ''
-    ${script "plugin/write-spec-plugin.ts"} "$out" ${writeText "codex-plugin-args.json" (builtins.toJSON {
-      bash = runtimeShell;
-      env = "${coreutils}/bin/env";
-      description = "${readPlugin plugin}";
-    })}
-  '';
+  inherit (runtime) readPlugin;
   marketplace = runCommand "codex-${marketplaceName}-marketplace" { nativeBuildInputs = [ jq ]; } ''
     mkdir -p "$out/.agents/plugins"
     touch entries.json "$out/plugin-ids"
     ${lib.concatMapStrings (plugin: ''
       name=$(jq -er '.manifest.name' ${readPlugin plugin})
-      ln -s ${adaptPlugin plugin} "$out/$name"
+      ln -s ${runtime.specPlugin plugin} "$out/$name"
       jq -n --arg name "$name" '{
         name: $name,
         source: {source: "local", path: ("./" + $name)},
@@ -41,8 +29,6 @@ let
     inherit info;
     codex = lib.getExe codex;
     marketplace = marketplaceName;
-    bash = runtimeShell;
-    env = "${coreutils}/bin/env";
     profile = map (plugin: { description = "${readPlugin plugin}"; }) plugins;
   };
 in
