@@ -27,6 +27,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 server = http.server.HTTPServer(('127.0.0.1', port), Handler)
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+# A stub for a test, but with the floor a server should have: TLS 1.0 and 1.1
+# are not versions to offer anyone.
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 context.load_cert_chain(certificate, key)
 server.socket = context.wrap_socket(server.socket, server_side=True)
 server.serve_forever()
