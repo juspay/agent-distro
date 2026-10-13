@@ -192,11 +192,18 @@ in
         assert current() == ca, current()
 
     with subtest("the index publishes no revision: the old skip, reworded"):
+        before = len(history().splitlines())
         output = update("${config "${indexUrl missingPort}"}")
         assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
         assert "no content-addressed bundle is published for revision" in output, output
         assert current() == ca, current()
-        skipped = [line for line in history().splitlines() if "skipped:" in line]
-        assert len(skipped) == 1 and "no content-addressed bundle is published for revision" in skipped[0], skipped
+        # Recorded, as the last thing that happened — and a repeat of the same
+        # reason, which the next run is, adds nothing.
+        last = history().splitlines()[-1]
+        assert "vanilla skipped: cache ${cacheUrl} not usable and no content-addressed bundle is " \
+               "published for revision " in last, last
+        assert "could not be copied" not in last, last
+        update("${config "${indexUrl missingPort}"}")
+        assert len(history().splitlines()) == before + 1, history()
   '';
 }
