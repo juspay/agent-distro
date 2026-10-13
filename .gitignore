@@ -10,3 +10,6 @@ __pycache__/
 
 # Claude Code
 .worktrees/
+
+# odu's run records and node logs, written into the checkout it runs from
+.ci/
