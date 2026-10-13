@@ -165,11 +165,13 @@ jobs:
           printf '%s' "$paths" | attic push --stdin oss
 
       # What a consumer does, done here: fetch the published closure back from
-      # the cache into a throwaway store and verify its contents. A `ca` whose
-      # nar the cache serves differently — a rewrite by a Nix that hashes
-      # self-referential NARs differently than the `install_url` above — fails
-      # right here, before the index names it, instead of on a user's machine.
-      # Nothing reaches `latest/` unless this passes.
+      # the cache into a throwaway store and verify its contents — with the
+      # same Nix that published it (`install_url` above), because the two lines
+      # do not accept each other's form: 2.35 recomputes a self-referential
+      # NAR's address differently than 2.34, measured both ways, each import
+      # failing with `ca hash mismatch` on the same two digests. This is what
+      # says the publication targets the line the fleet verifies; nothing
+      # reaches `latest/` unless it passes.
       - name: Verify the published closure imports
         if: env.PUSH_CACHE == 'true' && runner.os == 'Linux'
         env:

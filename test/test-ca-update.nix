@@ -30,6 +30,7 @@ let
   okPort = 8100;
   missingPort = 8101;
   signedPort = 8102;
+  noCaPort = 8103;
   # A self-signed certificate for 127.0.0.1: the stub index is an https server,
   # and the updater is pointed at this as its trust anchor (NODE_EXTRA_CA_CERTS).
   # A test key for a test server, which nothing else trusts.
@@ -49,6 +50,13 @@ let
   indexUrl = port: "https://127.0.0.1:${toString port}";
   # What a `*-darwin` entry looks like: the signed bundle, nothing rewritten.
   signedEntry = pkgs.writeText "ca-signed.json" (builtins.toJSON { ia = bundle; });
+  # An entry whose ca the cache does not hold: what a copy that cannot be made
+  # looks like from here (a cache that has not caught up, or a nix that will
+  # not take it).
+  absentEntry = pkgs.writeText "ca-absent.json" (builtins.toJSON {
+    ia = bundle;
+    ca = "/nix/store/00000000000000000000000000000000-agent-distro-vanilla";
+  });
   config = caIndex: pkgs.writeText "ca-update-config.json" (builtins.toJSON {
     profile = "vanilla";
     # A revision (git+file:), which is what the index is keyed by.
@@ -83,6 +91,10 @@ in
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${indexServer 200 signedPort signedEntry}";
     };
+    systemd.services.ca-index-absent = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.ExecStart = "${indexServer 200 noCaPort absentEntry}";
+    };
     systemd.services.ca-index-missing = {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${indexServer 404 missingPort "/tmp/ca-pair.json"}";
@@ -97,6 +109,7 @@ in
     machine.wait_for_unit("ca-index-missing.service")
     machine.wait_for_open_port(${toString okPort})
     machine.wait_for_open_port(${toString signedPort})
+    machine.wait_for_open_port(${toString noCaPort})
     machine.wait_for_open_port(${toString missingPort})
 
     def user(command):
@@ -166,6 +179,13 @@ in
         assert "no content-addressed bundle is published for revision" in output, output
         assert "ignoring caIndex" not in output, output
         assert "names no signed bundle" not in output, output
+        assert current() == ca, current()
+
+    with subtest("a ca the cache cannot supply is a skip that claims no more"):
+        output = update("${config "${indexUrl noCaPort}"}")
+        assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
+        assert "content-addressed bundle /nix/store/00000000000000000000000000000000-agent-distro-vanilla " \
+               "could not be copied from ${cacheUrl}" in output, output
         assert current() == ca, current()
 
     with subtest("the index publishes no revision: the old skip, reworded"):

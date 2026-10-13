@@ -340,7 +340,10 @@ async function contentAddressed(
   log.update.debug(`the content-addressed ${entry.ia} is ${entry.ca}`);
   for (const url of urls) {
     // The bundle is the whole point of this path: a cache that has not caught
-    // up with the index (or no network) skips, as an incomplete cache does.
+    // up with the index, one that holds it but cannot be reached, and a nix
+    // that refuses it (2.35 recomputes a self-referential NAR's address
+    // differently than 2.34, and neither line accepts the other's form) all
+    // skip, as an incomplete cache does.
     const copy: Build = await nixStep(nix, ['copy', '--from', url, entry.ca], nixLog, report);
     if (!copy.error && copy.status === 0) {
       return { build: await nixStep(nix, ['build', entry.ca, '--out-link', current], nixLog, report) };
@@ -348,7 +351,9 @@ async function contentAddressed(
     log.update.debug(`nix copy --from ${url} ${entry.ca} failed: `
       + `${copy.error?.message ?? `exit ${copy.status ?? copy.signal}`}`);
   }
-  return { skip: `content-addressed bundle ${entry.ca} is not in ${urls.join(' ')} yet` };
+  // Not "not in the cache yet": the cache holding it is not enough for a nix
+  // that cannot verify it, so the reason claims no more than the copy.
+  return { skip: `content-addressed bundle ${entry.ca} could not be copied from ${urls.join(' ')}` };
 }
 
 /**

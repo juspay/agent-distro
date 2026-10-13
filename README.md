@@ -12,8 +12,10 @@ nix run github:juspay/agent-distro
 Installs keep themselves up to date from the project's binary cache and never
 compile. A Linux machine whose Nix will not trust that cache — a shared host
 where you are not a trusted user — updates too, from the content-addressed
-bundles published for every revision; a Mac needs the cache key or a trusted
-user, because a rewritten Mach-O does not run on arm64 macOS.
+bundles published for every revision (built with Nix 2.34.x: Nix 2.35 changed
+how a self-referential path is addressed, and a host on it cannot take them);
+a Mac needs the cache key or a trusted user, because a rewritten Mach-O does
+not run on arm64 macOS.
 
 Everything else is on the website, **<https://agent-distro.nixos.asia>**:
 
