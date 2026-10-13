@@ -7,11 +7,8 @@ default:
 [metadata("odu:shard=8")]
 test:
     #!/usr/bin/env bash
-    # odu shards this recipe (odu:shard=8): each lane is given ODU_SHARD_INDEX
-    # and ODU_SHARD_TOTAL and takes ./test's checks at that position mod the
-    # total, so the VMs boot on up to 8 hosts instead of queueing on one. With
-    # neither variable set it runs every check in one `nix flake check` — the
-    # local spelling.
+    # Sharded by odu: each lane builds its own slice of the checks; see the CI
+    # section below.
     set -euo pipefail
     cd test
     # Cap how many VMs run at once — a `nix flake check` left to itself boots
