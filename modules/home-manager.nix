@@ -77,8 +77,9 @@ in
         `<caIndex>/<rev>/<system>/<profile>.json`, the revision being the one
         the flake resolves to. The default is agent-distro's index; a
         distribution that publishes its own bundles names its own, and one
-        whose revisions this index does not carry leaves the update skipped
-        rather than fetched from an unsigned source.
+        whose revisions this index does not carry leaves the update skipped.
+        An `https://` URL with no credentials, query or fragment: the updater
+        fetches nothing else, and says so as a warning.
       '';
     };
     frequency = lib.mkOption {

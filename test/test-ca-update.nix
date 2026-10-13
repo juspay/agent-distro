@@ -3,9 +3,10 @@
 # needs no signature and no nix.conf change — and takes the old skip where the
 # index publishes none (src/update/update.ts `contentAddressed`).
 #
-# The stub index answers on 200 and 404 ports, the bundle's
-# content-addressed rewrite stands in for what CI publishes, and the cache that
-# holds it is one this user's nix would not take a signed path from.
+# The stub index answers on 200 and 404 ports over TLS (the updater fetches
+# only an https base, and refuses anything else), the bundle's content-addressed
+# rewrite stands in for what CI publishes, and the cache that holds it is one
+# this user's nix would not take a signed path from.
 { pkgs, agent-distro }:
 let
   inherit (pkgs) lib;
@@ -28,9 +29,21 @@ let
   cacheKey = "ca-test-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   okPort = 8100;
   missingPort = 8101;
-  indexServer = status: port: pkgs.writeShellScript "ca-index-${toString port}" ''
-    exec ${pkgs.python3}/bin/python ${./support/ca-index-fixture.py} ${toString status} ${toString port}
+  # A self-signed certificate for 127.0.0.1: the stub index is an https server,
+  # and the updater is pointed at this as its trust anchor (NODE_EXTRA_CA_CERTS).
+  # A test key for a test server, which nothing else trusts.
+  cert = pkgs.runCommand "ca-index-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
+    mkdir -p "$out"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+      -keyout "$out/key.pem" -out "$out/cert.pem" \
+      -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" \
+      -addext "basicConstraints=critical,CA:TRUE"
   '';
+  indexServer = status: port: pkgs.writeShellScript "ca-index-${toString port}" ''
+    exec ${pkgs.python3}/bin/python ${./support/ca-index-fixture.py} \
+      ${toString status} ${toString port} ${cert}/cert.pem ${cert}/key.pem
+  '';
+  indexUrl = port: "https://127.0.0.1:${toString port}";
   config = caIndex: pkgs.writeText "ca-update-config.json" (builtins.toJSON {
     profile = "vanilla";
     # A revision (git+file:), which is what the index is keyed by.
@@ -79,7 +92,10 @@ in
         return machine.succeed("su - testuser -c " + shlex.quote(command))
 
     def update(config):
-        output = user("${runtime.node} ${runtime.tree}/src/update/update.ts " + config + " 2>&1")
+        # The index base is https, and the stub's certificate is self-signed:
+        # this is the trust anchor the updater verifies it against.
+        output = user("NODE_EXTRA_CA_CERTS=${cert}/cert.pem "
+                      "${runtime.node} ${runtime.tree}/src/update/update.ts " + config + " 2>&1")
         # The run's own words, in the test log: the copy, the update and the skip.
         machine.log(output.strip())
         return output
@@ -110,7 +126,7 @@ in
     user("cd ~/update-flake && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm flake")
 
     with subtest("the index publishes the revision: an untrusted user updates"):
-        output = update("${config "http://127.0.0.1:${toString okPort}"}")
+        output = update("${config "${indexUrl okPort}"}")
         assert "vanilla updated nothing -> " + ca in output, output
         assert current() == ca, current()
         # The content-addressed path is back, unsigned and uncached by nix.conf.
@@ -121,11 +137,18 @@ in
         assert "updated: Claude Code 1.2.3" in history(), history()
         # A repeat is unchanged, and copies nothing — under `--progress`, where
         # the copy is asked for nix's own progress on stderr.
-        output = update("${config "http://127.0.0.1:${toString okPort}"} --progress")
+        output = update("${config "${indexUrl okPort}"} --progress")
         assert '"result":"unchanged","bundle":"' + ca + '"' in output, output
 
+    with subtest("a base that is not https is refused, and not fetched"):
+        output = update("${config "http://127.0.0.1:${toString okPort}"}")
+        assert 'ignoring caIndex "http://127.0.0.1:${toString okPort}"' in output, output
+        assert "must be an https URL with no credentials, query or fragment" in output, output
+        assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
+        assert current() == ca, current()
+
     with subtest("the index publishes no revision: the old skip, reworded"):
-        output = update("${config "http://127.0.0.1:${toString missingPort}"}")
+        output = update("${config "${indexUrl missingPort}"}")
         assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
         assert "no content-addressed bundle is published for revision" in output, output
         assert current() == ca, current()
