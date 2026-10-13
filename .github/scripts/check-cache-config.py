@@ -23,7 +23,10 @@ def contexts():
     derived list rather than spelling it a second time: a rename in the workflow
     then reaches the ruleset through the next protect run, instead of quietly
     requiring a context nothing posts."""
-    jobs = (root / WORKFLOW).read_text().split("\njobs:\n", 1)[1]
+    text = (root / WORKFLOW).read_text()
+    if "\njobs:\n" not in text:
+        sys.exit(f"{WORKFLOW}: no `jobs:` block, so no status contexts to derive")
+    jobs = text.split("\njobs:\n", 1)[1]
     ids = re.findall(r"^  (\S+):", jobs, re.M)
     if len(ids) != 1:
         sys.exit(f"{WORKFLOW}: jobs: must hold exactly one job, found {ids}")
@@ -41,6 +44,9 @@ if "--contexts" in sys.argv[1:]:
         print(context)
     sys.exit(0)
 
+# The drift gate: the workflow must still resolve to one job with an inline
+# `os:` matrix. A restructure that leaves it unreadable fails here, in CI, rather
+# than letting `protect` read an empty context list and write it to the ruleset.
 contexts()
 
 
