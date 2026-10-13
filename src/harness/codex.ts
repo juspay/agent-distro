@@ -23,13 +23,14 @@
  * cannot be enabled or disabled this way; it is reported and skipped.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { LaunchError, STALE_DAYS, type Adapter, type ProfileEntry } from '../plugin/launch.ts';
 import { shellQuote } from '../plugin/launcher.ts';
+import { writeSpecPlugin, type Inputs } from '../plugin/resources.ts';
 
-type LaunchArgs = { codex: string; marketplace: string; profile: ProfileEntry[] };
+type LaunchArgs = { codex: string; marketplace: string; profile: ProfileEntry[]; bash: string; env: string };
 
 const PREFIX = 'agent-distro-';
 const SCRATCH = '.agent-distro-install-';
@@ -40,12 +41,15 @@ const marketplaceName = (key: string) => PREFIX + createHash('sha256').update(ke
 /** A TOML basic string; JSON's escapes are all valid TOML. */
 const tomlString = (value: string) => JSON.stringify(value);
 
-export const adapter: Adapter<LaunchArgs, ProfileEntry, null> = {
-  translationInputs: () => null,
-  translate: (description, out, _inputs, _report, key) => {
+export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
+  translationInputs: ({ bash, env }) => ({ bash, env }),
+  translate: (description, out, inputs, report, key) => {
     const name = description.manifest.name;
     mkdirSync(join(out, '.agents/plugins'), { recursive: true });
-    symlinkSync(description.root, join(out, name));
+    // Codex reads the plugin's own `mcp.json` and starts each stdio server in
+    // the plugin root, so the directory it installs is a copy whose servers run
+    // through launchers (src/plugin/resources.ts).
+    writeSpecPlugin(description, join(out, name), inputs, report);
     writeFileSync(join(out, '.agents/plugins/marketplace.json'), JSON.stringify({
       name: marketplaceName(key),
       plugins: [{

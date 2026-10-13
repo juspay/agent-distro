@@ -504,6 +504,7 @@ function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved {
 
 /** The shell a launcher evaluates; see the head of this file. */
 export function shell(launched: string, gateway: Gateway | null, paths: string[], logLevel: string | null = null): string {
+  const cwd = workingDirectory();
   const lines = [
     `launched=${quote(launched)}`,
     'unset AGENT_DISTRO_PROFILE',
@@ -512,6 +513,12 @@ export function shell(launched: string, gateway: Gateway | null, paths: string[]
     `profile_gateway_key_env=${quote(gateway?.keyEnv ?? '')}`,
     `profile_gateway_key_hint=${quote(gateway?.keyHint ?? '')}`,
   ];
+  // The directory this launch was typed in. A harness starts a plugin's stdio
+  // MCP servers in a directory of its own choosing (the plugin's root, per the
+  // spec), which for a plugin from a flake reference is under /nix/store and
+  // makes `nix run github:…` fail there; the launchers the adapters generate cd
+  // here instead. Exported, because the harness passes its environment on.
+  if (cwd) lines.push(`AGENT_DISTRO_CWD=${quote(cwd)}`, 'export AGENT_DISTRO_CWD');
   // The level this launch settled on after warning about the one it was given:
   // the gateway and harness scripts it runs next take that one as it is,
   // rather than repeating the warning, once each.

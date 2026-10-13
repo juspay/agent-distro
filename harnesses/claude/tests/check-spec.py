@@ -36,15 +36,17 @@ assert placeholders['env']['FIXTURE_CONFIG'] == root + '/share/README', placehol
 assert placeholders['env']['FIXTURE_DATA'] == data, placeholders
 assert placeholders['env']['FIXTURE_LITERAL'] == '${HOME}', placeholders
 assert placeholders['env']['FIXTURE-DASHED'] == 'dashed', placeholders
-# cwd defaults to the plugin root, not Claude Code's launch directory.
-assert placeholders['cwd'] == root, placeholders
+# cwd defaults to the launch directory, not the plugin root: for a plugin from a
+# flake reference that root is under /nix/store, where `nix run github:…` cannot
+# run at all. A plugin's own `cwd` (below) is its author's instruction.
+assert placeholders['cwd'] == os.getcwd(), placeholders
 assert record('explicit-cwd')['cwd'] == root + '/share'
 assert record('data-cwd')['cwd'] == data
 
 # A bare command is found on PATH; its PLUGIN_ROOT is its own plugin's.
 bare = record('bare')
-assert bare['argv'] == ['bare', bare['env']['PLUGIN_ROOT']] and bare['cwd'] == bare['env']['PLUGIN_ROOT'], bare
-assert json.loads(Path(bare['cwd'], 'plugin.json').read_text())['name'] == 'mcp-only'
+assert bare['argv'] == ['bare', bare['env']['PLUGIN_ROOT']] and bare['cwd'] == os.getcwd(), bare
+assert json.loads(Path(bare['env']['PLUGIN_ROOT'], 'plugin.json').read_text())['name'] == 'mcp-only'
 
 # Outside Claude Code, the launcher falls back to its own data directory.
 launcher = re.search(r'^plugin:acme\.spec-fixture:data-cwd: (\S+)', listing, re.MULTILINE)[1]

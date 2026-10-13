@@ -6,7 +6,11 @@ share OpenCode's fetch/cache; model defaults fill only absent settings. Every
 profile defaults `hideThinkingBlock` to `true`; set it to `false` in
 `settings.json` to show thinking blocks again.
 
-A plugin on `AGENT_DISTRO_PLUGINS` is merged the same way, but for one launch:
+Each stdio MCP server runs through a generated launcher, in the directory the
+harness was launched in: Pi would otherwise start it in the plugin root, which
+for a plugin from a flake reference is under `/nix/store`, where `nix run
+github:…` cannot run. A plugin on `AGENT_DISTRO_PLUGINS` is merged the same way,
+but for one launch:
 the merge records what it added (and the profile servers it displaced) in
 `.agent-distro-launch.json` in the agent directory, and the next merge removes
 whatever is still as recorded before applying its own, so the entries stay

@@ -9,6 +9,7 @@
     { name = "claudeKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; }
     { name = "claudePlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" ]; }
     { name = "claudeSpec"; script = import ../../test/guest-script.nix ./tests/check-spec.py; requires = [ "spec" ]; packages = [ "recordFixture" ]; }
+    { name = "claudeMcpCwd"; script = import ../../test/guest-script.nix ./tests/check-mcp-cwd.py; requires = [ "spec" ]; packages = [ ]; }
     { name = "claude"; script = import ../../test/guest-script.nix ./tests/check.py; requires = [ ]; packages = [ ]; }
   ];
 }

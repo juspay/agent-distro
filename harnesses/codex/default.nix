@@ -2,20 +2,30 @@
 # Portable plugin contents and provider policy stay outside this adapter.
 { pkgs, plugins, info, package }:
 let
-  inherit (pkgs) lib writeShellApplication runCommand jq;
+  inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils jq;
   codex = package;
   marketplaceName = "${info.default}-ai";
 
-  # Codex loads the original directory itself; the description only supplies
-  # its validated name, so an invalid manifest fails here as it does for Claude.
-  inherit (import ../../lib/runtime.nix pkgs) readPlugin;
+  runtime = import ../../lib/runtime.nix pkgs;
+  inherit (runtime) readPlugin script;
+  # Codex reads the plugin's own `mcp.json` and starts its stdio servers in the
+  # plugin root, as the spec requires. A built-in plugin's servers must run in
+  # the launch directory like every other plugin's, so the marketplace carries a
+  # copy whose servers go through generated launchers — the same translation the
+  # adapter applies to AGENT_DISTRO_PLUGINS at launch.
+  adaptPlugin = plugin: runCommand "codex-plugin" { } ''
+    ${script "plugin/write-spec-plugin.ts"} "$out" ${writeText "codex-plugin-args.json" (builtins.toJSON {
+      bash = runtimeShell;
+      env = "${coreutils}/bin/env";
+      description = "${readPlugin plugin}";
+    })}
+  '';
   marketplace = runCommand "codex-${marketplaceName}-marketplace" { nativeBuildInputs = [ jq ]; } ''
     mkdir -p "$out/.agents/plugins"
     touch entries.json "$out/plugin-ids"
-    for description in ${lib.escapeShellArgs (map (plugin: toString (readPlugin plugin)) plugins)}; do
-      plugin=$(jq -er '.root' "$description")
-      name=$(jq -er '.manifest.name' "$description")
-      ln -s "$plugin" "$out/$name"
+    ${lib.concatMapStrings (plugin: ''
+      name=$(jq -er '.manifest.name' ${readPlugin plugin})
+      ln -s ${adaptPlugin plugin} "$out/$name"
       jq -n --arg name "$name" '{
         name: $name,
         source: {source: "local", path: ("./" + $name)},
@@ -23,14 +33,16 @@ let
         category: "Productivity"
       }' >> entries.json
       printf '%s\n' "$name@${marketplaceName}" >> "$out/plugin-ids"
-    done
+    '') plugins}
     jq -s --arg name ${lib.escapeShellArg marketplaceName} '{name: $name, plugins: .}' entries.json > "$out/.agents/plugins/marketplace.json"
   '';
-  launchPlugins = (import ../../lib/runtime.nix pkgs).launchPlugins {
+  launchPlugins = runtime.launchPlugins {
     harness = "codex";
     inherit info;
     codex = lib.getExe codex;
     marketplace = marketplaceName;
+    bash = runtimeShell;
+    env = "${coreutils}/bin/env";
     profile = map (plugin: { description = "${readPlugin plugin}"; }) plugins;
   };
 in
