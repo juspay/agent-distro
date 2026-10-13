@@ -267,14 +267,19 @@ in
     # A repeat of the same reason is not logged again.
     machine.succeed(systemctl("start agent-distro-update.service"))
     check_history()
-    # A cache the daemon would ignore skips before any build, and activation warns once.
+    # A cache the daemon would ignore: nix drops the updater's own substituter
+    # for this user, so the run takes the revision's published
+    # content-addressed bundle instead — and this flake is a path, which names
+    # no revision for an index to key a bundle by, so it skips.
+    skipped = ("cache file:///not-configured not usable and no content-addressed bundle is published for "
+               "the revision this flake is on; add it to nix.settings substituters/trusted-public-keys")
     warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${unusableCache}/activate 2>&1"))
     assert warning.count("agent-distro update: warning: cannot use cache file:///not-configured") == 1, warning
     machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    journal_has("agent-distro update: warning: vanilla update skipped: cache file:///not-configured not usable")
-    events.append("skipped: cache file:///not-configured not usable; add it to nix.settings substituters/trusted-public-keys")
+    journal_has("agent-distro update: warning: vanilla update skipped: " + skipped)
+    events.append("skipped: " + skipped)
     check_history()
     assert machine.succeed("readlink -f " + state).strip() == before
 

@@ -9,10 +9,16 @@ and model gateway once, and run them in every harness.
 nix run github:juspay/agent-distro
 ```
 
+Installs keep themselves up to date from the project's binary cache and never
+compile. A machine whose Nix will not trust that cache — a shared host where you
+are not a trusted user — updates too, from the content-addressed bundles
+published for every revision.
+
 Everything else is on the website, **<https://agent-distro.nixos.asia>**:
 
 - [Quick start](https://agent-distro.nixos.asia/#quick-start)
 - [Install and keep updated](https://agent-distro.nixos.asia/#install)
+- [The binary cache](https://agent-distro.nixos.asia/#binary-cache)
 - [Build your own distribution](https://agent-distro.nixos.asia/#build-your-own-distribution)
 - [Profiles](https://agent-distro.nixos.asia/#profiles)
 - [Harnesses](https://agent-distro.nixos.asia/#harnesses)
