@@ -151,7 +151,9 @@ protect *args:
     set -euo pipefail
     # `{{ args }}` and not `"$@"`: just interpolates a recipe's parameters into
     # its body and passes none of them positionally, so a bare `$@` here is
-    # always empty — the dry run below would then look like a real one.
+    # always empty — the dry run below would then look like a real one. They are
+    # word-split, so an argument holding a space needs no quoting to survive
+    # (none of this recipe's flags takes one).
     odu=(nix run --accept-flake-config github:juspay/odu -- protect \
       --platform x86_64-linux --platform aarch64-darwin {{ args }})
     contexts=$(nix shell --accept-flake-config nixpkgs#python3 \
@@ -174,15 +176,31 @@ protect *args:
     # odu owns the list; it goes first, and whatever it dropped and we require
     # is re-added below.
     "${odu[@]}"
-    ruleset=23633532   # this repository's ruleset "Require CI on main"
     slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+    # WHICH ruleset odu wrote is not this recipe's to know: it picks the one
+    # whose required checks already contain a context odu posts
+    # (`<recipe>@x86_64-linux`, which only odu writes). Exactly one ruleset must
+    # match, since the contexts required of a branch are the union of its
+    # rulesets': appending to a second one would leave contexts no run reports.
+    owners=()
+    while read -r id; do
+      [ -n "$id" ] || continue
+      posted=$(gh api "repos/$slug/rulesets/$id" --jq '
+        [.rules[] | select(.type == "required_status_checks")
+         | .parameters.required_status_checks[]? | .context | strings
+         | select(endswith("@x86_64-linux"))] | length')
+      [ "$posted" = "0" ] || owners+=("$id")
+    done < <(gh api --paginate "repos/$slug/rulesets" --jq '.[].id')
+    if [ "${#owners[@]}" -ne 1 ]; then
+      found=none
+      [ "${#owners[@]}" -eq 0 ] || found="${owners[*]}"
+      echo "protect: expected one ruleset requiring an odu context; found $found" >&2
+      exit 1
+    fi
+    ruleset=${owners[0]}
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
     gh api "repos/$slug/rulesets/$ruleset" >"$work/ruleset.json"
-    if ! grep -q '"required_status_checks"' "$work/ruleset.json"; then
-      echo "protect: ruleset $ruleset has no required_status_checks rule to add to" >&2
-      exit 1
-    fi
     # A ruleset PUT replaces the whole object, so this is the same
     # read-modify-write odu does: every field the read returned goes back out
     # and only the checks rule's contexts change. Ours are deduplicated against
@@ -211,4 +229,4 @@ protect *args:
       echo "protect: $slug still does not require: ${missing[*]}" >&2
       exit 1
     fi
-    echo "protect: $slug requires odu's contexts and ${#cache_contexts[@]} cache contexts"
+    echo "protect: $slug ruleset #$ruleset requires odu's contexts and ${#cache_contexts[@]} cache contexts"
