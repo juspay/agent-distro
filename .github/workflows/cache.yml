@@ -10,9 +10,10 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Warm the cache on demand: a dispatch pushes exactly what a main push does.
-  # Its `build (…)` contexts are required on main, so dispatch on a commit that
-  # can land there.
+  # A manual warm: a dispatch pushes what it builds to the cache and publishes
+  # its `<rev>/<system>/…` entries. It writes no `latest/` entry, which moves
+  # only on a push to main. Its `build (…)` contexts are required on main, so
+  # dispatch on a commit that can land there.
   workflow_dispatch:
 
 concurrency:
