@@ -1,4 +1,5 @@
 from claude_support import *
+import tempfile
 
 # Each fixture server records its argv, cwd and environment here on launch.
 records = home / 'records'
@@ -36,9 +37,7 @@ assert placeholders['env']['FIXTURE_CONFIG'] == root + '/share/README', placehol
 assert placeholders['env']['FIXTURE_DATA'] == data, placeholders
 assert placeholders['env']['FIXTURE_LITERAL'] == '${HOME}', placeholders
 assert placeholders['env']['FIXTURE-DASHED'] == 'dashed', placeholders
-# cwd defaults to the launch directory, not the plugin root: for a plugin from a
-# flake reference that root is under /nix/store, where `nix run github:…` cannot
-# run at all. A plugin's own `cwd` (below) is its author's instruction.
+# cwd defaults to the launch directory (doc/index.md), not the plugin root.
 assert placeholders['cwd'] == os.getcwd(), placeholders
 assert record('explicit-cwd')['cwd'] == root + '/share'
 assert record('data-cwd')['cwd'] == data
@@ -54,3 +53,13 @@ fallback = {k: v for k, v in env.items() if k != 'CLAUDE_PLUGIN_DATA'}
 fallback['XDG_DATA_HOME'] = str(home / 'xdg')
 subprocess.run([launcher], env=fallback, stdin=subprocess.DEVNULL, timeout=60, check=True)
 assert record('data-cwd')['cwd'] == str(home / 'xdg/agent-distro/plugins/acme.spec-fixture')
+
+# The same plugin from AGENT_DISTRO_PLUGINS, whose translation is made at launch.
+with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as again:
+    launch = os.path.realpath(launch)
+    listing = subprocess.run(
+        ['claude', 'mcp', 'list'], cwd=launch, text=True, capture_output=True, timeout=180,
+        env=env | {'FIXTURE_RECORDS': again, 'AGENT_DISTRO_PLUGINS': os.environ['AGENT_DISTRO_TEST_SPEC']})
+    assert 'Connected' in listing.stdout, (listing.stdout, listing.stderr)
+    placeholders = json.loads(Path(again, 'placeholders.json').read_text())
+    assert placeholders['cwd'] == launch, placeholders

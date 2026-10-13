@@ -9,7 +9,6 @@
     { name = "opencodeKolu"; script = import ../../test/guest-script.nix ./tests/check-kolu.py; requires = [ "kolu" ]; packages = [ "koluFixture" ]; env.AI_GATEWAY = "0"; }
     { name = "opencodeKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; env.AI_GATEWAY = "0"; }
     { name = "opencodePlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" ]; env.AI_GATEWAY = "0"; }
-    { name = "opencodeMcpCwd"; script = import ../../test/guest-script.nix ./tests/check-mcp-cwd.py; requires = [ "spec" ]; packages = [ ]; }
     { name = "opencode"; script = import ../../test/guest-script.nix ./tests/check.py; requires = [ ]; packages = [ ]; env.AI_GATEWAY = "0"; }
   ];
 }

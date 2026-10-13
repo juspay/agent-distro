@@ -8,10 +8,9 @@
     { name = "codexCli"; script = import ../../test/guest-script.nix ./tests/check-cli.py; requires = [ ]; packages = [ ]; env.CODEX_SESSION_DEFAULTS = "${./session-defaults.sh}"; }
     { name = "codexKolu"; script = import ../../test/guest-script.nix ./tests/check-kolu.py; requires = [ "kolu" ]; packages = [ "koluFixture" ]; }
     { name = "codexKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; }
-    { name = "codexPlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" "upstream" ]; }
+    { name = "codexPlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" "upstream" "recordFixture" ]; }
     { name = "codexStaleMarketplace"; script = import ../../test/guest-script.nix ./tests/check-stale-marketplace.py; requires = [ "plugins" ]; packages = [ "upstream" ]; }
     { name = "codexTerminal"; script = import ../../test/guest-script.nix ./tests/check-terminal.py; requires = [ ]; packages = [ ]; }
-    { name = "codexMcpCwd"; script = import ../../test/guest-script.nix ./tests/check-mcp-cwd.py; requires = [ "spec" ]; packages = [ "recordFixture" ]; }
     { name = "codex"; script = import ../../test/guest-script.nix ./tests/check.py; requires = [ ]; packages = [ ]; }
   ];
 }
