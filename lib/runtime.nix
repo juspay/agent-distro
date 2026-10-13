@@ -41,7 +41,7 @@ let
     system = pkgs.stdenv.hostPlatform.system;
   };
 in
-{
+rec {
   inherit node tree script info;
   # One Agent Plugin, validated once into a harness-independent description
   # for any adapter that needs more than its directory. A fatal manifest
@@ -49,15 +49,27 @@ in
   readPlugin = plugin: pkgs.runCommand "agent-plugin.json" { } ''
     ${script "plugin/read.ts"} ${plugin} > "$out"
   '';
+  # The two programs every generated launcher runs through
+  # (src/plugin/resources.ts): stated once, since the copies below and every
+  # launch need the same pair.
+  launcherInputs = { bash = pkgs.runtimeShell; env = "${pkgs.coreutils}/bin/env"; };
+  # One plugin materialized as an Agent Plugins directory whose stdio servers
+  # run through generated launchers: the build-time half of what the OMP and
+  # Codex adapters translate at launch, so a plugin built into a distribution
+  # starts its servers in the launch directory too.
+  specPlugin = plugin: pkgs.runCommand "agent-plugin-spec" { } ''
+    ${script "plugin/write-spec-plugin.ts"} "$out" ${pkgs.writeText "agent-plugin-spec-args.json" (builtins.toJSON (launcherInputs // { description = "${readPlugin plugin}"; }))}
+  '';
   # The shell every launcher runs before its harness: the profile in effect,
   # its gateway and packages, and the plugins of that profile and of
   # AGENT_DISTRO_PLUGINS, as `launched` and `profile_gateway*`. `args` names
   # the adapter (`harness`), the built-in profile's plugins (`profile`, each
-  # with its `description`) and the adapter's `info`; see src/plugin/launch.ts.
+  # with its `description`) and the adapter's `info`; the launcher inputs ride
+  # along, so no adapter spells them. See src/plugin/launch.ts.
   # Captured before eval, so a failed launch stops the launcher; the variables
   # are declared first, for shellcheck to see what the eval assigns.
   launchPlugins = args: ''
     : "''${launched=}" "''${profile_gateway=}" "''${profile_gateway_url=}" "''${profile_gateway_key_env=}" "''${profile_gateway_key_hint=}"
-    launch=$(${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON args)})
+    launch=$(${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON (launcherInputs // args))})
     eval "$launch"'';
 }

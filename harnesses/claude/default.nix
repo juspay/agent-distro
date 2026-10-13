@@ -2,22 +2,18 @@
 # portable; no provider initialization or persistent plugin install is needed.
 { pkgs, plugins, info, package }:
 let
-  inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils;
+  inherit (pkgs) lib writeShellApplication runCommand writeText;
   claude = package;
 
   runtime = import ../../lib/runtime.nix pkgs;
   adaptPlugin = plugin: runCommand "claude-plugin" { } ''
-    ${runtime.script "harness/claude.ts"} "$out" ${writeText "claude-plugin-args.json" (builtins.toJSON {
-      bash = runtimeShell;
-      env = "${coreutils}/bin/env";
+    ${runtime.script "harness/claude.ts"} "$out" ${writeText "claude-plugin-args.json" (builtins.toJSON (runtime.launcherInputs // {
       description = "${runtime.readPlugin plugin}";
-    })}
+    }))}
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "claude";
     inherit info;
-    bash = runtimeShell;
-    env = "${coreutils}/bin/env";
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${adaptPlugin plugin}"; }) plugins;
   };
 in

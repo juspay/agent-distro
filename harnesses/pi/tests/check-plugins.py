@@ -34,3 +34,32 @@ homeless = subprocess.run(['env', '-u', 'HOME', '-u', 'PI_CODING_AGENT_DIR', f'X
                           env=env, capture_output=True, text=True, timeout=120)
 assert homeless.returncode != 0, homeless
 assert 'HOME and PI_CODING_AGENT_DIR are unset' in homeless.stderr, homeless.stderr
+
+
+# A plugin's stdio MCP server runs in the launch directory (doc/index.md).
+if 'acme.spec-fixture' in expected:
+    spec = os.environ['AGENT_DISTRO_TEST_SPEC']
+    for plugins in (None, spec):
+        with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as records:
+            launch = os.path.realpath(launch)
+            overrides = {'FIXTURE_RECORDS': records}
+            if plugins is not None:
+                overrides['AGENT_DISTRO_PLUGINS'] = plugins
+            here = os.getcwd()
+            os.chdir(launch)
+            try:
+                # `pi mcp list` exits non-zero while any server is down, and this
+                # profile's remote fixture points at a dead port: the listing is
+                # what the assertions below read.
+                result = subprocess.run(['pi', 'mcp', 'list', '--json'], env=env | overrides,
+                                        text=True, capture_output=True, timeout=120)
+                listing = json.loads(result.stdout)
+            finally:
+                os.chdir(here)
+            server = next(entry for entry in listing['servers'] if entry['name'] == 'placeholders')
+            assert server['state'] == 'connected', listing
+            placeholders = json.loads(Path(records, 'placeholders.json').read_text())
+            assert placeholders['cwd'] == launch, placeholders
+            # A plugin's own `cwd` is its author's instruction, and still wins.
+            explicit = json.loads(Path(records, 'explicit-cwd.json').read_text())
+            assert explicit['cwd'] == os.path.join(os.path.realpath(spec), 'share'), explicit

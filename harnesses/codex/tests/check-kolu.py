@@ -8,6 +8,4 @@ for gateway in ['0', '1']:
     assert_preserved()
 servers = {s['name']: s for s in json.loads(run('mcp', 'list', '--json', check=True).stdout)}
 assert {'personal', 'kolu'} <= servers.keys(), servers
-assert servers['kolu']['enabled']
-assert servers['kolu']['transport']['command'] == 'kolu'
-assert servers['kolu']['transport']['args'] == ['mcp']
+assert_kolu_server(servers)

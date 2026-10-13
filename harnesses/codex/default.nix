@@ -6,16 +6,14 @@ let
   codex = package;
   marketplaceName = "${info.default}-ai";
 
-  # Codex loads the original directory itself; the description only supplies
-  # its validated name, so an invalid manifest fails here as it does for Claude.
-  inherit (import ../../lib/runtime.nix pkgs) readPlugin;
+  runtime = import ../../lib/runtime.nix pkgs;
+  inherit (runtime) readPlugin;
   marketplace = runCommand "codex-${marketplaceName}-marketplace" { nativeBuildInputs = [ jq ]; } ''
     mkdir -p "$out/.agents/plugins"
     touch entries.json "$out/plugin-ids"
-    for description in ${lib.escapeShellArgs (map (plugin: toString (readPlugin plugin)) plugins)}; do
-      plugin=$(jq -er '.root' "$description")
-      name=$(jq -er '.manifest.name' "$description")
-      ln -s "$plugin" "$out/$name"
+    ${lib.concatMapStrings (plugin: ''
+      name=$(jq -er '.manifest.name' ${readPlugin plugin})
+      ln -s ${runtime.specPlugin plugin} "$out/$name"
       jq -n --arg name "$name" '{
         name: $name,
         source: {source: "local", path: ("./" + $name)},
@@ -23,10 +21,10 @@ let
         category: "Productivity"
       }' >> entries.json
       printf '%s\n' "$name@${marketplaceName}" >> "$out/plugin-ids"
-    done
+    '') plugins}
     jq -s --arg name ${lib.escapeShellArg marketplaceName} '{name: $name, plugins: .}' entries.json > "$out/.agents/plugins/marketplace.json"
   '';
-  launchPlugins = (import ../../lib/runtime.nix pkgs).launchPlugins {
+  launchPlugins = runtime.launchPlugins {
     harness = "codex";
     inherit info;
     codex = lib.getExe codex;

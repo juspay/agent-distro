@@ -19,8 +19,6 @@ jobs:
       pull-requests: write
       # Approve the runs this job's pull request is waiting on.
       actions: write
-    outputs:
-      pr: ${{ steps.update.outputs.pull-request-number }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -83,12 +81,11 @@ jobs:
 
       # A pull request that GITHUB_TOKEN opens leaves its workflow runs waiting
       # for a maintainer to approve them, and quiet wording in the checks UI
-      # hides that they never ran. This job created the pull request and gates
-      # the merge on its own CI, so it approves those runs itself instead of
-      # asking a maintainer to start the same builds every morning. What the
-      # runs then prove is unchanged: the required `build (ubuntu-latest)` and
-      # `build (macos-latest)` checks are the contexts `Require CI on main`
-      # expects, and they now report on the commit the pull request merges.
+      # hides that they never ran. This job created the pull request, so it
+      # approves those runs itself instead of asking a maintainer to start the
+      # same builds every morning. What the runs then prove is unchanged: the
+      # `build (…)` contexts `cache.yml` posts are required by `Require CI on
+      # main`, and they report on the commit this pull request merges.
       - name: Approve the runs the update pull request is waiting on
         if: steps.update.outputs.pull-request-number != ''
         env:
@@ -114,23 +111,16 @@ jobs:
             sleep 10
           done
 
-  # Merge the update only after the shared CI the ruleset requires succeeds.
-  merge:
-    needs: update
-    if: needs.update.outputs.pr != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Wait for the pull request checks
+      # Enable auto-merge and stop there: the ruleset gates the merge, so no
+      # job here has to watch the checks. What it waits on is odu's
+      # `<recipe>@<platform>` statuses — posted by whoever runs odu on this
+      # pull request, which is how this repository's CI reports now — plus the
+      # `build (…)` contexts of `cache.yml`, whose runs the step above just
+      # approved. GitHub merges the moment they are all green.
+      - name: Merge once the required checks are green
+        if: steps.update.outputs.pull-request-number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: timeout 2h gh pr checks "${{ needs.update.outputs.pr }}" --watch --fail-fast --interval 30
-
-      - name: Merge the flake bump
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh pr merge --squash --delete-branch "${{ needs.update.outputs.pr }}"
+          PR: ${{ steps.update.outputs.pull-request-number }}
+        run: gh pr merge --squash --auto --delete-branch "$PR"

@@ -46,7 +46,7 @@ test('a launch prints shell assignments only', () => {
   writeFileSync(args, JSON.stringify({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [], info }));
   const { stdout, stderr } = run([join(src, 'plugin/launch-cli.mjs'), args], { AGENT_DISTRO_PLUGINS: plugin });
   for (const line of stdout.trimEnd().split('\n')) {
-    assert.match(line, /^(unset AGENT_DISTRO_PROFILE|export PATH|[a-z_]+='(?:[^']|'"'"')*'(?:"\$\{PATH:\+:\$PATH\}")?)$/, stdout);
+    assert.match(line, /^(unset [A-Za-z_]\w*|export [A-Za-z_]\w*|[A-Za-z_]\w*='(?:[^']|'"'"')*'(?:"\$\{PATH:\+:\$PATH\}")?)$/, stdout);
   }
   assert.match(stdout, /^launched='--plugin-dir /m);
   assert.match(stderr, /^agent-distro plugin: .*my-skills: from AGENT_DISTRO_PLUGINS/m);

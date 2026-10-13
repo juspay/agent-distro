@@ -23,6 +23,7 @@ import type { Gateway } from '../gateway/models.ts';
 import { log } from '../log.ts';
 import type { Adapter, ProfileEntry } from '../plugin/launch.ts';
 import { shellQuote } from '../plugin/launcher.ts';
+import { writeSpecPlugin, type Inputs } from '../plugin/resources.ts';
 import { decodeUtf8, isSystemError, realpath, writeTemporary } from '../util.ts';
 
 type Defaults = Record<string, unknown>;
@@ -139,12 +140,12 @@ export function gatewayLayer({ models }: Gateway): Defaults {
 }
 
 /** At launch: every plugin's `-e` root, as shell words, replacing the launcher's own. */
-export const adapter: Adapter<{ profile: (ProfileEntry & { dir: string })[] }, ProfileEntry & { dir: string }> = {
-  translationInputs: () => null,
-  translate: () => {},
+export const adapter: Adapter<{ profile: (ProfileEntry & { dir: string })[] }, ProfileEntry & { dir: string }, Inputs> = {
+  translationInputs: ({ bash, env }) => ({ bash, env }),
+  translate: (description, out, inputs, report) => writeSpecPlugin(description, out, inputs, report),
   launch: ({ kept, plugins }) => [
     ...kept.map((plugin) => plugin.entry.dir),
-    ...plugins.map((plugin) => plugin.description.root),
+    ...plugins.map((plugin) => plugin.translation),
   ].flatMap((dir) => ['-e', shellQuote(dir)]).join(' '),
 };
 

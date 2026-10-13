@@ -57,10 +57,10 @@ def main():
     body.write_text(
         "Automated input update.\n\n" + "\n\n".join(notes) + "\n\n"
         + f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"
-        f"The [Update Flake]({run_url}) workflow approves the runs GitHub holds "
-        "back for automation-created pull requests, waits for this pull request's "
-        "checks — `build (ubuntu-latest)` and `build (macos-latest)`, the contexts "
-        "`Require CI on main` expects — and squash-merges once they pass.\n"
+        "Run odu on this branch (`nix run --accept-flake-config github:juspay/odu "
+        "-- run`) to post the `<recipe>@<platform>` statuses; the pull request "
+        f"auto-merges once main's required checks are green — [this run]({run_url}) "
+        "approves the ones GitHub holds back for automation-created pull requests.\n"
     )
     with Path(env["GITHUB_OUTPUT"]).open("a") as output:
         output.write(f"pr-title={title}\npr-body-path={body}\n")

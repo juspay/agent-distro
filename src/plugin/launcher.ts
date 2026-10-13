@@ -48,7 +48,14 @@ export function launcher(
       'esac',
     );
   } else {
-    lines.push('cd -- "$root"');
+    // The launch directory, not the plugin root: the spec's default is the
+    // plugin root (§7.2.1), which for a plugin named by a flake reference is a
+    // directory under /nix/store — and `nix run github:…` cannot run from
+    // there at all. AGENT_DISTRO_CWD is the directory the harness was launched
+    // in, exported by launch.ts; a wrapper run outside a launch keeps the
+    // spec's answer. A plugin's own `cwd` is its author's instruction and is
+    // untouched above.
+    lines.push('cd -- "${AGENT_DISTRO_CWD:-$root}"');
   }
   // Configured env overlays the inherited environment, then PLUGIN_ROOT and
   // PLUGIN_DATA are set last (§9.1). `env` accepts names bash cannot export.

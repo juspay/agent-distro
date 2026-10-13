@@ -5,7 +5,7 @@ let
   omp = package;
 
   ensureApiKey = import ../../lib/gateway-key.nix { inherit gum; };
-  # Defaults are merged only into absent keys, preserving /model and /settings
+  # Defaults are merged only into absent keys, preserving /model /settings
   # choices. src/harness/omp.ts round-trips the YAML to retain comments and
   # quoted values.
   runtime = import ../../lib/runtime.nix pkgs;
@@ -18,7 +18,7 @@ let
   launchPlugins = runtime.launchPlugins {
     harness = "omp";
     inherit info;
-    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${plugin}"; }) plugins;
+    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${runtime.specPlugin plugin}"; }) plugins;
   };
 
   initialization = ''

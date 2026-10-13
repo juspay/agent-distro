@@ -20,3 +20,29 @@ assert not any(l.endswith(f'/{name}/{n}/SKILL.md') for n in expected[name] for l
 # Unset, the session config is the profile's again.
 assert set(skill_paths(check_inventory())) == old_paths
 assert settings.read_bytes() == preserved
+
+
+# A plugin's stdio MCP server runs in the launch directory (doc/index.md).
+if 'acme.spec-fixture' in expected:
+    spec = os.environ['AGENT_DISTRO_TEST_SPEC']
+    for plugins in (None, spec):
+        with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as records:
+            launch = os.path.realpath(launch)
+            env['FIXTURE_RECORDS'] = records
+            if plugins is None:
+                env.pop('AGENT_DISTRO_PLUGINS', None)
+            else:
+                env['AGENT_DISTRO_PLUGINS'] = plugins
+            here = os.getcwd()
+            os.chdir(launch)
+            try:
+                listing = api('mcp')['data']
+            finally:
+                os.chdir(here)
+            server = next(entry for entry in listing if entry['name'] == 'placeholders')
+            assert server['status']['status'] == 'connected', listing
+            placeholders = json.loads(Path(records, 'placeholders.json').read_text())
+            assert placeholders['cwd'] == launch, placeholders
+            # A plugin's own `cwd` is its author's instruction, and still wins.
+            explicit = json.loads(Path(records, 'explicit-cwd.json').read_text())
+            assert explicit['cwd'] == os.path.join(os.path.realpath(spec), 'share'), explicit

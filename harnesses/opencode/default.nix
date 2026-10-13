@@ -2,24 +2,20 @@
 # OpenCode v2 reuses this adapter with its own schema, shape and session setup.
 { pkgs, plugins, info, package, schema ? "v1", shape ? ./gateway-shape.json, sessionDefaults ? "" }:
 let
-  inherit (pkgs) lib writeShellApplication runCommand writeText runtimeShell coreutils curl gum;
+  inherit (pkgs) lib writeShellApplication runCommand writeText curl gum;
   opencode = package;
 
   name = if schema == "v2" then "opencode2" else "opencode";
   runtime = import ../../lib/runtime.nix pkgs;
   config = runCommand "${name}-config" { } ''
-    ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON {
+    ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON (runtime.launcherInputs // {
       inherit schema;
-      bash = runtimeShell;
-      env = "${coreutils}/bin/env";
       descriptions = map (plugin: "${runtime.readPlugin plugin}") plugins;
-    })}
+    }))}
   '';
   launchPlugins = runtime.launchPlugins {
     harness = "opencode";
     inherit schema name info;
-    bash = runtimeShell;
-    env = "${coreutils}/bin/env";
     config = "${config}";
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; }) plugins;
   };

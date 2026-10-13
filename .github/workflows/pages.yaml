@@ -4,7 +4,7 @@ name: Pages
 
 on:
   # Pages serves one site, built from main. A docs change on a PR branch is
-  # checked by `nix build ./doc` in ci.yml; the `github-pages` environment only
+  # checked by odu's `site` recipe; the `github-pages` environment only
   # deploys main, so other branches would just fail the deploy.
   push:
     branches: [main]

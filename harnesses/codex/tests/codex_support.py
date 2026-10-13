@@ -34,6 +34,28 @@ def run(*args, launcher='codex', plugins=None, **kwargs):
                           capture_output=True, timeout=60, **kwargs)
 
 
+def assert_kolu_server(servers):
+    """The kolu plugin's server reaches Codex through a generated launcher.
+
+    Codex starts a plugin's stdio servers in the plugin root — the spec's
+    default, and a /nix/store path for a plugin from a flake reference, where
+    `nix run github:…` cannot run — so the adapter installs a copy whose
+    `mcp.json` names a launcher, which runs the plugin's own command in the
+    directory Codex was launched in (doc/index.md).
+    """
+    server = servers['kolu']
+    assert server['enabled'], server
+    assert server['transport']['command'].endswith('bin/kolu-0-kolu'), server
+    assert server['transport']['args'] == [], server
+    # And it runs: the fixture answers an MCP initialize as kolu's server.
+    launchers = list(codex_home.glob('plugins/cache/*/kolu/*/bin/kolu-0-kolu'))
+    assert len(launchers) == 1, launchers
+    launcher = launchers[0]
+    started = subprocess.run([str(launcher)], text=True, capture_output=True, timeout=60,
+                             input='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}\n')
+    assert json.loads(started.stdout.splitlines()[0])['result']['serverInfo']['name'] == 'kolu-test', started
+
+
 def upstream(*args):
     return subprocess.run(['codex-upstream', *args], env=env, text=True,
                           capture_output=True, timeout=60, check=True)

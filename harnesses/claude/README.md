@@ -4,7 +4,7 @@ Writes each plugin as a self-contained Claude Code plugin
 root, passed with `--plugin-dir` for that session: its manifest, its
 discovered skills, and a `.mcp.json`. Each stdio MCP server runs through a
 generated launcher that provides `PLUGIN_ROOT`, `PLUGIN_DATA`, placeholder
-expansion, and the plugin root as working directory, as the spec requires.
+expansion and the working directory (doc/index.md, "Working directory").
 Extra user plugins compose with them; no persistent installation is needed.
 
 A plugin on `AGENT_DISTRO_PLUGINS` is written the same way into the cache and

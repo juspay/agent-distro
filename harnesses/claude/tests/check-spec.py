@@ -1,4 +1,5 @@
 from claude_support import *
+import tempfile
 
 # Each fixture server records its argv, cwd and environment here on launch.
 records = home / 'records'
@@ -36,15 +37,15 @@ assert placeholders['env']['FIXTURE_CONFIG'] == root + '/share/README', placehol
 assert placeholders['env']['FIXTURE_DATA'] == data, placeholders
 assert placeholders['env']['FIXTURE_LITERAL'] == '${HOME}', placeholders
 assert placeholders['env']['FIXTURE-DASHED'] == 'dashed', placeholders
-# cwd defaults to the plugin root, not Claude Code's launch directory.
-assert placeholders['cwd'] == root, placeholders
+# cwd defaults to the launch directory (doc/index.md), not the plugin root.
+assert placeholders['cwd'] == os.getcwd(), placeholders
 assert record('explicit-cwd')['cwd'] == root + '/share'
 assert record('data-cwd')['cwd'] == data
 
 # A bare command is found on PATH; its PLUGIN_ROOT is its own plugin's.
 bare = record('bare')
-assert bare['argv'] == ['bare', bare['env']['PLUGIN_ROOT']] and bare['cwd'] == bare['env']['PLUGIN_ROOT'], bare
-assert json.loads(Path(bare['cwd'], 'plugin.json').read_text())['name'] == 'mcp-only'
+assert bare['argv'] == ['bare', bare['env']['PLUGIN_ROOT']] and bare['cwd'] == os.getcwd(), bare
+assert json.loads(Path(bare['env']['PLUGIN_ROOT'], 'plugin.json').read_text())['name'] == 'mcp-only'
 
 # Outside Claude Code, the launcher falls back to its own data directory.
 launcher = re.search(r'^plugin:acme\.spec-fixture:data-cwd: (\S+)', listing, re.MULTILINE)[1]
@@ -52,3 +53,13 @@ fallback = {k: v for k, v in env.items() if k != 'CLAUDE_PLUGIN_DATA'}
 fallback['XDG_DATA_HOME'] = str(home / 'xdg')
 subprocess.run([launcher], env=fallback, stdin=subprocess.DEVNULL, timeout=60, check=True)
 assert record('data-cwd')['cwd'] == str(home / 'xdg/agent-distro/plugins/acme.spec-fixture')
+
+# The same plugin from AGENT_DISTRO_PLUGINS, whose translation is made at launch.
+with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as again:
+    launch = os.path.realpath(launch)
+    listing = subprocess.run(
+        ['claude', 'mcp', 'list'], cwd=launch, text=True, capture_output=True, timeout=180,
+        env=env | {'FIXTURE_RECORDS': again, 'AGENT_DISTRO_PLUGINS': os.environ['AGENT_DISTRO_TEST_SPEC']})
+    assert 'Connected' in listing.stdout, (listing.stdout, listing.stderr)
+    placeholders = json.loads(Path(again, 'placeholders.json').read_text())
+    assert placeholders['cwd'] == launch, placeholders
