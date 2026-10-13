@@ -9,9 +9,8 @@ not install, start, or update a shared server. Explicit `--remote` connections
 and daemon-management subcommands remain available.
 
 The directory a plugin is installed from is a copy whose stdio MCP servers run
-through generated launchers, so they start in the directory Codex was launched
-in rather than the plugin root (the spec's default, and a `/nix/store` path for
-a plugin from a flake reference, where `nix run github:…` cannot run).
+through generated launchers, in the directory Codex was launched in
+(doc/index.md, "Working directory").
 
 A plugin on `AGENT_DISTRO_PLUGINS` is never registered in `config.toml`. It gets
 a one-plugin marketplace in the cache, named `agent-distro-<hash of its cache

@@ -43,15 +43,15 @@ export function writeLauncher(
 
 /**
  * Write `description` as an Agent Plugins directory whose stdio servers run
- * through generated launchers.
+ * through generated launchers, for the harnesses that read a plugin's `mcp.json`
+ * themselves: OMP and Codex. The working directory that buys them is
+ * src/plugin/launcher.ts's; a remote server has none and is written as it is.
  *
- * The harnesses that read a plugin's `mcp.json` themselves — OMP and Codex —
- * start a stdio server in the plugin root, as the spec requires (§7.2.1), and
- * for a plugin named by a flake reference that root is under `/nix/store`,
- * where `nix run github:…` cannot run at all. Handing them a directory whose
- * `mcp.json` names a launcher is what lets the server run in the launch
- * directory instead, exactly as the harnesses agent-distro hands a launcher to
- * directly. A remote server has no working directory and is written as it is.
+ * `plugin.json`, `skills/` and `mcp.json` are the whole Agent Plugins 1.0.0
+ * surface a harness may read from a plugin directory — v1 defines skills and MCP
+ * servers as its component types, and puts commands, hooks, agents and rules
+ * outside it — and these two read exactly that: an original directory's other
+ * files, kolu's `.claude-plugin/` among them, were never read by either.
  */
 export function writeSpecPlugin(description: Description, out: string, { bash, env }: Inputs, report: Report) {
   mkdirSync(out, { recursive: true });

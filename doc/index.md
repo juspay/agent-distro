@@ -557,6 +557,7 @@ Every plugin is read once, harness-independently, against Agent Plugins 1.0.0, b
 - **Invalid manifest.** Fails the build (or the launch) with a message naming the field.
 - **Lesser problems.** Skipped skills, disabled `mcp.json` files and invalid server entries are reported in the build log (or on stderr).[^failure-boundaries]
 - **Commands.** A bare MCP `command` is found on `PATH`: the profile's `packages` first, then the user's own. A `./` command runs from the plugin.
+- **Working directory.** A stdio MCP server starts in the directory the harness was launched in, not the plugin root — a deliberate departure from Agent Plugins §7.2.1, because a plugin from a flake reference lives under `/nix/store` and `nix run github:…` cannot run from there. A server's own `cwd` still wins.
 
 > One known gap: Claude Code expands `${VAR}` in a remote server's `url` and `headers`, which the spec forbids.[^var-gap]
 

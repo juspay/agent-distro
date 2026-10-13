@@ -7,10 +7,9 @@ cached list or the profile's two aliases as fallback when unavailable.
 `AI_GATEWAY=0` omits the generated provider configuration.
 
 Each stdio MCP server runs through a generated launcher, in the directory the
-harness was launched in: OpenCode would otherwise start it in the plugin root,
-which for a plugin from a flake reference is under `/nix/store`, where `nix run
-github:…` cannot run. With `AGENT_DISTRO_PLUGINS`, each plugin's skills and
-server launchers are translated into the cache, and the launcher writes a session config (the one
+harness was launched in (doc/index.md, "Working directory"). With
+`AGENT_DISTRO_PLUGINS`, each plugin's skills and server launchers are translated
+into the cache, and the launcher writes a session config (the one
 above, less the profile plugins those replace, plus theirs) to the cache by
 content and points `OPENCODE_CONFIG` at it. A profile read at launch (an
 `agent-distro.nix`) takes the same path, its plugins replacing every built-in
