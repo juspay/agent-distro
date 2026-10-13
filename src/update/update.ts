@@ -37,6 +37,7 @@ import { log, type Logger } from '../log.ts';
 import { realpath, writeTemporary } from '../util.ts';
 import { checkCaches } from './cache.ts';
 import { updateDue } from './due.ts';
+import { indexEntryUrl } from './ca-index.ts';
 import { NixLog, nixErrorDetail } from './progress.ts';
 
 type Config = {
@@ -271,23 +272,31 @@ function systemOf(nix: string): string {
  */
 async function published(nix: string, config: Config, revision: string): Promise<Indexed | null> {
   const system = systemOf(nix);
-  if (!revision || !system || !config.caIndex) return null;
-  const url = `${config.caIndex.replace(/\/+$/, '')}/${revision}/${system}/${config.profile}.json`;
+  if (!revision || !system) return null;
+  // The base is a config value, so it is validated before anything is fetched
+  // from it (src/update/ca-index.ts): one that is not an https URL without
+  // credentials, query or fragment is ignored, and the update then skips.
+  const url = indexEntryUrl(config.caIndex, revision, system, config.profile);
+  if (url === null) {
+    log.update.warn(`ignoring caIndex ${JSON.stringify(config.caIndex)}: it must be an https URL `
+      + 'with no credentials, query or fragment');
+    return null;
+  }
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
     if (!response.ok) {
-      log.update.debug(`${url}: HTTP ${response.status}`);
+      log.update.debug(`${url.href}: HTTP ${response.status}`);
       return null;
     }
     const value = await response.json() as Partial<Indexed>;
     const storePath = (path: unknown): path is string => typeof path === 'string' && path.startsWith('/nix/store/');
     if (!storePath(value.ia) || !storePath(value.ca)) {
-      log.update.warn(`the content-addressed index at ${url} is not an {ia, ca} pair of store paths`);
+      log.update.warn(`the content-addressed index at ${url.href} is not an {ia, ca} pair of store paths`);
       return null;
     }
     return { ia: value.ia, ca: value.ca };
   } catch (error) {
-    log.update.debug(`cannot read ${url}: ${(error as Error).message}`);
+    log.update.debug(`cannot read ${url.href}: ${(error as Error).message}`);
     return null;
   }
 }

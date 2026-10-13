@@ -1,10 +1,15 @@
 """A stub of the content-addressed index: one port answers with the pair a test
 wrote to /tmp/ca-pair.json, the other refuses with 404, so a test can drive
-both the published and the unpublished revision."""
+both the published and the unpublished revision.
+
+Serves TLS: the updater fetches only an https base, so the stub has to be one
+— a self-signed certificate the test points the updater's trust at
+(NODE_EXTRA_CA_CERTS)."""
 import http.server
+import ssl
 import sys
 
-status, port = int(sys.argv[1]), int(sys.argv[2])
+status, port, certificate, key = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -20,4 +25,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+server = http.server.HTTPServer(('127.0.0.1', port), Handler)
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+# A stub for a test, but with the floor a server should have: TLS 1.0 and 1.1
+# are not versions to offer anyone.
+context.minimum_version = ssl.TLSVersion.TLSv1_2
+context.load_cert_chain(certificate, key)
+server.socket = context.wrap_socket(server.socket, server_side=True)
+server.serve_forever()
