@@ -100,12 +100,19 @@ jobs:
         env:
           REV: ${{ github.sha }}
           INDEX: ${{ runner.temp }}/ca-index
+          # `latest/` names the newest bundle a system published, so only a
+          # push to main moves it: a pull request's run would point consumers
+          # at a commit that never lands.
+          LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           set -eu
+          args=(--rev "$REV" --system "$(nix config show system)" --directory "$INDEX")
+          if [ "$LATEST" = "true" ]; then
+            args+=(--latest)
+          fi
           installables=()
           for directory in profiles/*/; do installables+=(".#$(basename "$directory")"); done
-          python3 .github/scripts/ca-index.py --rev "$REV" --system "$(nix config show system)" \
-            --directory "$INDEX" "${installables[@]}"
+          python3 .github/scripts/ca-index.py "${args[@]}" "${installables[@]}"
 
       - name: Run a launcher out of a content-addressed bundle
         # The rewrite replaces the store paths embedded in every file, which
@@ -138,9 +145,11 @@ jobs:
           "$bundle/bin/claude" --version
 
       - name: Push the content-addressed index
-        # Every system's entries are disjoint files under its own directory,
-        # so a run that pushed meanwhile is rebased under this one rather than
-        # contested; the branch is created by whichever system reaches it first.
+        # Every system's entries are disjoint files under its own directory
+        # (`<rev>/<system>/…`, and `latest/<system>/…` where a main push wrote
+        # one), so a run that pushed meanwhile is rebased under this one rather
+        # than contested; the branch is created by whichever system gets there
+        # first.
         if: env.PUSH_CACHE == 'true'
         env:
           REV: ${{ github.sha }}

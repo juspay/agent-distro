@@ -101,7 +101,7 @@ in
     assert ca != ia, (ia, ca)
     # The cache holds the content-addressed bundle and this store does not:
     # nothing but the updater's copy can bring it back.
-    machine.succeed("nix copy --to " + "${cacheUrl}" + " " + ca)
+    machine.succeed("nix copy --to ${cacheUrl} " + ca)
     machine.succeed("nix store delete " + ca)
     machine.fail("test -e " + ca)
     machine.succeed("printf %s " + shlex.quote(json.dumps({"ia": ia, "ca": ca})) + " > /tmp/ca-pair.json")

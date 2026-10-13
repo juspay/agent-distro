@@ -71,12 +71,26 @@ class CaIndexTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             entry = root / 'ca-index' / ('f' * 40) / 'x86_64-linux' / 'vanilla.json'
             self.assertEqual(json.loads(entry.read_text()), {'ia': IA, 'ca': CA})
+            # Without --latest there is nothing that names a newest bundle.
+            self.assertFalse((root / 'ca-index' / 'latest').exists())
             # The job's log carries what it published, for the pull request record.
             self.assertIn(f'{IA} -> {CA}', result.stdout)
             self.assertEqual((root / 'calls').read_text().splitlines(), [
                 'build --no-link --print-out-paths .#vanilla',
                 f'store make-content-addressed --json {IA}',
                 f'path-info --json-format 1 --json {CA}'])
+
+    def test_latest_names_the_newest_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = index(root, answers(root), '--latest', '.#vanilla')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            latest = root / 'ca-index' / 'latest' / 'x86_64-linux' / 'vanilla.json'
+            # The revision is with the pair, so a consumer can tell whether
+            # what it already has is what this names.
+            self.assertEqual(json.loads(latest.read_text()), {'rev': 'f' * 40, 'ia': IA, 'ca': CA})
+            # The pair is in the log beside the revision it names.
+            self.assertIn(f'latest/x86_64-linux/vanilla.json: {"f" * 40} -> {CA}', result.stdout)
 
     def test_each_installable_gets_its_own_pair(self):
         with tempfile.TemporaryDirectory() as directory:

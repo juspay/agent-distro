@@ -6,15 +6,21 @@ it at all: nix drops a non-trusted user's `extra-substituters`, their keys and
 `--no-check-sigs` alike (`nix.conf` `require-sigs`). A content-addressed store
 path is trusted by itself, so `nix copy` accepts one from that same cache
 whatever the signature. This script does the rewrite CI cannot defer to the
-user's machine, and writes the entry its updater reads:
+user's machine, and writes the entries its updater and other consumers read:
 
     <directory>/<rev>/<system>/<profile>.json = {"ia": …, "ca": …}
+
+An updater on a revision looks its own entry up; `--latest`, which only a push
+to the main branch passes, also names the newest bundle a system published, for
+a consumer that wants that rather than the revision it is on:
+
+    <directory>/latest/<system>/<profile>.json = {"rev": …, "ia": …, "ca": …}
 
 The rewrite is all-new store paths, so the cache push that follows the job
 uploads every one of them. Nothing here needs a cache: `nix store
 make-content-addressed` reads the paths the job just built.
 
-Usage: ca-index.py --rev REV --system SYSTEM --directory DIR INSTALLABLE...
+Usage: ca-index.py --rev REV --system SYSTEM --directory DIR [--latest] INSTALLABLE...
        (INSTALLABLE is a flake attribute, e.g. `.#vanilla`.)
 """
 import argparse
@@ -71,11 +77,19 @@ def indexed(nix_command: str, installable: str) -> tuple:
     return ia, ca
 
 
+def write(path: pathlib.Path, value: dict) -> None:
+    """One index entry: the JSON a consumer reads, in the directory it needs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2) + "\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--rev", required=True, help="the revision the bundles were built from (the index's key)")
     parser.add_argument("--system", required=True, help="the system they were built for, e.g. x86_64-linux")
     parser.add_argument("--directory", required=True, type=pathlib.Path, help="the index tree to write into")
+    parser.add_argument("--latest", action="store_true",
+                        help="also name the newest bundle each profile published (a push to main only)")
     parser.add_argument("--nix", default="nix", help="the nix to run")
     parser.add_argument("installables", nargs="+", metavar="INSTALLABLE")
     args = parser.parse_args()
@@ -87,10 +101,14 @@ def main() -> int:
         if not PROFILE.fullmatch(profile):
             sys.exit(f"ca-index: {installable}: {profile!r} is not a profile name")
         ia, ca = indexed(args.nix, installable)
-        path = args.directory / args.rev / args.system / f"{profile}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"ia": ia, "ca": ca}, indent=2) + "\n")
+        write(args.directory / args.rev / args.system / f"{profile}.json", {"ia": ia, "ca": ca})
         print(f"ca-index: {args.system}/{profile}.json: {ia} -> {ca}")
+        if args.latest:
+            # The revision beside the pair, so a consumer can tell whether what
+            # it already has is what this names.
+            write(args.directory / "latest" / args.system / f"{profile}.json",
+                  {"rev": args.rev, "ia": ia, "ca": ca})
+            print(f"ca-index: latest/{args.system}/{profile}.json: {args.rev} -> {ca}")
     return 0
 
 

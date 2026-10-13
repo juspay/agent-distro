@@ -270,7 +270,11 @@ nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13Ei
 ```
 https://raw.githubusercontent.com/juspay/agent-distro/ca-index/<rev>/<system>/<profile>.json
 # {"ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
+https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<profile>.json
+# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
 ```
+
+`<rev>` is the revision CI built, which is what an updater looks its own entry up by; `latest/` names the newest bundle a system published, with the revision that wrote it so a consumer can tell whether what it has is what this names. Only a push to `main` writes `latest/`, so a pull request's build never moves it, and each system moves only its own file.
 
 `ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Anyone can do the same by hand, with the `ca` path the index names:
 
@@ -279,6 +283,8 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
 ```
 
 > A revision CI has not built yet, a `path:` flake (which names no revision to key a bundle by), and a cache that does not hold the bundle all end the same way: the update is skipped and your current version keeps working.
+
+**macOS included.** A Mach-O that the rewrite changes has an ad-hoc signature that no longer matches, which arm64 macOS refuses to exec — so CI runs `bin/claude --version` out of every rewritten bundle on the runner that built it, `aarch64-darwin` among them, and says whether the rewrite reached the bytes of the binary that ran. It runs, so the Mac bundle is published like the others; a `ca` bundle a Mac cannot exec fails that step rather than reaching the index.
 
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
