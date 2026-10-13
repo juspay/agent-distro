@@ -244,7 +244,7 @@ Or keep the cache-only updates, but drive them yourself:
 - **Scheduling is yours.** The updater schedules nothing itself, so run it on your own cadence.[^scheduled-flag]
 - **Setup is yours.** Create the `stateDirectory` yourself, and run `--cache-warnings` once to surface an unusable cache.[^no-outlink]
 
-[^updater-no-compile]: Never compiling; it passes nix only `substituters`.
+[^updater-no-compile]: Never compiling: it hands nix `substituters`, and where this user's nix will not honour them, the revision's published content-addressed bundle instead.
 [^scheduled-flag]: It checks the UTC boundary only when you pass `--scheduled`, as the module's launchd does.
 [^no-outlink]: The updater replaces `<state>/current` directly, so there is no out-link pruning for the consumer to do.
 
@@ -254,22 +254,46 @@ Append `--progress` to `command` to drive the same update from a program that wa
 
 [^progress-json]: `{"progress":{"done":<bytes>,"total":<bytes>}}` while nix fetches, then `{"result":"updated","bundle":"/nix/store/…"}` (or `unchanged`, or `skipped`/`failed` with a `reason`; a `failed` result also carries `detail`, nix's last `error:` line, when there is one).
 
-### The binary cache
+### The binary cache {#binary-cache}
 
-The updater never compiles harnesses from source; it passes the project cache to every update.[^cache-setting] On a multi-user install where you are not a trusted Nix user, add the cache to your NixOS or nix-darwin configuration:[^untrusted]
+The updater never compiles harnesses from source; it passes the project cache to every update.[^cache-setting] A trusted user, or a single-user install, is done there. A Nix daemon lets nobody else's request through, though: for a user the daemon does not trust, nix drops the updater's substituter, its key *and* `--no-check-sigs`. So there are two ways to feed such a user, and the updater takes the second when the first is out of reach.
+
+**Signed paths, if you list the cache.** Add the cache to your NixOS or nix-darwin configuration:[^untrusted]
 
 ```nix
 nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
-> Without it, or when the cache does not yet hold the whole bundle, the update is skipped and your current version keeps working.
+**Content-addressed bundles, without touching `nix.conf`.** A *content-addressed* store path is trusted by itself: nix copies one from any cache, for any user, without a signature (`require-sigs`, `nix store make-content-addressed`). CI therefore rewrites every profile's bundle that way for each revision it builds, and publishes an index of what it wrote:
+
+```
+https://raw.githubusercontent.com/juspay/agent-distro/ca-index/<rev>/<system>/<profile>.json
+# {"ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
+https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<profile>.json
+# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
+```
+
+`<rev>` is the revision CI built, which is what an updater looks its own entry up by; `latest/` names the newest bundle a system published, with the revision that wrote it so a consumer can tell whether what it has is what this names. Only a push to `main` writes `latest/`, so a pull request's build never moves it, and each system moves only its own file.
+
+This index is agent-distro's. A distribution that publishes its own bundles names it with `caIndex` (`services.agent-distro.caIndex`, or `mkFlake`'s `caIndex`); its revisions are not in this index, and an entry that is not there leaves the update skipped.[^ca-index]
+
+`ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Anyone can do the same by hand, with the `ca` path the index names:
+
+```sh
+nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
+```
+
+> A revision CI has not built yet, a `path:` flake (which names no revision to key a bundle by), and a cache that does not hold the bundle all end the same way: the update is skipped and your current version keeps working.
+
+**macOS included.** A Mach-O that the rewrite changes has an ad-hoc signature that no longer matches, which arm64 macOS refuses to exec — so CI runs `bin/claude --version` out of every rewritten bundle on the runner that built it, `aarch64-darwin` among them, and says whether the rewrite reached the bytes of the binary that ran. It runs, so the Mac bundle is published like the others; a `ca` bundle a Mac cannot exec fails that step rather than reaching the index.
 
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
 [^cache-setting]: `cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`.
+[^ca-index]: Where the index lives is stated once, in [lib/ca-index.nix](https://github.com/juspay/agent-distro/blob/main/lib/ca-index.nix): `mkUpdater` reads it, and `.github/scripts/check-cache-config.py` keeps this page and the workflow's push equal to it.
 [^untrusted]: Nothing more is needed when you are a trusted Nix user or run a single-user install. Otherwise the daemon ignores the updater's request unless your system config already lists the cache.
-[^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
+[^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable and no content-addressed bundle is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
 
 ### Troubleshooting
 
@@ -330,12 +354,12 @@ The template is a repository that is both an Agent Plugins directory and a profi
 - **Update.** `nix flake update agent-distro`.
 
 ```nix
-agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; }
+agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; caIndex ? …; }
 # profile: an agent-distro.nix, or the attribute set it holds
 # → packages.<system>: every harness, default picker, and <profile.name> bundle
 #   (a bundle's bin/ carries its harness commands and `agent-distro`, its own picker)
 #   apps.<system>: every harness and default picker; homeManagerModules.default;
-#   lib: the same eight-name library attrset this flake exposes
+#   lib: the same nine-name library attrset this flake exposes
 
 agent-distro.lib.mkLaunchers { pkgs; profile; }
 # → every harness launcher, plus picker and bundle (the bundle's bin/ also holds
@@ -347,10 +371,10 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 
 - **Outputs.** `mkFlake` returns `packages`,[^mkflake-packages] `apps`, `homeManagerModules.default`, and the same `lib` attrset `flake.nix` exposes; add other outputs with `//`.
 - **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. A repository's `agent-distro.nix`, `AI_PROFILE` or a positional reference still replace it for a launch, as they replace `vanilla`; `vanilla` stays accepted by name.
-- **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache. Push your own builds to a cache and pass it, or your users' updates are skipped.[^cache-only]
+- **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache, and `caIndex`, the base URL of the index of the content-addressed bundles you publish ([The binary cache](#binary-cache)), defaulting to agent-distro's. Push your own builds to a cache and pass it, and name your own index if you publish one, or your users' updates are skipped.[^cache-only]
 
 [^mkflake-packages]: Every harness, the default picker, and the `<profile.name>` bundle, which carries its own picker as `bin/agent-distro`.
-[^cache-only]: The Home Manager updater only installs what that cache holds and never compiles.
+[^cache-only]: The Home Manager updater only installs what that cache holds, or the content-addressed bundle your index names, and never compiles.
 
 For NixOS, with your distribution bound as `distro`:
 
@@ -397,7 +421,7 @@ agent-distro.lib.mkShims { pkgs; bundle; stateDirectory; profile ? null; }
 #   `commands`); anything else is an eval error naming the problem. A `profile`
 #   reference is exported as AI_PROFILE unless the environment sets one.
 
-agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; }
+agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; caIndex ? …; }
 # → { config = <the generated JSON file>; command = [ node update.ts config ];
 #   program = <a writeShellApplication running `command "$@"`>; }. The Home
 #   Manager module's systemd ExecStart, launchd ProgramArguments (`++ ["--scheduled"]`)
@@ -405,7 +429,9 @@ agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; histo
 #   is the same update with JSON progress on stdout. `bundle` must be a
 #   `mkLaunchers` bundle with a `runtime` (post-#59 ones do); the period/offset
 #   come from `lib.schedule` and are not overridable here; the updater never
-#   compiles, handing nix only `substituters`.
+#   compiles: it hands nix `substituters`, and for a user whose nix will not
+#   honour them it copies the revision's published content-addressed bundle
+#   from one of them instead ([The binary cache](#binary-cache)).
 
 agent-distro.lib.mkPicker { pkgs; profile; launchers; nixpkgs ? null; }
 # → lib/picker.nix's derivation: the interactive harness chooser over
@@ -578,7 +604,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,prof
 
 - **Daily sources.** CI runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
 - **Report.** The update report reads resolved versions and each harness's release-note metadata.
-- **Cache.** CI pushes realised paths to the OSS cache.[^attic-token]
+- **Cache.** CI pushes realised paths to the OSS cache,[^attic-token] and publishes each profile bundle's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository ([The binary cache](#binary-cache)).
 - **Merge gate.** The daily update PR merges only after the required Linux/macOS builds and VM/template checks pass.[^auto-merge]
 - **Cancellation.** Superseded PR runs are cancelled.
 - **Consumers.** They run `nix flake update agent-distro`.
@@ -595,7 +621,7 @@ Consumers can import `test/lib.nix { pkgs; launchers; profile; features; koluPlu
 
 - **Also `mkLaunchers`.** Rebuild and gateway checks also accept `mkLaunchers`.
 - **Plugin rebuilds.** Select plugin rebuild checks only for nonempty skill plugins.
-- **Coverage.** The test flake covers vanilla (with kolu's plugin loaded at launch), the Juspay profile built in, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a copy of the Juspay profile's `agent-distro.nix` matching the built-in one in OMP, Codex and Claude Code.
+- **Coverage.** The test flake covers vanilla (with kolu's plugin loaded at launch), the Juspay profile built in, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a copy of the Juspay profile's `agent-distro.nix` matching the built-in one in OMP, Codex and Claude Code; and `ca-update`: the update that takes the published content-addressed bundle as an untrusted user, and the skip where the index publishes none.
 
 [^features]: The features are `plugins`, `gateway`, `kolu`, `spec`, and `koluLaunch`, which loads `koluPlugin` through `AGENT_DISTRO_PLUGINS`.
 

@@ -175,6 +175,11 @@
           auto-update = pkgs.testers.runNixOSTest (import ./test-auto-update.nix {
             inherit pkgs agent-distro home-manager;
           });
+          # The update that takes the published content-addressed bundle
+          # instead of skipping, in a VM as an untrusted user.
+          ca-update = pkgs.testers.runNixOSTest (import ./test-ca-update.nix {
+            inherit pkgs agent-distro;
+          });
           discovery = import ./test-discovery.nix { inherit pkgs agent-distro nixpkgs; };
           reserved-profile = assert builtins.all
             (name:

@@ -8,7 +8,10 @@
  *
  * CONFIG_JSON is written by modules/home-manager.nix. Each run builds the
  * profile's bundle into `<state>/current`, which the shims prefer, and appends
- * what changed to the history log.
+ * what changed to the history log. Where nix will not honour the cache for
+ * this user — it drops a non-trusted user's own substituters and keys — the
+ * run takes the revision's published *content-addressed* bundle instead, which
+ * needs no signature and no configuration (see `contentAddressed`).
  *
  * `--progress` is the same update for a machine rather than a person: stdout
  * carries one JSON object per line — `{"progress":{"done":…,"total":…}}` while
@@ -45,6 +48,8 @@ type Config = {
   nix: string;
   /** Binary cache URL → public key. */
   substituters: Record<string, string>;
+  /** Base URL of the content-addressed index (lib/ca-index.nix, via mkUpdater). */
+  caIndex: string;
   /** The launchd schedule: one period per run, phased onto the first hour. */
   periodSeconds: number;
   offsetSeconds: number;
@@ -64,6 +69,13 @@ export const LOCK_WAIT_MS = 2000;
 /** A history lock this old is from a run that was killed holding it. */
 export const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_RETRY_MS = 50;
+
+/**
+ * The index is one request on the update's path; a hanging one must not become
+ * the path. Where the index is is `config.caIndex`: mkUpdater writes the one
+ * location lib/ca-index.nix states, so nothing repeats it here.
+ */
+const INDEX_TIMEOUT_MS = 30_000;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -178,6 +190,15 @@ function loggedBuild(nix: string, args: string[], nixLog: NixLog, report: Report
 const UNBOUNDED = { encoding: 'utf8', maxBuffer: Infinity } as const;
 
 /**
+ * One nix step that installs a bundle. Under `--progress` its stderr is read
+ * for the bytes it fetches and its messages re-emitted; otherwise it inherits
+ * the terminal, as every other nix call here does.
+ */
+async function nixStep(nix: string, args: string[], nixLog: NixLog | undefined, report: Report): Promise<Build> {
+  return nixLog ? await loggedBuild(nix, args, nixLog, report) : spawnSync(nix, args, { stdio: 'inherit' });
+}
+
+/**
  * Names of the derivations a build of `target` would compile rather than
  * fetch, at most three. Derivations with allowSubstitutes = false (trivial
  * builders such as symlinkJoin and shell wrappers) are always built locally,
@@ -230,6 +251,81 @@ export function wouldCompile(
     .filter((drv) => drv.env?.allowSubstitutes !== '' && drv.structuredAttrs?.allowSubstitutes !== false)
     .map((drv) => drv.name);
   return { names: names.slice(0, 3).join(',') };
+}
+
+/** What the index publishes for one bundle: its store path, and its content-addressed rewrite. */
+type Indexed = { ia: string; ca: string };
+
+/** The system the store builds for, as `nix config show system` names it, or ''. */
+function systemOf(nix: string): string {
+  const result = spawnSync(nix, ['config', 'show', 'system'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.status === 0) return result.stdout.trim();
+  log.update.debug(`nix config show system failed: ${result.error?.message ?? result.stderr.trim()}`);
+  return '';
+}
+
+/**
+ * The bundle the index publishes for `revision` on this system, or null when
+ * it publishes none: a revision CI has not built since this path existed, a
+ * flake that names no revision to key one by, or an index that cannot be read.
+ */
+async function published(nix: string, config: Config, revision: string): Promise<Indexed | null> {
+  const system = systemOf(nix);
+  if (!revision || !system || !config.caIndex) return null;
+  const url = `${config.caIndex.replace(/\/+$/, '')}/${revision}/${system}/${config.profile}.json`;
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
+    if (!response.ok) {
+      log.update.debug(`${url}: HTTP ${response.status}`);
+      return null;
+    }
+    const value = await response.json() as Partial<Indexed>;
+    const storePath = (path: unknown): path is string => typeof path === 'string' && path.startsWith('/nix/store/');
+    if (!storePath(value.ia) || !storePath(value.ca)) {
+      log.update.warn(`the content-addressed index at ${url} is not an {ia, ca} pair of store paths`);
+      return null;
+    }
+    return { ia: value.ia, ca: value.ca };
+  } catch (error) {
+    log.update.debug(`cannot read ${url}: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * The revision's content-addressed bundle, installed as `<state>/current`.
+ *
+ * This is what the update does where `checkCaches` finds no cache this user's
+ * nix will honour: nix drops their own `extra-substituters`, their keys and
+ * `--no-check-sigs` alike, so the signed bundle is out of reach, but a
+ * content-addressed path is trusted by itself and nix copies it from that same
+ * cache for anybody. Copy `<ca>` and realise it — which makes the out-link,
+ * and nothing else: no `--option`, no signature, no build.
+ *
+ * `{ skip }` is why it cannot: no bundle published for this revision and
+ * system, or no configured cache holding the one published.
+ */
+async function contentAddressed(
+  config: Config, report: Report, nixLog: NixLog | undefined, urls: string[], revision: string, current: string,
+): Promise<{ skip: string } | { build: Build }> {
+  const unpublished = `cache ${urls.join(' ')} not usable and no content-addressed bundle is published for `
+    + `${revision ? `revision ${revision}` : 'the revision this flake is on'}; `
+    + 'add it to nix.settings substituters/trusted-public-keys';
+  const { nix } = config;
+  const entry = await published(nix, config, revision);
+  if (entry === null) return { skip: unpublished };
+  log.update.debug(`the content-addressed ${entry.ia} is ${entry.ca}`);
+  for (const url of urls) {
+    // The bundle is the whole point of this path: a cache that has not caught
+    // up with the index (or no network) skips, as an incomplete cache does.
+    const copy: Build = await nixStep(nix, ['copy', '--from', url, entry.ca], nixLog, report);
+    if (!copy.error && copy.status === 0) {
+      return { build: await nixStep(nix, ['build', entry.ca, '--out-link', current], nixLog, report) };
+    }
+    log.update.debug(`nix copy --from ${url} ${entry.ca} failed: `
+      + `${copy.error?.message ?? `exit ${copy.status ?? copy.signal}`}`);
+  }
+  return { skip: `content-addressed bundle ${entry.ca} is not in ${urls.join(' ')} yet` };
 }
 
 /**
@@ -359,10 +455,10 @@ export async function update(config: Config, report: Report = plain, nixLog?: Ni
   const caches = checkCaches(nix, config.substituters);
   const usable = caches.filter((cache) => cache.usable);
   const unusable = caches.filter((cache) => !cache.usable);
-  if (unusable.length && !usable.length) {
-    return skip(`cache ${unusable.map((cache) => cache.url).join(' ')} not usable; `
-      + 'add it to nix.settings substituters/trusted-public-keys');
-  }
+  // Some cache is configured and nix will not honour any of it: the signed
+  // bundle is out of reach for this user, so the content-addressed one is the
+  // only path left (contentAddressed), and a skip when it is not published.
+  const adrift = unusable.length > 0 && usable.length === 0;
   const options = usable.length
     ? ['--option', 'extra-substituters', usable.map((cache) => cache.url).join(' '),
       '--option', 'extra-trusted-public-keys', usable.map((cache) => cache.key).join(' ')]
@@ -376,34 +472,46 @@ export async function update(config: Config, report: Report = plain, nixLog?: Ni
     { ...UNBOUNDED, stdio: ['inherit', 'pipe', 'pipe'] });
   process.stderr.write(metadata.stderr);
   let ref = '';
+  // What the index keys a bundle by; a path flake has none.
+  let revision = '';
   try {
-    if (metadata.status === 0) ref = JSON.parse(metadata.stdout).url ?? '';
+    if (metadata.status === 0) {
+      const resolved = JSON.parse(metadata.stdout);
+      ref = resolved.url ?? '';
+      revision = typeof resolved.revision === 'string' ? resolved.revision : '';
+    }
   } catch (error) {
     log.update.warn(`nix flake metadata printed unreadable JSON: ${(error as Error).message}`);
     ref = '';
   }
-  if (typeof ref !== 'string' || !ref) {
-    const detail = nixErrorDetail(metadata.stderr);
-    // Under `--progress` the JSON result carries the cause; the plain note appends it.
-    const suffix = !nixLog && detail ? `: ${detail}` : '';
-    report.note('error', `${profile} update failed (cannot resolve ${config.flake})${suffix}`);
-    record('failed: cannot resolve flake');
-    report.result({ result: 'failed', reason: 'cannot resolve flake', ...(detail ? { detail } : {}) });
-    return 1;
-  }
-  const target = `${ref}#${profile}`;
-  // Never compile on a cache miss, nor when what would be built is unknown.
-  const plan = wouldCompile(nix, target, options);
-  if ('unknown' in plan) return skip(`cannot tell what the bundle would build (${plan.unknown})`);
-  if (plan.names) return skip(`bundle not fully cached yet (would build ${plan.names})`);
 
-  // Read versions before nix build replaces the current out-link.
+  // Read versions before either path replaces the current out-link.
   const previous = old ? versions(old) : null;
-  const args = ['build', target, ...options, '--out-link', current];
-  log.update.debug(`running ${nix} ${args.join(' ')}`);
-  const build: Build = nixLog
-    ? await loggedBuild(nix, args, nixLog, report)
-    : spawnSync(nix, args, { stdio: 'inherit' });
+  let build: Build;
+  if (adrift) {
+    const outcome = await contentAddressed(config, report, nixLog,
+      unusable.map((cache) => cache.url), revision, current);
+    if ('skip' in outcome) return skip(outcome.skip);
+    build = outcome.build;
+  } else {
+    if (typeof ref !== 'string' || !ref) {
+      const detail = nixErrorDetail(metadata.stderr);
+      // Under `--progress` the JSON result carries the cause; the plain note appends it.
+      const suffix = !nixLog && detail ? `: ${detail}` : '';
+      report.note('error', `${profile} update failed (cannot resolve ${config.flake})${suffix}`);
+      record('failed: cannot resolve flake');
+      report.result({ result: 'failed', reason: 'cannot resolve flake', ...(detail ? { detail } : {}) });
+      return 1;
+    }
+    const target = `${ref}#${profile}`;
+    // Never compile on a cache miss, nor when what would be built is unknown.
+    const plan = wouldCompile(nix, target, options);
+    if ('unknown' in plan) return skip(`cannot tell what the bundle would build (${plan.unknown})`);
+    if (plan.names) return skip(`bundle not fully cached yet (would build ${plan.names})`);
+    const args = ['build', target, ...options, '--out-link', current];
+    log.update.debug(`running ${nix} ${args.join(' ')}`);
+    build = await nixStep(nix, args, nixLog, report);
+  }
   if (build.error || build.status !== 0) {
     // As bash reports it: 127 for a nix that is gone (say, garbage-collected),
     // 126 for one that cannot run, a signal's number plus 128.
@@ -463,11 +571,22 @@ async function scheduled(config: Config): Promise<number> {
   }
 }
 
+/**
+ * Warn about the caches this user's nix will not honour. What an unusable
+ * cache costs depends on the others: with a usable one the update proceeds
+ * through it, and only with none — the same test `update` makes — does it take
+ * the published content-addressed bundle, and skip where none is published.
+ */
 function cacheWarnings(config: Config): number {
-  for (const cache of checkCaches(config.nix, config.substituters)) {
+  const caches = checkCaches(config.nix, config.substituters);
+  const usable = caches.some((cache) => cache.usable);
+  for (const cache of caches) {
     if (cache.usable) continue;
-    log.update.warn(`cannot use cache ${cache.url}; updates are skipped rather than `
-      + 'built from source. Add it to nix.settings substituters and trusted-public-keys.');
+    log.update.warn(`cannot use cache ${cache.url}; `
+      + (usable
+        ? 'updates use the caches nix will honour. '
+        : 'updates fetch the content-addressed bundle instead, and skip where none is published for the revision. ')
+      + 'Add it to nix.settings substituters and trusted-public-keys.');
   }
   return 0;
 }

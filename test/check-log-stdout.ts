@@ -96,7 +96,7 @@ else if (args[0] === 'build' && has('--out-link')) symlinkSync(${JSON.stringify(
   const config = join(temporary(), 'config.json');
   writeFileSync(config, JSON.stringify({
     profile: 'p', flake: 'path:/fixture', state, history: join(state, 'history.log'), nix,
-    substituters: {}, periodSeconds: 21600, offsetSeconds: 7200,
+    substituters: {}, caIndex: 'https://example.invalid/ca-index', periodSeconds: 21600, offsetSeconds: 7200,
   }));
   const { stdout, stderr } = run([join(src, 'update/update.ts'), config, '--progress']);
   const lines = stdout.trimEnd().split('\n').map((line) => JSON.parse(line));

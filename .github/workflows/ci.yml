@@ -37,12 +37,17 @@ jobs:
         # aarch64-linux, so every supported system reaches the cache.
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
+    # This job pushes the content-addressed index, a branch of this repository.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Test flake update policy and reporting
+      - name: Test the update and index scripts
         if: runner.os == 'Linux'
-        run: python3 .github/scripts/test-update-flake.py
+        run: |
+          python3 .github/scripts/test-update-flake.py
+          python3 .github/scripts/test-ca-index.py
 
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
@@ -82,6 +87,113 @@ jobs:
         # The picker depends on every launcher, so this builds them all.
         run: |
           nix build --print-build-logs .#default
+
+      # A user whose nix will not honour the cache cannot fetch an
+      # input-addressed bundle from it at all: their own substituters, key and
+      # --no-check-sigs are all dropped (nix.conf `require-sigs`). A
+      # content-addressed path is trusted by itself, so publish the rewritten
+      # closure and the index that names it together — the attic-action below
+      # pushes the rewritten paths along with the rest of the job's store
+      # additions, and the updater reads the index to find them.
+      - name: Publish the content-addressed bundles
+        if: env.PUSH_CACHE == 'true'
+        env:
+          REV: ${{ github.sha }}
+          INDEX: ${{ runner.temp }}/ca-index
+          # `latest/` names the newest bundle a system published, so only a
+          # push to main moves it: a pull request's run would point consumers
+          # at a commit that never lands.
+          LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          set -eu
+          args=(--rev "$REV" --system "$(nix config show system)" --directory "$INDEX")
+          if [ "$LATEST" = "true" ]; then
+            args+=(--latest)
+          fi
+          installables=()
+          for directory in profiles/*/; do installables+=(".#$(basename "$directory")"); done
+          python3 .github/scripts/ca-index.py "${args[@]}" "${installables[@]}"
+
+      - name: Run a launcher out of a content-addressed bundle
+        # The rewrite replaces the store paths embedded in every file, which
+        # for a Mach-O also invalidates its ad-hoc signature; arm64 macOS then
+        # kills the binary on exec. Running one launcher from the rewritten
+        # bundle is the only way to know a user can still run it, and comparing
+        # the bytes of what ran is what says whether the rewrite reached it.
+        if: env.PUSH_CACHE == 'true'
+        env:
+          REV: ${{ github.sha }}
+          INDEX: ${{ runner.temp }}/ca-index
+        run: |
+          set -eu
+          entry="$INDEX/$REV/$(nix config show system)/vanilla.json"
+          where() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$entry" "$1"; }
+          bundle=$(where ca)
+          echo "content-addressed bundle: $bundle (from $(where ia))"
+          # The launcher is a script: its shebang names the binary that runs
+          # first, and a store path embedded in a file is what the rewrite
+          # replaces.
+          interpreter() { sed -n '1s/^#!//p' "$1/bin/claude" | awk '{print $1}'; }
+          before=$(interpreter "$(where ia)")
+          after=$(interpreter "$bundle")
+          echo "launcher interpreter: $before -> $after"
+          if cmp -s "$before" "$after"; then
+            echo "the rewrite left the interpreter's bytes alone"
+          else
+            echo "the rewrite rewrote the interpreter: $(cmp -l "$before" "$after" 2>/dev/null | wc -l) bytes differ"
+          fi
+          "$bundle/bin/claude" --version
+
+      - name: Push the content-addressed index
+        # Every system's entries are disjoint files under its own directory
+        # (`<rev>/<system>/…`, and `latest/<system>/…` where a main push wrote
+        # one), so a run that pushed meanwhile is rebased under this one rather
+        # than contested; the branch is created by whichever system gets there
+        # first.
+        #
+        # Only outside a pull request: `github.sha` there is the merge commit
+        # GitHub made for the run, which no updater can lock — entries for it
+        # would be read by nobody, forever. The rewrite and the launcher run on
+        # pull requests all the same; only this push waits for a commit that
+        # lands on a branch.
+        if: env.PUSH_CACHE == 'true' && github.event_name != 'pull_request'
+        env:
+          REV: ${{ github.sha }}
+          INDEX: ${{ runner.temp }}/ca-index
+        run: |
+          set -eu
+          branch=ca-index
+          # This checkout is shallow and detached; the branch is written with
+          # plumbing from the index tree alone, so nothing here touches the
+          # repository's own work tree or its commits.
+          export GIT_DIR="$(cd "$(git rev-parse --git-dir)" && pwd)"
+          export GIT_WORK_TREE="$INDEX"
+          export GIT_INDEX_FILE="$GIT_DIR/$branch.index"
+          cd "$INDEX"
+          for attempt in $(seq 10); do
+            if git fetch --quiet --depth=1 origin "$branch" 2>/dev/null; then
+              parent=$(git rev-parse FETCH_HEAD)
+              git read-tree "$parent"
+            else
+              parent=
+              git read-tree --empty
+            fi
+            # What this run published, keeping whatever the branch held
+            # already: an entry for another system is not this run's to drop.
+            git add --ignore-removal .
+            tree=$(git write-tree)
+            commit=$(git -c user.name='github-actions[bot]' \
+              -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              commit-tree "$tree" ${parent:+-p "$parent"} -m "chore(ca-index): bundles built from $REV")
+            if git push --quiet origin "$commit:refs/heads/$branch"; then
+              echo "ca-index: pushed $commit"
+              exit 0
+            fi
+            echo "ca-index: the branch moved; retrying on its new tip (attempt $attempt)"
+            sleep 2
+          done
+          echo "::error::cannot push the $branch branch"
+          exit 1
 
       - name: Build the website
         # The site is the same on every system, so one runner builds it; a

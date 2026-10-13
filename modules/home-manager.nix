@@ -2,7 +2,7 @@
 # Shims, the updater and the state directory are built by lib/ so any Nix
 # consumer can run the same update machinery; only the OS glue (systemd,
 # launchd, activation) belongs to Home Manager.
-{ bundles, defaultProfile, defaultFlake ? null, cache }:
+{ bundles, defaultProfile, defaultFlake ? null, cache, caIndex ? import ../lib/ca-index.nix }:
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.agent-distro;
@@ -31,7 +31,7 @@ let
     inherit pkgs bundle nix;
     history = "${config.xdg.stateHome}/agent-distro/history.log";
     inherit stateDirectory;
-    inherit (cfg) flake substituters;
+    inherit (cfg) flake substituters caIndex;
     profile = bundleName;
   };
   # Discover commands from the bundle, keeping shims and collision checks together.
@@ -61,11 +61,24 @@ in
       type = lib.types.attrsOf lib.types.str;
       default = { ${cache.url} = cache.publicKey; };
       description = ''
-        Binary caches (URL to public key) the updater passes to nix. Only
-        effective where the user is trusted or the system config already lists
-        them; otherwise the update is skipped, never compiled. {} adds none,
-        and updates still never compile, so only a bundle fully available from
-        the caches your system already uses will install.
+        Binary caches (URL to public key) the updater passes to nix. A daemon
+        ignores them for a user it does not trust unless the system config
+        already lists them; that user's update takes the published
+        content-addressed bundle instead (caIndex). Updates never compile, so
+        only a bundle your caches or the content-addressed one holds will
+        install. {} adds none.
+      '';
+    };
+    caIndex = lib.mkOption {
+      type = lib.types.str;
+      default = caIndex.rawBase;
+      description = ''
+        Where the updater reads which content-addressed bundle CI published:
+        `<caIndex>/<rev>/<system>/<profile>.json`, the revision being the one
+        the flake resolves to. The default is agent-distro's index; a
+        distribution that publishes its own bundles names its own, and one
+        whose revisions this index does not carry leaves the update skipped
+        rather than fetched from an unsigned source.
       '';
     };
     frequency = lib.mkOption {

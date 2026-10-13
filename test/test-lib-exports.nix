@@ -76,6 +76,18 @@ let
       profile = agent-distro.profiles.vanilla;
     };
   };
+  # A distribution that publishes its own content-addressed bundles: the index
+  # it names must reach the config its updater reads.
+  ownIndex = "https://example.invalid/own-distro/ca-index";
+  ownIndexUpdater = import "${agent-distro}/lib/mk-updater.nix" {
+    inherit pkgs bundle;
+    inherit (svc) flake profile substituters;
+    inherit stateDirectory;
+    history = "${configuration.xdg.stateHome}/agent-distro/history.log";
+    nix = lib.getExe pkgs.nix;
+    caIndex = ownIndex;
+  };
+  ownIndexConfig = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile ownIndexUpdater.config));
 
   # The shim is identical text to the module's, so a consumer's edits to it
   # cannot drift: same state line, same exec/fallback logic, same shebang.
@@ -114,7 +126,7 @@ let
   }).omp.drvPath;
   mkFlakeLibNames = builtins.attrNames mkFlakeOut.lib;
   mkFlakePackageNames = builtins.attrNames mkFlakeOut.packages.${pkgs.system};
-  expectedLibNames = [ "cache" "mkFlake" "mkLaunchers" "mkPicker" "mkShims"
+  expectedLibNames = [ "caIndex" "cache" "mkFlake" "mkLaunchers" "mkPicker" "mkShims"
     "mkUpdater" "schedule" "stateDirectory" ];
 
   # --- missing-required-argument checks, executed in the builder below ---
@@ -175,6 +187,11 @@ assert config.history == "${configuration.xdg.stateHome}/agent-distro/history.lo
 assert config.profile == svc.profile;
 assert config.flake == svc.flake;
 assert config.substituters == svc.substituters;
+# The index the updater reads comes from lib/ca-index.nix, through the module
+# and the library; a distribution's own index reaches the config the same way.
+assert config.caIndex == agent-distro.lib.caIndex.rawBase;
+assert otherConfig.caIndex == agent-distro.lib.caIndex.rawBase;
+assert ownIndexConfig.caIndex == ownIndex;
 assert config.periodSeconds == schedule.updatePeriodSeconds;
 assert config.offsetSeconds == schedule.updateOffsetSeconds;
 # A second nixpkgs must still produce a well-formed updater on the same schedule.
@@ -187,7 +204,7 @@ assert otherShims.passthru.stateDirectory == stateDirectory;
 # returns (Home Manager normalises a single command line to a one-element list).
 assert lib.escapeShellArgs updater.command ==
   builtins.head configuration.systemd.user.services.agent-distro-update.Service.ExecStart;
-# mkFlake evaluates: exactly the same eight-name lib, packages include the bundle + picker.
+# mkFlake evaluates: exactly the same nine-name lib, packages include the bundle + picker.
 assert mkFlakeLibNames == expectedLibNames;
 assert lib.elem svc.profile mkFlakePackageNames;
 assert lib.elem "default" mkFlakePackageNames;
