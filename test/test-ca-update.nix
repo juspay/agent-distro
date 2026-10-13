@@ -183,8 +183,11 @@ in
 
     with subtest("a ca the cache cannot supply is a skip that claims no more"):
         output = update("${config "${indexUrl noCaPort}"}")
-        assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
-        assert "content-addressed bundle /nix/store/00000000000000000000000000000000-agent-distro-vanilla " \
+        # The entry is well formed and names a ca; the cache simply cannot
+        # supply it, so the reason says exactly that and nothing about what the
+        # cache holds (a nix that will not take the path looks the same here).
+        assert "vanilla update skipped: content-addressed bundle " \
+               "/nix/store/00000000000000000000000000000000-agent-distro-vanilla " \
                "could not be copied from ${cacheUrl}" in output, output
         assert current() == ca, current()
 
