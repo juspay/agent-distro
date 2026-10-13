@@ -93,7 +93,9 @@ scripts:
 website:
     nix build ./doc --no-link -L
 
-# The wrapper checks, VMs included.
+# The wrapper checks, VMs included. `--max-jobs` caps how many VMs run at once:
+# a lane host has many cores but bounded memory, and a `nix flake check` left to
+# itself would boot one per check.
 [linux]
 vm: picker
-    cd test && nix flake check -L
+    cd test && nix flake check -L --max-jobs 4
