@@ -52,6 +52,14 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           github_access_token: ${{ github.token }}
+          # Not the newest release: the version the fleet runs. Nix 2.35
+          # changed how it hashes a self-referential NAR — libunistring's .la
+          # files are one — so a path it rewrites is one a 2.34 consumer
+          # recomputes differently and refuses (`ca hash mismatch importing
+          # path`, which is how a 2.35 rewrite broke this cache for 2.34 users).
+          # Publisher and consumer have to agree; the verify step below reads
+          # what this publishes back from the cache with this same version.
+          nix_version: 2.34.8
           # Trust the project cache so builds pull from it (warms nix run /
           # nix develop on both platforms) instead of rebuilding.
           extra_nix_config: |
@@ -91,10 +99,11 @@ jobs:
       # A user whose nix will not honour the cache cannot fetch an
       # input-addressed bundle from it at all: their own substituters, key and
       # --no-check-sigs are all dropped (nix.conf `require-sigs`). A
-      # content-addressed path is trusted by itself, so publish the rewritten
-      # closure and the index that names it together — the attic-action below
-      # pushes the rewritten paths along with the rest of the job's store
-      # additions, and the updater reads the index to find them.
+      # content-addressed path is trusted by itself, so the rewrite is
+      # published — for every system but macOS, where the rewrite edits the
+      # Mach-Os inside the closure, which invalidates their ad-hoc signatures
+      # and arm64 then kills them on exec. A darwin entry names the signed
+      # bundle and nothing rewritten (.github/scripts/ca-index.py).
       - name: Publish the content-addressed bundles
         if: env.PUSH_CACHE == 'true'
         env:
@@ -115,34 +124,67 @@ jobs:
           python3 .github/scripts/ca-index.py "${args[@]}" "${installables[@]}"
 
       - name: Run a launcher out of a content-addressed bundle
-        # The rewrite replaces the store paths embedded in every file, which
-        # for a Mach-O also invalidates its ad-hoc signature; arm64 macOS then
-        # kills the binary on exec. Running one launcher from the rewritten
-        # bundle is the only way to know a user can still run it, and comparing
-        # the bytes of what ran is what says whether the rewrite reached it.
-        if: env.PUSH_CACHE == 'true'
+        # What was just built, run from the rewritten bundle: the rewrite
+        # replaces the store paths embedded in every file, so this is what says
+        # the result is execable where it was built. The macOS runner takes no
+        # part — a rewritten Mach-O is killed there, which is why nothing is
+        # rewritten for it.
+        if: env.PUSH_CACHE == 'true' && runner.os == 'Linux'
         env:
           REV: ${{ github.sha }}
           INDEX: ${{ runner.temp }}/ca-index
         run: |
           set -eu
           entry="$INDEX/$REV/$(nix config show system)/vanilla.json"
-          where() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$entry" "$1"; }
-          bundle=$(where ca)
-          echo "content-addressed bundle: $bundle (from $(where ia))"
-          # The launcher is a script: its shebang names the binary that runs
-          # first, and a store path embedded in a file is what the rewrite
-          # replaces.
-          interpreter() { sed -n '1s/^#!//p' "$1/bin/claude" | awk '{print $1}'; }
-          before=$(interpreter "$(where ia)")
-          after=$(interpreter "$bundle")
-          echo "launcher interpreter: $before -> $after"
-          if cmp -s "$before" "$after"; then
-            echo "the rewrite left the interpreter's bytes alone"
-          else
-            echo "the rewrite rewrote the interpreter: $(cmp -l "$before" "$after" 2>/dev/null | wc -l) bytes differ"
+          ca=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("ca", ""))' "$entry")
+          echo "content-addressed bundle: $ca"
+          "$ca/bin/claude" --version
+
+      # The index must not name a bundle the cache does not hold, and the
+      # verification below reads one back from there, so the rewrite is pushed
+      # now instead of being left to the action's post step at the end of the
+      # job (which pushes these paths again, a no-op the second time).
+      - name: Push the rewritten paths to the cache
+        if: env.PUSH_CACHE == 'true' && runner.os == 'Linux'
+        env:
+          REV: ${{ github.sha }}
+          INDEX: ${{ runner.temp }}/ca-index
+        run: |
+          set -eu
+          paths=""
+          for entry in "$INDEX/$REV/$(nix config show system)"/*.json; do
+            ca=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("ca", ""))' "$entry")
+            [ -n "$ca" ] && paths="$paths$ca"$'\n'
+          done
+          if [ -z "$paths" ]; then
+            echo "these entries name no content-addressed path"
+            exit 0
           fi
-          "$bundle/bin/claude" --version
+          printf '%s' "$paths" | attic push --stdin oss
+
+      # What a consumer does, done here: fetch the published closure back from
+      # the cache into a throwaway store and verify its contents. A `ca` whose
+      # nar the cache serves differently — a rewrite by a Nix that hashes
+      # self-referential NARs differently than the `nix_version` above — fails
+      # right here, before the index names it, instead of on a user's machine.
+      # Nothing reaches `latest/` unless this passes.
+      - name: Verify the published closure imports
+        if: env.PUSH_CACHE == 'true' && runner.os == 'Linux'
+        env:
+          REV: ${{ github.sha }}
+          INDEX: ${{ runner.temp }}/ca-index
+        run: |
+          set -eu
+          cache=$(nix eval --raw --file lib/cache.nix --apply 'c: c.url')
+          store="local?root=$RUNNER_TEMP/verify"
+          for entry in "$INDEX/$REV/$(nix config show system)"/*.json; do
+            ca=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("ca", ""))' "$entry")
+            [ -n "$ca" ] || continue
+            echo "importing $ca from $cache"
+            nix copy --from "$cache" --to "$store" "$ca"
+            nix store verify --store "$store" --recursive "$ca"
+          done
+          echo "what was published imports and verifies"
 
       - name: Push the content-addressed index
         # Every system's entries are disjoint files under its own directory
@@ -218,6 +260,8 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           github_access_token: ${{ github.token }}
+          # Same pin as the build job, for the same reason: the fleet's Nix.
+          nix_version: 2.34.8
 
       - name: Split the checks into shards
         id: plan
@@ -244,6 +288,8 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           github_access_token: ${{ github.token }}
+          # Same pin as the build job, for the same reason: the fleet's Nix.
+          nix_version: 2.34.8
           extra_nix_config: |
             extra-substituters = https://cache.nixos.asia/oss
             extra-trusted-public-keys = oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=

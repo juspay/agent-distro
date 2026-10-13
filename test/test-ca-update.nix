@@ -29,6 +29,7 @@ let
   cacheKey = "ca-test-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   okPort = 8100;
   missingPort = 8101;
+  signedPort = 8102;
   # A self-signed certificate for 127.0.0.1: the stub index is an https server,
   # and the updater is pointed at this as its trust anchor (NODE_EXTRA_CA_CERTS).
   # A test key for a test server, which nothing else trusts.
@@ -39,11 +40,15 @@ let
       -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" \
       -addext "basicConstraints=critical,CA:TRUE"
   '';
-  indexServer = status: port: pkgs.writeShellScript "ca-index-${toString port}" ''
+  # Each stub serves the file it is given: the pair, or — as a darwin system's
+  # entry has it — the signed bundle alone.
+  indexServer = status: port: entry: pkgs.writeShellScript "ca-index-${toString port}" ''
     exec ${pkgs.python3}/bin/python ${./support/ca-index-fixture.py} \
-      ${toString status} ${toString port} ${cert}/cert.pem ${cert}/key.pem
+      ${toString status} ${toString port} ${cert}/cert.pem ${cert}/key.pem ${entry}
   '';
   indexUrl = port: "https://127.0.0.1:${toString port}";
+  # What a `*-darwin` entry looks like: the signed bundle, nothing rewritten.
+  signedEntry = pkgs.writeText "ca-signed.json" (builtins.toJSON { ia = bundle; });
   config = caIndex: pkgs.writeText "ca-update-config.json" (builtins.toJSON {
     profile = "vanilla";
     # A revision (git+file:), which is what the index is keyed by.
@@ -72,11 +77,15 @@ in
     nix.settings.substituters = lib.mkForce [ ];
     systemd.services.ca-index-ok = {
       wantedBy = [ "multi-user.target" ];
-      serviceConfig.ExecStart = "${indexServer 200 okPort}";
+      serviceConfig.ExecStart = "${indexServer 200 okPort "/tmp/ca-pair.json"}";
+    };
+    systemd.services.ca-index-signed = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.ExecStart = "${indexServer 200 signedPort signedEntry}";
     };
     systemd.services.ca-index-missing = {
       wantedBy = [ "multi-user.target" ];
-      serviceConfig.ExecStart = "${indexServer 404 missingPort}";
+      serviceConfig.ExecStart = "${indexServer 404 missingPort "/tmp/ca-pair.json"}";
     };
   };
   testScript = ''
@@ -84,8 +93,10 @@ in
     import shlex
     ${common.testPreamble}
     machine.wait_for_unit("ca-index-ok.service")
+    machine.wait_for_unit("ca-index-signed.service")
     machine.wait_for_unit("ca-index-missing.service")
     machine.wait_for_open_port(${toString okPort})
+    machine.wait_for_open_port(${toString signedPort})
     machine.wait_for_open_port(${toString missingPort})
 
     def user(command):
@@ -145,6 +156,16 @@ in
         assert 'ignoring caIndex "http://127.0.0.1:${toString okPort}"' in output, output
         assert "must be an https URL with no credentials, query or fragment" in output, output
         assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
+        assert current() == ca, current()
+
+    with subtest("an entry that names the signed bundle alone is the ordinary skip"):
+        # What a Mac gets from this index: nothing to copy content-addressed, so
+        # the update skips — and says nothing about it being malformed.
+        output = update("${config "${indexUrl signedPort}"}")
+        assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
+        assert "no content-addressed bundle is published for revision" in output, output
+        assert "ignoring caIndex" not in output, output
+        assert "names no signed bundle" not in output, output
         assert current() == ca, current()
 
     with subtest("the index publishes no revision: the old skip, reworded"):

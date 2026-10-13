@@ -254,7 +254,10 @@ export function wouldCompile(
   return { names: names.slice(0, 3).join(',') };
 }
 
-/** What the index publishes for one bundle: its store path, and its content-addressed rewrite. */
+/**
+ * What the index publishes for one bundle: the signed bundle's store path, and
+ * — on the systems that publish one — its content-addressed rewrite.
+ */
 type Indexed = { ia: string; ca: string };
 
 /** The system the store builds for, as `nix config show system` names it, or ''. */
@@ -266,9 +269,11 @@ function systemOf(nix: string): string {
 }
 
 /**
- * The bundle the index publishes for `revision` on this system, or null when
- * it publishes none: a revision CI has not built since this path existed, a
- * flake that names no revision to key one by, or an index that cannot be read.
+ * The bundle the index publishes for `revision` on this system, or null when it
+ * publishes none: a revision CI has not built since this path existed, a flake
+ * that names no revision to key one by, a system the index names the signed
+ * bundle for and nothing rewritten (macOS, where a rewritten Mach-O is killed
+ * on exec), or an index that cannot be read.
  */
 async function published(nix: string, config: Config, revision: string): Promise<Indexed | null> {
   const system = systemOf(nix);
@@ -290,11 +295,17 @@ async function published(nix: string, config: Config, revision: string): Promise
     }
     const value = await response.json() as Partial<Indexed>;
     const storePath = (path: unknown): path is string => typeof path === 'string' && path.startsWith('/nix/store/');
-    if (!storePath(value.ia) || !storePath(value.ca)) {
-      log.update.warn(`the content-addressed index at ${url.href} is not an {ia, ca} pair of store paths`);
+    if (!storePath(value.ia)) {
+      log.update.warn(`the index at ${url.href} names no signed bundle`);
       return null;
     }
-    return { ia: value.ia, ca: value.ca };
+    // A `ca` is optional — the entry for a system that publishes none carries
+    // the signed bundle alone — but one that is there must be a store path.
+    if (value.ca !== undefined && !storePath(value.ca)) {
+      log.update.warn(`the content-addressed index at ${url.href} names a ca that is not a store path`);
+      return null;
+    }
+    return value.ca === undefined ? null : { ia: value.ia, ca: value.ca };
   } catch (error) {
     log.update.debug(`cannot read ${url.href}: ${(error as Error).message}`);
     return null;

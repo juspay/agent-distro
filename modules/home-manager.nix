@@ -79,7 +79,9 @@ in
         distribution that publishes its own bundles names its own, and one
         whose revisions this index does not carry leaves the update skipped.
         An `https://` URL with no credentials, query or fragment: the updater
-        fetches nothing else, and says so as a warning.
+        fetches nothing else, and says so as a warning. Content-addressed
+        bundles are Linux-only — on macOS the index names the signed bundle,
+        which needs the cache key or a trusted user like any signed path.
       '';
     };
     frequency = lib.mkOption {
