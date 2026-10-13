@@ -59,7 +59,9 @@ jobs:
           # path`, which is how a 2.35 rewrite broke this cache for 2.34 users).
           # Publisher and consumer have to agree; the verify step below reads
           # what this publishes back from the cache with this same version.
-          nix_version: 2.34.8
+          # `install_url` is what pins it: this action version ignores an
+          # unknown `nix_version` input with a warning and installs the newest.
+          install_url: https://releases.nixos.org/nix/nix-2.34.8/install
           # Trust the project cache so builds pull from it (warms nix run /
           # nix develop on both platforms) instead of rebuilding.
           extra_nix_config: |
@@ -165,7 +167,7 @@ jobs:
       # What a consumer does, done here: fetch the published closure back from
       # the cache into a throwaway store and verify its contents. A `ca` whose
       # nar the cache serves differently — a rewrite by a Nix that hashes
-      # self-referential NARs differently than the `nix_version` above — fails
+      # self-referential NARs differently than the `install_url` above — fails
       # right here, before the index names it, instead of on a user's machine.
       # Nothing reaches `latest/` unless this passes.
       - name: Verify the published closure imports
@@ -261,7 +263,7 @@ jobs:
         with:
           github_access_token: ${{ github.token }}
           # Same pin as the build job, for the same reason: the fleet's Nix.
-          nix_version: 2.34.8
+          install_url: https://releases.nixos.org/nix/nix-2.34.8/install
 
       - name: Split the checks into shards
         id: plan
@@ -289,7 +291,7 @@ jobs:
         with:
           github_access_token: ${{ github.token }}
           # Same pin as the build job, for the same reason: the fleet's Nix.
-          nix_version: 2.34.8
+          install_url: https://releases.nixos.org/nix/nix-2.34.8/install
           extra_nix_config: |
             extra-substituters = https://cache.nixos.asia/oss
             extra-trusted-public-keys = oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=
