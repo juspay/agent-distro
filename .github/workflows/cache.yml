@@ -40,12 +40,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest is arm64 (aarch64-darwin), matching the flake's supported
-        # systems; ubuntu-latest covers x86_64-linux and ubuntu-24.04-arm
-        # aarch64-linux, so every supported system reaches the cache. The ARM
-        # lane earns its place here rather than in odu, which has no
-        # aarch64-linux lane.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+        # The two systems odu has lanes for: ubuntu-latest is x86_64-linux and
+        # macos-latest is arm64 (aarch64-darwin). aarch64-linux is not warmed.
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # This job pushes the content-addressed index, a branch of this repository.
     permissions:
