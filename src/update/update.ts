@@ -37,7 +37,7 @@ import { log, type Logger } from '../log.ts';
 import { realpath, writeTemporary } from '../util.ts';
 import { checkCaches } from './cache.ts';
 import { updateDue } from './due.ts';
-import { indexEntryUrl } from './ca-index.ts';
+import { indexEntryUrl, takesContentAddressed } from './ca-index.ts';
 import { NixLog, nixErrorDetail } from './progress.ts';
 
 type Config = {
@@ -254,7 +254,10 @@ export function wouldCompile(
   return { names: names.slice(0, 3).join(',') };
 }
 
-/** What the index publishes for one bundle: its store path, and its content-addressed rewrite. */
+/**
+ * What the index publishes for one bundle: the signed bundle's store path, and
+ * — on the systems that publish one — its content-addressed rewrite.
+ */
 type Indexed = { ia: string; ca: string };
 
 /** The system the store builds for, as `nix config show system` names it, or ''. */
@@ -266,13 +269,18 @@ function systemOf(nix: string): string {
 }
 
 /**
- * The bundle the index publishes for `revision` on this system, or null when
- * it publishes none: a revision CI has not built since this path existed, a
- * flake that names no revision to key one by, or an index that cannot be read.
+ * The bundle the index publishes for `revision` on this system, or null when it
+ * publishes none: a revision CI has not built since this path existed, a flake
+ * that names no revision to key one by, a system the index names the signed
+ * bundle for and nothing rewritten (macOS, where a rewritten Mach-O is killed
+ * on exec), or an index that cannot be read.
  */
 async function published(nix: string, config: Config, revision: string): Promise<Indexed | null> {
   const system = systemOf(nix);
-  if (!revision || !system) return null;
+  // A system that cannot run a rewritten bundle is not asked for one: its
+  // entry names the signed bundle, and an older one that still names a `ca` is
+  // not taken either (src/update/ca-index.ts).
+  if (!revision || !system || !takesContentAddressed(system)) return null;
   // The base is a config value, so it is validated before anything is fetched
   // from it (src/update/ca-index.ts): one that is not an https URL without
   // credentials, query or fragment is ignored, and the update then skips.
@@ -290,11 +298,17 @@ async function published(nix: string, config: Config, revision: string): Promise
     }
     const value = await response.json() as Partial<Indexed>;
     const storePath = (path: unknown): path is string => typeof path === 'string' && path.startsWith('/nix/store/');
-    if (!storePath(value.ia) || !storePath(value.ca)) {
-      log.update.warn(`the content-addressed index at ${url.href} is not an {ia, ca} pair of store paths`);
+    if (!storePath(value.ia)) {
+      log.update.warn(`the index at ${url.href} names no signed bundle`);
       return null;
     }
-    return { ia: value.ia, ca: value.ca };
+    // A `ca` is optional — the entry for a system that publishes none carries
+    // the signed bundle alone — but one that is there must be a store path.
+    if (value.ca !== undefined && !storePath(value.ca)) {
+      log.update.warn(`the content-addressed index at ${url.href} names a ca that is not a store path`);
+      return null;
+    }
+    return value.ca === undefined ? null : { ia: value.ia, ca: value.ca };
   } catch (error) {
     log.update.debug(`cannot read ${url.href}: ${(error as Error).message}`);
     return null;
@@ -326,7 +340,10 @@ async function contentAddressed(
   log.update.debug(`the content-addressed ${entry.ia} is ${entry.ca}`);
   for (const url of urls) {
     // The bundle is the whole point of this path: a cache that has not caught
-    // up with the index (or no network) skips, as an incomplete cache does.
+    // up with the index, one that holds it but cannot be reached, and a nix
+    // that refuses it (2.35 recomputes a self-referential NAR's address
+    // differently than 2.34, and neither line accepts the other's form) all
+    // skip, as an incomplete cache does.
     const copy: Build = await nixStep(nix, ['copy', '--from', url, entry.ca], nixLog, report);
     if (!copy.error && copy.status === 0) {
       return { build: await nixStep(nix, ['build', entry.ca, '--out-link', current], nixLog, report) };
@@ -334,7 +351,9 @@ async function contentAddressed(
     log.update.debug(`nix copy --from ${url} ${entry.ca} failed: `
       + `${copy.error?.message ?? `exit ${copy.status ?? copy.signal}`}`);
   }
-  return { skip: `content-addressed bundle ${entry.ca} is not in ${urls.join(' ')} yet` };
+  // Not "not in the cache yet": the cache holding it is not enough for a nix
+  // that cannot verify it, so the reason claims no more than the copy.
+  return { skip: `content-addressed bundle ${entry.ca} could not be copied from ${urls.join(' ')}` };
 }
 
 /**

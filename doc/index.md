@@ -269,7 +269,8 @@ nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13Ei
 
 ```
 https://raw.githubusercontent.com/juspay/agent-distro/ca-index/<rev>/<system>/<profile>.json
-# {"ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
+# {"ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}   ← Linux
+# {"ia": "/nix/store/…-agent-distro-vanilla"}                                            ← macOS
 https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<profile>.json
 # {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
 ```
@@ -278,7 +279,7 @@ https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<
 
 This index is agent-distro's. A distribution that publishes its own bundles names it with `caIndex` (`services.agent-distro.caIndex`, or `mkFlake`'s `caIndex`) — an `https://` base URL with no credentials, query or fragment, the only kind the updater will fetch from; anything else is ignored with a warning, and the update skips. Its revisions are not in this index, and an entry that is not there leaves the update skipped too.[^ca-index]
 
-`ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Anyone can do the same by hand, with the `ca` path the index names:
+`ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Before the index names a bundle, CI pushes the rewritten paths and reads one back from the cache into a throwaway store, verifying its contents — a rewrite that a consumer's nix cannot verify never reaches the index. Which nix does the rewriting matters for that: 2.35 hashes a self-referential NAR differently than 2.17–2.34 do, so CI rewrites with the release the fleet runs (`install_url` in `ci.yml` pins it), not the newest. **These bundles target Nix 2.34.x, and nothing else.** Measured both ways on a bundle whose closure has such a path (libunistring's `.la` files): a 2.34 rewrite fails to import on 2.35 and a 2.35 rewrite fails on 2.34, each with `ca hash mismatch` naming the same two digests — the lines do not accept each other's form. A host on 2.35 or later therefore cannot take these bundles and takes the ordinary skip; the signed bundle and the cache key above are its route, and so is a single-user install of either line. Anyone can do the same by hand, with the `ca` path the index names:
 
 ```sh
 nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
@@ -286,7 +287,7 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
 
 > A revision CI has not built yet, a `path:` flake (which names no revision to key a bundle by), and a cache that does not hold the bundle all end the same way: the update is skipped and your current version keeps working.
 
-**macOS included.** A Mach-O that the rewrite changes has an ad-hoc signature that no longer matches, which arm64 macOS refuses to exec — so CI runs `bin/claude --version` out of every rewritten bundle on the runner that built it, `aarch64-darwin` among them, and says whether the rewrite reached the bytes of the binary that ran. It runs, so the Mac bundle is published like the others; a `ca` bundle a Mac cannot exec fails that step rather than reaching the index.
+**Content-addressed bundles are Linux-only; macOS keeps signed ones.** The rewrite edits every file in the closure that embeds a store path, and a Mach-O is one of them: the edit invalidates the binary's ad-hoc signature, and arm64 macOS then kills it on exec. Nothing can repair that afterwards — re-signing would change the bytes again — so a `*-darwin` entry names the signed bundle alone — and the updater on such a system fetches no content-addressed bundle even where an older entry still names one — and a Mac needs the cache key (above) or a trusted user, exactly as before this index existed. A Mac whose cache is unusable skips, saying so, and keeps the version it has.
 
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
@@ -595,7 +596,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,prof
 | `profile-resolve` | the profile in effect, with a fake nix: discovery, precedence, references and their offline fallback, the evaluation's isolation, its cache, nixpkgs fetched only for packages, and the no-compile policy |
 | `vanilla-closure` | the `vanilla` bundle names nixpkgs by reference and does not hold its source |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
-| `update-schedule` | the updater's schedule, cache policy and index URL |
+| `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
 | `picker-layout` | the chooser's cell widths, truncation and box at common terminal sizes |
 | `picker-auth` | the auth probes over fixture homes and stores |

@@ -55,10 +55,10 @@ def answers(root: Path, *bundles: tuple, rewrite: str = None, info: str = None, 
                 CA_CALLS=str(root / 'calls'), CA_ANSWERS=str(root / 'answers.json'))
 
 
-def index(root: Path, env: dict, *args: str) -> subprocess.CompletedProcess:
+def index(root: Path, env: dict, *args: str, system: str = 'x86_64-linux') -> subprocess.CompletedProcess:
     """Run the script for one revision, system and index tree."""
     return subprocess.run(
-        [sys.executable, str(SCRIPTS / 'ca-index.py'), '--rev', 'f' * 40, '--system', 'x86_64-linux',
+        [sys.executable, str(SCRIPTS / 'ca-index.py'), '--rev', 'f' * 40, '--system', system,
          '--directory', str(root / 'ca-index'), *args],
         cwd=root, env=env, capture_output=True, text=True)
 
@@ -91,6 +91,20 @@ class CaIndexTests(unittest.TestCase):
             self.assertEqual(json.loads(latest.read_text()), {'rev': 'f' * 40, 'ia': IA, 'ca': CA})
             # The pair is in the log beside the revision it names.
             self.assertIn(f'latest/x86_64-linux/vanilla.json: {"f" * 40} -> {CA}', result.stdout)
+
+    def test_a_darwin_entry_names_the_signed_bundle_and_nothing_rewritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = index(root, answers(root), '--latest', '.#vanilla', system='aarch64-darwin')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tree = root / 'ca-index'
+            # A rewritten Mach-O does not run on arm64 macOS, so there is no ca:
+            # the entry is the signed bundle, and nothing was rewritten for it.
+            self.assertEqual(json.loads((tree / ('f' * 40) / 'aarch64-darwin' / 'vanilla.json').read_text()), {'ia': IA})
+            self.assertEqual(json.loads((tree / 'latest' / 'aarch64-darwin' / 'vanilla.json').read_text()),
+                             {'rev': 'f' * 40, 'ia': IA})
+            self.assertEqual((root / 'calls').read_text().splitlines(), ['build --no-link --print-out-paths .#vanilla'])
+            self.assertIn('signed: a rewritten Mach-O is killed on arm64 macOS', result.stdout)
 
     def test_each_installable_gets_its_own_pair(self):
         with tempfile.TemporaryDirectory() as directory:
