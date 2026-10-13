@@ -287,7 +287,7 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
 
 > A revision CI has not built yet, a `path:` flake (which names no revision to key a bundle by), and a cache that does not hold the bundle all end the same way: the update is skipped and your current version keeps working.
 
-**Content-addressed bundles are Linux-only; macOS keeps signed ones.** The rewrite edits every file in the closure that embeds a store path, and a Mach-O is one of them: the edit invalidates the binary's ad-hoc signature, and arm64 macOS then kills it on exec. Nothing can repair that afterwards — re-signing would change the bytes again — so a `*-darwin` entry names the signed bundle alone, and a Mac needs the cache key (above) or a trusted user, exactly as before this index existed. A Mac whose cache is unusable skips, saying so, and keeps the version it has.
+**Content-addressed bundles are Linux-only; macOS keeps signed ones.** The rewrite edits every file in the closure that embeds a store path, and a Mach-O is one of them: the edit invalidates the binary's ad-hoc signature, and arm64 macOS then kills it on exec. Nothing can repair that afterwards — re-signing would change the bytes again — so a `*-darwin` entry names the signed bundle alone — and the updater on such a system fetches no content-addressed bundle even where an older entry still names one — and a Mac needs the cache key (above) or a trusted user, exactly as before this index existed. A Mac whose cache is unusable skips, saying so, and keeps the version it has.
 
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
@@ -596,7 +596,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,prof
 | `profile-resolve` | the profile in effect, with a fake nix: discovery, precedence, references and their offline fallback, the evaluation's isolation, its cache, nixpkgs fetched only for packages, and the no-compile policy |
 | `vanilla-closure` | the `vanilla` bundle names nixpkgs by reference and does not hold its source |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
-| `update-schedule` | the updater's schedule, cache policy and index URL |
+| `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
 | `picker-layout` | the chooser's cell widths, truncation and box at common terminal sizes |
 | `picker-auth` | the auth probes over fixture homes and stores |

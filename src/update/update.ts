@@ -37,7 +37,7 @@ import { log, type Logger } from '../log.ts';
 import { realpath, writeTemporary } from '../util.ts';
 import { checkCaches } from './cache.ts';
 import { updateDue } from './due.ts';
-import { indexEntryUrl } from './ca-index.ts';
+import { indexEntryUrl, takesContentAddressed } from './ca-index.ts';
 import { NixLog, nixErrorDetail } from './progress.ts';
 
 type Config = {
@@ -277,7 +277,10 @@ function systemOf(nix: string): string {
  */
 async function published(nix: string, config: Config, revision: string): Promise<Indexed | null> {
   const system = systemOf(nix);
-  if (!revision || !system) return null;
+  // A system that cannot run a rewritten bundle is not asked for one: its
+  // entry names the signed bundle, and an older one that still names a `ca` is
+  // not taken either (src/update/ca-index.ts).
+  if (!revision || !system || !takesContentAddressed(system)) return null;
   // The base is a config value, so it is validated before anything is fetched
   // from it (src/update/ca-index.ts): one that is not an https URL without
   // credentials, query or fragment is ignored, and the update then skips.

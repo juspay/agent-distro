@@ -1,4 +1,17 @@
 /**
+ * Whether a content-addressed bundle can be installed on this system at all.
+ *
+ * No, on macOS: the rewrite edits every Mach-O in the closure that embeds a
+ * store path, which invalidates its ad-hoc signature, and arm64 then kills the
+ * binary on exec. An entry for such a system publishes the signed bundle only,
+ * and the updater takes its ordinary skip there — even where an older entry
+ * still names a `ca`, which is what the index carried before this was known.
+ */
+export function takesContentAddressed(system: string): boolean {
+  return !system.endsWith('-darwin');
+}
+
+/**
  * Where one content-addressed index entry is, from the configured base.
  *
  * `caIndex` is untrusted input to this process: it arrives in the updater's

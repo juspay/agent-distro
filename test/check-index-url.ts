@@ -1,8 +1,10 @@
 /*
- * The index URL built from a configured base (src/update/ca-index.ts), without
- * a store or a network: `caIndex` is a config value, so only an https base
- * without credentials, query or fragment may become a request, and the
- * revision, system and profile must not be able to move it.
+ * The index (src/update/ca-index.ts), without a store or a network: the URL
+ * built from a configured base — `caIndex` is a config value, so only an https
+ * base without credentials, query or fragment may become a request, and the
+ * revision, system and profile must not be able to move it — and which systems
+ * take a content-addressed bundle at all (not macOS, where the rewrite leaves
+ * a Mach-O that arm64 kills).
  *
  * Usage: node check-index-url.ts SRC
  *
@@ -14,7 +16,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 
 const [src] = process.argv.slice(2);
-const { indexEntryUrl } = await import(join(src, 'update/ca-index.ts'));
+const { indexEntryUrl, takesContentAddressed } = await import(join(src, 'update/ca-index.ts'));
 
 const revision = 'a'.repeat(40);
 const href = (base: string, over: { revision?: string; system?: string; profile?: string } = {}) =>
@@ -68,3 +70,10 @@ assert.equal(href('https://cache.example/i', { revision: 'r', system: 's', profi
 // A dot inside a segment is ordinary — a version, a host triple.
 assert.equal(href('https://cache.example/i', { profile: 'v1.2' }),
   `https://cache.example/i/${revision}/x86_64-linux/v1.2.json`);
+
+// macOS never takes a rewritten bundle: its entries name the signed one, and an
+// older entry that still names a `ca` must not be fetched either.
+assert.equal(takesContentAddressed('x86_64-linux'), true);
+assert.equal(takesContentAddressed('aarch64-linux'), true);
+assert.equal(takesContentAddressed('aarch64-darwin'), false);
+assert.equal(takesContentAddressed('x86_64-darwin'), false);
