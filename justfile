@@ -158,10 +158,9 @@ protect *args:
       --platform x86_64-linux --platform aarch64-darwin {{ args }})
     contexts=$(nix shell --accept-flake-config nixpkgs#python3 \
       -c python3 .github/scripts/check-cache-config.py --contexts)
-    if [ -z "$contexts" ]; then
-      echo "protect: the cache workflow names no contexts to require" >&2
-      exit 1
-    fi
+    # No guard on that: the script IS the check for it — it refuses a workflow
+    # it cannot read the contexts out of — and `set -e` carries its failure out
+    # of this substitution. What it prints is one context per line, never empty.
     mapfile -t cache_contexts <<<"$contexts"
     case " {{ args }} " in
       *" --dry-run "*)
@@ -204,7 +203,8 @@ protect *args:
     # A ruleset PUT replaces the whole object, so this is the same
     # read-modify-write odu does: every field the read returned goes back out
     # and only the checks rule's contexts change. Ours are deduplicated against
-    # odu's and carry the Actions integration id, as the contexts odu writes do.
+    # odu's and carry the Actions integration id, because the cache workflow
+    # posts them from Actions — odu posts its own contexts and carries none.
     nix shell --accept-flake-config nixpkgs#jq -c jq --args -c '
       {
         name, target, enforcement, conditions, bypass_actors,
@@ -213,7 +213,8 @@ protect *args:
           + [.rules[] | select(.type == "required_status_checks")
              | .parameters.required_status_checks = (
                  ((.parameters.required_status_checks // [])
-                  + [$ARGS.positional[] | {context: ., integration_id: 15368}])
+                  + [$ARGS.positional[] | select(. != "")
+                     | {context: ., integration_id: 15368}])
                  | unique_by(.context))]
         )
       }' "${cache_contexts[@]}" <"$work/ruleset.json" >"$work/body.json"
