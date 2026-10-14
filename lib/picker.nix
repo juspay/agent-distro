@@ -4,7 +4,8 @@
 # One profile per launch, so the picker chooses a harness. The profile in
 # effect is resolved here (src/profile/resolve.ts) and handed to the launcher
 # in AGENT_DISTRO_PROFILE: a leading positional selector, else the
-# repository's agent-distro.nix, else AI_PROFILE, else the built-in profile.
+# repository's agent-distro.nix composed over AI_PROFILE, over the built-in
+# profile.
 { lib, pkgs, writeShellApplication, launchers, info }:
 let
   runtime = import ./runtime.nix pkgs;

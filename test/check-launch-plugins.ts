@@ -57,9 +57,9 @@ function resolve(value: string, cache: string, profile: unknown[] = [], reports:
     (message: string) => reports.push(message));
 }
 
-/** `resolve` for a profile other than the built-in one, whose plugin is `own`. */
+/** `resolve` for a profile that does not include the built-in one, whose plugin is `own`. */
 function launch_(own: string, value: string, cache: string, profile: unknown[] = []) {
-  return launch.resolve('claude', claude, claudeArgs(profile), value, { XDG_CACHE_HOME: cache }, () => {}, [own]);
+  return launch.resolve('claude', claude, claudeArgs(profile), value, { XDG_CACHE_HOME: cache }, () => {}, [own], true);
 }
 
 /** The cache root `resolve` uses for an XDG_CACHE_HOME. */
@@ -222,7 +222,7 @@ test('no entries load nothing and need no cache', () => {
   assert.equal(launched(result.stdout), '--plugin-dir /profile/kept');
 });
 
-test('a profile other than the built-in one replaces every built-in plugin, ahead of the variable', () => {
+test('a profile chosen positionally replaces every built-in plugin, ahead of the variable', () => {
   const cache = temporary();
   const kept = profileEntry(plugin('kept'), '/profile/kept');
   const own = plugin('own');
@@ -237,9 +237,20 @@ test('a profile other than the built-in one replaces every built-in plugin, ahea
   // Taking the built-in plugins away needs no cache when nothing is added,
   // but a launch that does must name the profile when there is none.
   const homeless = (value: string, replacement: string[]) => () => launchModule.resolve('claude', claude, claudeArgs([kept]),
-    value, {}, () => {}, replacement);
+    value, {}, () => {}, replacement, true);
   assert.throws(homeless('', [own]), /profile: cannot cache translations/);
   assert.throws(homeless(extra, []), /profile: cannot cache/);
+});
+
+test('a profile composed over the built-in one keeps its plugins, replacing only those of the same name', () => {
+  const cache = temporary();
+  const kept = profileEntry(plugin('kept'), '/profile/kept');
+  const shadowed = profileEntry(plugin('own'), '/profile/own');
+  const own = plugin('own', 'repo');
+  const launch = launchModule.resolve('claude', claude, claudeArgs([kept, shadowed]), '', { XDG_CACHE_HOME: cache }, () => {}, [own]);
+  assert.deepEqual(launch.kept.map((p: any) => p.name), ['kept']);
+  assert.deepEqual(launch.replaced.map((p: any) => p.name), ['own']);
+  assert.deepEqual(launch.plugins.map((p: any) => p.description.root), [own]);
 });
 
 test('the shell a launcher evaluates', () => {

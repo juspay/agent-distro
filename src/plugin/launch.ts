@@ -15,10 +15,12 @@
  * `_url`, `_key_env` and `_key_hint`, and the profile's packages go first on
  * PATH.
  *
- * A profile other than the built-in one replaces the built-in's plugins, its
- * gateway and its packages: its plugin directories are translated exactly as
- * the variable's, ahead of them. Each directory is read exactly as a built-in
- * plugin is, then translated once per content into
+ * A profile composed over the built-in one keeps the built-in's plugins and
+ * adds its own; one that does not include it (chosen positionally, or another
+ * built-in name) replaces them. Either way its plugin directories are
+ * translated exactly as the variable's, ahead of them, and its gateway and
+ * packages are the ones in effect. Each directory is read exactly as a
+ * built-in plugin is, then translated once per content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
  * already content-addressed; otherwise it hashes the directory's NAR
@@ -31,8 +33,8 @@
  * what is in use rather than every version ever seen.
  *
  * Plugins are matched by manifest name, never by version: a plugin on the
- * variable replaces the profile's plugin of the same name, and on the variable
- * the last of a name wins.
+ * variable, or of a composed profile, replaces the built-in plugin of the same
+ * name, and among those the last of a name wins.
  *
  * A launch names the profile in effect on stderr when a repository's
  * `agent-distro.nix` or AI_PROFILE chose it, worded as `--list` words it and
@@ -51,7 +53,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { readDescription } from './resources.ts';
 import { log, SITE, VARIABLE as LOG_VARIABLE } from '../log.ts';
-import { sourceText } from '../listing.ts';
+import { nameText, sourceText } from '../listing.ts';
 import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
 import type { Gateway } from '../gateway/models.ts';
 import { resolveProfile, select, workingDirectory, isResolved, type Info, type Resolved } from '../profile/resolve.ts';
@@ -448,18 +450,18 @@ export function sweep(directory: string, which: (name: string) => boolean = () =
 
 /**
  * Resolve the variable against the profile: who stays, who is replaced, who
- * is added. `replacement`, the plugin directories of a profile other than the
- * built-in one, replaces every built-in plugin and comes before the variable's.
+ * is added. `own`, the plugin directories of the profile in effect, come
+ * before the variable's; with `replace`, for a profile that does not include
+ * the built-in one, they replace every built-in plugin.
  */
 export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
   harness: string, adapter: Adapter<A, E>, args: A, value: string | undefined, env: NodeJS.ProcessEnv, report: Report,
-  replacement?: string[],
+  own: string[] = [], replace = false,
 ): Launch<A, E> {
-  const own = replacement ?? [];
   const names = [...own, ...entries(value)];
   // Nothing to load or take away needs no cache, so it cannot fail for want of one.
-  const changes = names.length > 0 || (replacement !== undefined && args.profile.length > 0);
-  const cache = changes ? cacheRoot(env, replacement !== undefined ? 'profile' : VARIABLE) : null;
+  const changes = names.length > 0 || (replace && args.profile.length > 0);
+  const cache = changes ? cacheRoot(env, replace || own.length > 0 ? 'profile' : VARIABLE) : null;
   const byName = new Map<string, LaunchPlugin>();
   for (const [i, entry] of names.entries()) {
     const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? 'profile' : VARIABLE);
@@ -471,7 +473,7 @@ export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
     const description = readDescription(entry.description);
     return { name: description.manifest.name, description, entry };
   });
-  const replaces = (plugin: ProfilePlugin<E>) => replacement !== undefined || byName.has(plugin.name);
+  const replaces = (plugin: ProfilePlugin<E>) => replace || byName.has(plugin.name);
   return {
     args, cache, report,
     kept: profile.filter((plugin) => !replaces(plugin)),
@@ -530,9 +532,9 @@ function describe<A extends { profile: E[] }, E extends ProfileEntry>(
   harness: string, profile: Resolved, launch: Launch<A, E>, launched: string,
 ) {
   if (profile.source === 'repository' || profile.source === 'variable') {
-    log.profile.info(`using ${profile.name} (${sourceText(profile)}) · ${SITE}`);
+    log.profile.info(`using ${nameText(profile)} (${sourceText(profile)}) · ${SITE}`);
   }
-  log.profile.debug(`profile ${profile.name}, ${sourceText(profile)}`);
+  log.profile.debug(`profile ${nameText(profile)}, ${sourceText(profile)}`);
   for (const plugin of launch.kept) log.plugin.debug(`${plugin.description.root}: built in, as ${plugin.name}`);
   for (const plugin of launch.replaced) log.plugin.debug(`${plugin.description.root}: built in, replaced`);
   for (const plugin of launch.plugins) {
@@ -555,10 +557,10 @@ export async function main(argsPath: string): Promise<number> {
     const profile = profileInEffect(args.info, process.env);
     logger = log.plugin;
     const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
-    // The built-in profile is the one this launcher was built with.
-    const builtIn = profile.builtin && profile.name === args.info.default;
+    // The built-in profile, the one this launcher was built with, keeps its
+    // plugins under any composed over it.
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
-      builtIn ? undefined : profile.plugins);
+      profile.plugins, !profile.keepsBuiltIn);
     logger = log.harness(args.harness);
     const launched = adapter.launch(launch);
     describe(args.harness, profile, launch, launched);

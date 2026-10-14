@@ -8,11 +8,12 @@
  * prints the resolved profile as JSON, for the picker to hand its launcher in
  * AGENT_DISTRO_PROFILE; PROFILE is the picker's positional selector. `list`
  * prints `--list` from the menu (src/listing.ts): with `--json`, the menu with
- * the profile in effect added; without, a line naming that profile and where
- * it came from, then one `harness title version` line per harness.
+ * the profile in effect added; without, a line naming that profile, those it
+ * is composed over, and where they came from, then one `harness title version`
+ * line per harness.
  */
 import { readFileSync } from 'node:fs';
-import { sourceText, type Listing } from '../listing.ts';
+import { nameText, sourceText, type Listing } from '../listing.ts';
 import { log } from '../log.ts';
 import { LaunchError, printable } from '../plugin/launch.ts';
 import { isSystemError } from '../util.ts';
@@ -32,12 +33,13 @@ function run(argv: string[]): number {
   if (command !== 'list') throw new Error(`unknown command: ${command}`);
   const [menu, format] = rest;
   const listing: Listing = JSON.parse(menu);
-  const { name, description, source, origin } = inEffect(info, undefined);
+  const { name, description, source, origin, over } = inEffect(info, undefined);
+  const profile = { name, description, source, origin, ...(over && { over }) };
   if (format === '--json') {
-    process.stdout.write(JSON.stringify({ ...listing, profile: { name, description, source, origin } }) + '\n');
+    process.stdout.write(JSON.stringify({ ...listing, profile }) + '\n');
     return 0;
   }
-  const lines = [`${name} · ${description} · ${sourceText({ source, origin })}`,
+  const lines = [`${nameText(profile)} · ${description} · ${sourceText(profile)}`,
     ...listing.profiles[0].harnesses.map((h) => `${h.name} ${h.title} ${h.version}`)];
   process.stdout.write(printable(lines.join('\n')) + '\n');
   return 0;

@@ -20,7 +20,7 @@ To keep the agents installed and updated, see [Install and keep updated](#instal
 
 ### The chooser
 
-The chooser is master–detail: harnesses are the list on the left, and the highlighted harness fills the panel on the right.[^chooser-rows] One [profile](#profiles) is in effect for the launch: the header names it, and the row under it says what it is and where it came from. Nothing in the box is ever cut.
+The chooser is master–detail: harnesses are the list on the left, and the highlighted harness fills the panel on the right.[^chooser-rows] One [profile](#profiles) is in effect for the launch: the header names it, with the one it is composed over, and the row under it says what it is and where it came from. Nothing in the box is ever cut.
 
 Here the terminal is in a repository whose `agent-distro.nix` is the Juspay profile, and `pi` is remembered from last time.
 
@@ -46,14 +46,14 @@ Here the terminal is in a repository whose `agent-distro.nix` is the Juspay prof
 | Variable[^var-names] | Values | Effect |
 | --- | --- | --- |
 | `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list[^non-interactive] |
-| `AI_PROFILE` | `vanilla`, or a profile [reference](#profiles) | The profile when the repository has none[^profile-fallback] |
+| `AI_PROFILE` | `vanilla`, or a profile [reference](#profiles) | Your profile, under the repository's own[^profile-fallback] |
 | `AI_GATEWAY` | `0` | Keeps the plugins but skips gateway initialization |
 | `AGENT_DISTRO_PLUGINS` | `:`-separated plugin directories | Loads more plugins for that launch; see [Plugins at launch](#plugins-at-launch) |
 | `AGENT_DISTRO_LOG` | `silent`, `error`, `warn`, `info` (default), `debug`, `trace` | How much agent-distro says on stderr; see [Diagnostics](#diagnostics) |
 
 [^var-names]: Names unchanged for script compatibility.
 [^non-interactive]: Also usable in scripts and non-interactive shells.
-[^profile-fallback]: Read by every command, `agent-distro`, `claude`, `omp` and the rest alike: it is the fallback an environment such as Kolu sets. See [Profiles](#profiles) for the order.
+[^profile-fallback]: Read by every command, `agent-distro`, `claude`, `omp` and the rest alike: it is the profile an environment such as Kolu sets. See [Profiles](#profiles) for how it composes.
 
 ### By name
 
@@ -74,7 +74,7 @@ agent-distro --list                      # the profile in effect, then harness t
 agent-distro --list --json               # the same, as JSON (below)
 ```
 
-- **Precedence.** The positional profile overrides the repository's `agent-distro.nix`, which overrides `AI_PROFILE`. `AI_HARNESS` takes precedence over a positional harness.
+- **Precedence.** The positional profile is used exactly, alone. Otherwise the repository's `agent-distro.nix` is composed over `AI_PROFILE` ([Profiles](#profiles)). `AI_HARNESS` takes precedence over a positional harness.
 - **Passthrough.** Recognized leading selectors are consumed;[^dash] other arguments and everything after `--` are passed to the harness unchanged.
 
 [^dash]: An argument starting with `-` is never a selector, so `agent-distro --model=a:b` passes it to the harness.
@@ -130,7 +130,7 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
 
 ### Listing as JSON
 
-`agent-distro --list --json` prints what the chooser draws, on one line, for programs that offer the same choice (such as [kolu](https://github.com/juspay/kolu)).[^listing-type] Here it is pretty-printed, cut to one harness, from a terminal in a repository with its own profile:
+`agent-distro --list --json` prints what the chooser draws, on one line, for programs that offer the same choice (such as [kolu](https://github.com/juspay/kolu)).[^listing-type] Here it is pretty-printed, cut to one harness, from a terminal in a repository with its own profile, with `AI_PROFILE=github:juspay/skills`:
 
 [^listing-type]: Its shape is stable, typed as `Listing` in [src/listing.ts](https://github.com/juspay/agent-distro/blob/main/src/listing.ts).
 
@@ -154,7 +154,13 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
     "name": "ekala",
     "description": "Ekala's Nix development skills",
     "source": "repository",
-    "origin": "/home/me/src/ekala-ai-skills/agent-distro.nix"
+    "origin": "/home/me/src/ekala-ai-skills/agent-distro.nix",
+    "over": {
+      "name": "juspay",
+      "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
+      "source": "variable",
+      "origin": "github:juspay/skills"
+    }
   }
 }
 ```
@@ -168,6 +174,7 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
 | `profile` | The profile in effect for a launch from the same directory and environment |
 | `profile.source` | `positional`, `repository`, `variable` (`AI_PROFILE`) or `builtin` |
 | `profile.origin` | The reference as given, the path to the `agent-distro.nix` found, or the built-in name |
+| `profile.over` | Present when it is composed over `AI_PROFILE`: that profile, in the same shape. The built-in profile beneath is never named |
 
 Keys within `profiles` are sorted; `profile`'s are in the order above. `--list` takes no other arguments.[^three-agree] A profile that cannot be read fails `--list` as it would fail a launch.
 
@@ -224,7 +231,7 @@ The Home Manager module puts every harness on your `PATH` and keeps them on the 
 
 Home Manager creates the state directory and schedules the updates for you.[^hm-prune] `profile` is a built-in name, which installs that bundle, or a [reference](#profiles), which installs the `vanilla` bundle and makes the reference every command's `AI_PROFILE` fallback.[^hm-reference]
 
-[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` wins over both. A reference is an absolute path or a flake reference; anything else that is not a built-in name is an evaluation error.
+[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` is composed over either. A reference is an absolute path or a flake reference; anything else that is not a built-in name is an evaluation error.
 
 [^hm-prune]: At activation its prune stage deletes sibling state directories left from an earlier flake/profile choice.
 
@@ -315,6 +322,7 @@ By default a launch prints a line only when something chose a profile for you, a
 
 ```text
 agent-distro profile: using repo (from /home/me/repo/agent-distro.nix) · https://agent-distro.nixos.asia
+agent-distro profile: using repo + juspay (from /home/me/repo/agent-distro.nix over AI_PROFILE=github:juspay/skills) · https://agent-distro.nixos.asia
 ```
 
 and when something will take a while, such as evaluating a profile for the first time or fetching its packages. The built-in profile, or one you named, prints nothing.
@@ -371,7 +379,7 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 ```
 
 - **Outputs.** `mkFlake` returns `packages`,[^mkflake-packages] `apps`, `homeManagerModules.default`, and the same `lib` attrset `flake.nix` exposes; add other outputs with `//`.
-- **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. A repository's `agent-distro.nix`, `AI_PROFILE` or a positional reference still replace it for a launch, as they replace `vanilla`; `vanilla` stays accepted by name.
+- **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. `AI_PROFILE` and a repository's `agent-distro.nix` are composed over it, keeping its plugins and, unless they set one, its gateway; only a positional reference, or `vanilla`, positional or in `AI_PROFILE`, replaces it for a launch.
 - **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache, and `caIndex`, the base URL of the index of the content-addressed bundles you publish ([The binary cache](#binary-cache)), defaulting to agent-distro's. Push your own builds to a cache and pass it, and name your own index if you publish one, or your users' updates are skipped.[^cache-only]
 
 [^mkflake-packages]: Every harness, the default picker, and the `<profile.name>` bundle, which carries its own picker as `bin/agent-distro`.
@@ -461,18 +469,28 @@ A profile is an `agent-distro.nix` in a git repository:
 Run it: `nix run github:juspay/agent-distro -- github:ekala-project/ekala-ai-skills`
 or `AI_PROFILE=github:ekala-project/ekala-ai-skills agent-distro omp`.
 
-Or let the repository you are in choose: with no profile named on the command line, the launcher uses the
-`agent-distro.nix` found from the working directory up to the git root, then `AI_PROFILE`,
-then `vanilla`. Discovery needs a git repository: an `agent-distro.nix` in a plain directory is
-read only when named, as `./dir` or in `AI_PROFILE`. A terminal opened in a repository, in Kolu
-or anywhere, starts its agents with that repository's profile.
+Or let the repository you are in add its own: with no profile named on the command line, the
+launcher composes the `agent-distro.nix` found from the working directory up to the git root over
+`AI_PROFILE`, and that over the built-in profile. Discovery needs a git repository: an
+`agent-distro.nix` in a plain directory is read only when named, as `./dir` or in `AI_PROFILE`.
+A terminal opened in a repository, in Kolu or anywhere, starts its agents with that repository's
+profile on top of yours.
+
+| Field | Composed, from the bottom up |
+| --- | --- |
+| `plugins`, `packages` | All of them, yours first; a plugin replaces one of the same name beneath it |
+| `gateway` | The topmost that sets one |
+| `name`, `description` | The topmost; the chooser and `--list` name both, as `repo + juspay` |
+
+A profile named on the command line is that profile alone, as is a built-in name, there or in
+`AI_PROFILE`; a repository's profile still composes over the latter.
 
 - **Nothing to register.** agent-distro ships `vanilla` only. Any repository with an
   `agent-distro.nix` is a profile.
 - **Always the latest agent-distro.** The profile is read when the harness starts, by whatever
   agent-distro you run. The repository pins nothing.
-- **Read once.** The profile and its `packages` are evaluated on first use and cached per content
-  and agent-distro build, like plugin translations.[^profile-cache]
+- **Read once.** Each profile and its `packages` are evaluated on first use and cached per file,
+  content and agent-distro build, like plugin translations.[^profile-cache]
 - **Never compiles.** `packages` come from the binary cache or the launch stops and names the
   missing one.[^never-compiles]
 - **Works offline.** A flake reference that cannot be fetched uses the store path it last
@@ -482,7 +500,7 @@ or anywhere, starts its agents with that repository's profile.
   and MCP servers run. Only open terminals in repositories you trust, as you already do with
   their `.envrc`.
 
-[^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. Its last store path is kept under `agent-distro/references/` for launches without network. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache; launchers name that nixpkgs by a locked reference and fetch its source only for a profile with `packages`.
+[^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, one entry per file, so a repository's profile over `AI_PROFILE` is two, each evaluated again only when its own file changes; removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. Its last store path is kept under `agent-distro/references/` for launches without network. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache; launchers name that nixpkgs by a locked reference and fetch its source only for a profile with `packages`.
 [^never-compiles]: Under the same policy as the updater: what a build would compile rather than fetch stops the launch.
 
 | Profile | What it is |
@@ -594,7 +612,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,prof
 | --- | --- |
 | `reader` | the plugin reader |
 | `launch-plugins` | `AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence, a profile replacing the built-in plugins, and the launches it fails |
-| `profile-resolve` | the profile in effect, with a fake nix: discovery, precedence, references and their offline fallback, the evaluation's isolation, its cache, nixpkgs fetched only for packages, and the no-compile policy |
+| `profile-resolve` | the profile in effect, with a fake nix: discovery, the stack and how it composes, references and their offline fallback, the evaluation's isolation, its cache, nixpkgs fetched only for packages, and the no-compile policy |
 | `vanilla-closure` | the `vanilla` bundle names nixpkgs by reference and does not hold its source |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |

@@ -3,8 +3,8 @@
 #
 # Stub harnesses that print what they were started with show the plugins and
 # packages each launch got: path and git+file: references, discovery from a
-# nested directory, the precedence of the positional selector, the
-# repository's agent-distro.nix, AI_PROFILE and the built-in profile, an
+# nested directory, the positional selector taken exactly, the repository's
+# agent-distro.nix composed over AI_PROFILE over the built-in profile, an
 # evaluation that sees neither the user's environment nor the network, and
 # the refusal of a package the binary cache lacks. Then a copy of the Juspay
 # profile's agent-distro.nix, its github: plugin reference replaced by a local
@@ -120,8 +120,10 @@ in
     # A repository whose profile names a plugin beside it, for discovery.
     user("mkdir -p ~/repo/.git ~/repo/nested/deep && cp -r ${plugins.alpha} ~/repo/plugin && chmod -R u+w ~/repo/plugin")
     write("~/repo/agent-distro.nix", '{ name = "repo"; description = "The repository"; plugins = [ ./plugin ]; gateway = null; }')
-    # A profile directory, for AI_PROFILE and the positional selector.
-    write("~/elsewhere/agent-distro.nix", '{ name = "elsewhere"; plugins = [ ${plugins.beta} ]; }')
+    # A profile directory, for AI_PROFILE and the positional selector, with a
+    # gateway for the repository's to fall back to.
+    write("~/elsewhere/agent-distro.nix", '{ name = "elsewhere"; plugins = [ ${plugins.beta} ]; '
+          + 'gateway = { url = "https://elsewhere.test"; keyEnv = "ELSEWHERE_KEY"; models = { large = "l"; small = "s"; }; }; }')
     # A git repository fetched by git+file:, itself a plugin, naming another
     # plugin by git+file: reference.
     user("mkdir -p ~/plugins && cp -r ${plugins.delta} ~/plugins/delta && chmod -R u+w ~/plugins")
@@ -164,17 +166,34 @@ in
         positional = stderr_of("probe-agent-distro /home/testuser/elsewhere claude")
         assert "agent-distro profile: using" not in positional, positional
 
-    with subtest("precedence: positional, repository, AI_PROFILE, built-in"):
+    with subtest("the repository's profile composes over AI_PROFILE; a positional one is exact"):
         other = "AI_PROFILE=/home/testuser/elsewhere"
+        # Named positionally: that profile alone.
         assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/fetched claude")[0] == ["gamma", "delta"]
         assert launched(f"cd ~/repo && {other} probe-agent-distro vanilla claude")[0] == []
-        assert launched(f"cd ~/repo && {other} probe-claude")[0] == ["alpha"]
-        assert in_effect("~/repo", other)["source"] == "repository"
+        # The user's plugins, then the repository's.
+        assert launched(f"cd ~/repo && {other} probe-claude")[0] == ["beta", "alpha"]
+        assert in_effect("~/repo", other) == {
+            "name": "repo", "description": "The repository", "source": "repository",
+            "origin": "/home/testuser/repo/agent-distro.nix",
+            "over": {"name": "elsewhere", "description": "", "source": "variable", "origin": "/home/testuser/elsewhere"}}
+        listed = user(f"cd ~/repo && {other} probe-agent-distro --list")
+        assert ("repo + elsewhere · The repository · from /home/testuser/repo/agent-distro.nix"
+                " over AI_PROFILE=/home/testuser/elsewhere") in listed, listed
+        noticed = stderr_of(f"cd ~/repo && {other} probe-claude")
+        assert ("agent-distro profile: using repo + elsewhere (from /home/testuser/repo/agent-distro.nix"
+                " over AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n") in noticed, noticed
+        # The repository sets `gateway = null`: AI_PROFILE's is in effect,
+        # asking for its key.
+        output = refused(f"cd ~/repo && {other} probe-omp")
+        assert "ELSEWHERE_KEY is not set" in output and "https://elsewhere.test/dashboard" in output, output
         assert launched(f"{other} probe-claude")[0] == ["beta"]
         assert in_effect("~", other)["source"] == "variable"
+        assert "over" not in in_effect("~", other)
         assert launched("probe-claude")[0] == []
         # AGENT_DISTRO_PLUGINS composes on top of whichever profile is in effect.
         assert launched("cd ~/repo && AGENT_DISTRO_PLUGINS=${plugins.beta} probe-claude")[0] == ["alpha", "beta"]
+        assert launched(f"cd ~/repo && {other} AGENT_DISTRO_PLUGINS=${plugins.gamma} probe-claude")[0] == ["beta", "alpha", "gamma"]
         # The positional selector is the picker's own: it never reaches the harness.
         assert "/home/testuser/fetched" not in user("probe-agent-distro /home/testuser/fetched claude")
 
