@@ -2,15 +2,16 @@
  * The profile in effect for one launch.
  *
  * A profile is an `agent-distro.nix` in any git repository. The one in effect
- * is, first to last: the picker's leading positional selector, the
+ * is the picker's leading positional selector, exactly; else a stack, bottom
+ * to top, of the launcher's built-in default, AI_PROFILE when set, and the
  * `agent-distro.nix` found from the working directory up to the git root,
- * AI_PROFILE, and the launcher's built-in default. A selector or AI_PROFILE is
+ * each composed over the one beneath (`merge`). A selector or AI_PROFILE is
  * a built-in name (`vanilla`, or the launcher's own) or a reference: a path
  * (absolute, or starting with ./, ../ or ~/) to the file or its directory, or
  * else, containing `/` or `:`, a flake reference such as
  * `github:owner/repo?dir=sub`, fetched with `nix flake prefetch`.
  *
- * The file is evaluated once per content and agent-distro build by
+ * Each file is evaluated once per content and agent-distro build by
  * evaluate.nix, and cached under
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/<key>/profile.json`;
  * what no launch has used for STALE_DAYS is removed when something new is
@@ -76,7 +77,7 @@ export type Selection = Pick<InEffect, 'source' | 'origin'>;
 
 /** The profile in effect, resolved for this launch. */
 export type Resolved = InEffect & {
-  /** Built into the launcher, so its plugins and packages are the launcher's own. */
+  /** The launcher's own built-in profile is part of it, so its plugins and packages are the launcher's own. */
   builtin: boolean;
   /** Plugin directories. */
   plugins: string[];
@@ -113,9 +114,14 @@ function gatewayProblem(value: unknown): string | null {
   return null;
 }
 
-export function isResolved(value: unknown): value is Resolved {
+function isInEffect(value: unknown): value is InEffect {
   return isObject(value) && isName(value.name) && isString(value.description)
-    && SOURCES.includes(value.source as Source) && isString(value.origin) && typeof value.builtin === 'boolean'
+    && SOURCES.includes(value.source as Source) && isString(value.origin)
+    && (value.over === undefined || isInEffect(value.over));
+}
+
+export function isResolved(value: unknown): value is Resolved {
+  return isInEffect(value) && typeof value.builtin === 'boolean'
     && isStrings(value.plugins) && gatewayProblem(value.gateway) === null && isStrings(value.paths);
 }
 
@@ -148,13 +154,18 @@ export function workingDirectory(): string | undefined {
   }
 }
 
-/** Which profile this launch is to use, before anything is read. */
-export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv, info: Info): Selection {
-  if (positional) return { source: 'positional', origin: positional };
+/**
+ * The profiles this launch is to use, bottom to top, before anything is read:
+ * the positional selector alone, else the built-in default, AI_PROFILE and the
+ * repository's, those that are there.
+ */
+export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv, info: Info): Selection[] {
+  if (positional) return [{ source: 'positional', origin: positional }];
+  const stack: Selection[] = [{ source: 'builtin', origin: info.default }];
+  if (env[VARIABLE]) stack.push({ source: 'variable', origin: env[VARIABLE] });
   const found = cwd === undefined ? null : discover(cwd);
-  if (found) return { source: 'repository', origin: found };
-  if (env[VARIABLE]) return { source: 'variable', origin: env[VARIABLE] };
-  return { source: 'builtin', origin: info.default };
+  if (found) stack.push({ source: 'repository', origin: found });
+  return stack;
 }
 
 type Kind = { builtin: Builtin } | { path: string } | { flake: string };
@@ -171,7 +182,7 @@ function classify(reference: string, info: Info, env: NodeJS.ProcessEnv): Kind |
   return null;
 }
 
-/** How errors name the selection: what the user typed, where. */
+/** How errors name one profile of the selection: what the user typed, where. */
 export function label({ source, origin }: Selection): string {
   if (source === 'variable') return `${VARIABLE}=${origin}`;
   if (source === 'positional') return `profile ${origin}`;
@@ -376,7 +387,27 @@ function fileAt(path: string, what: string): string {
   return file;
 }
 
-export function resolveProfile(info: Info, selection: Selection, env: NodeJS.ProcessEnv): Resolved {
+/**
+ * `upper` composed over `lower`: plugins and packages are both, lower's first;
+ * the gateway is upper's, else lower's; the rest is upper's, `over` naming
+ * lower unless it is the launcher's built-in default.
+ */
+function merge(lower: Resolved, upper: Resolved): Resolved {
+  const { name, description, source, origin, over } = lower;
+  return {
+    name: upper.name, description: upper.description, source: upper.source, origin: upper.origin,
+    ...(source === 'builtin' ? {} : { over: { name, description, source, origin, ...(over && { over }) } }),
+    builtin: lower.builtin, plugins: [...lower.plugins, ...upper.plugins],
+    gateway: upper.gateway ?? lower.gateway, paths: [...lower.paths, ...upper.paths],
+  };
+}
+
+/** The profile in effect: each of `stack` (from `select`) resolved, and composed bottom to top. */
+export function resolveProfile(info: Info, stack: Selection[], env: NodeJS.ProcessEnv): Resolved {
+  return stack.map((selection) => resolveOne(info, selection, env)).reduce(merge);
+}
+
+function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): Resolved {
   const what = printable(label(selection));
   const kind = selection.source === 'repository' ? { path: selection.origin } : classify(selection.origin, info, env);
   if (kind === null) {
@@ -384,7 +415,10 @@ export function resolveProfile(info: Info, selection: Selection, env: NodeJS.Pro
       + 'reference: a path starting with /, ./ or ../, or a flake reference such as github:owner/repo');
   }
   const { source, origin } = selection;
-  if ('builtin' in kind) return { ...kind.builtin, source, origin, builtin: true, plugins: [], paths: [] };
+  if ('builtin' in kind) {
+    const builtin = kind.builtin.name === info.default;
+    return { ...kind.builtin, source, origin, builtin, plugins: [], paths: [] };
+  }
   const cache = cacheRoot(env, what);
   const file = fileAt('path' in kind ? kind.path : fetched(kind.flake, what, cache), what);
   let profile = evaluated(file, info, cache, what, false);

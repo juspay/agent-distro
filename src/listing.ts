@@ -8,7 +8,9 @@
  *                                      "title": "Claude Code", "version": "2.1.291" } ],
  *                     "name": "vanilla" } ],
  *     "profile": { "description": "…", "name": "ekala",
- *                  "origin": "/home/me/ekala/agent-distro.nix", "source": "repository" } }
+ *                  "origin": "/home/me/ekala/agent-distro.nix", "source": "repository",
+ *                  "over": { "description": "…", "name": "juspay",
+ *                            "origin": "github:juspay/skills", "source": "variable" } } }
  *
  * `profiles` is the launcher's built-in profile; `harnesses` is in menu order.
  * `version` is the display version, without the package's `+` revision
@@ -16,7 +18,10 @@
  * from: `source` is `positional` (`agent-distro <reference>`), `repository`
  * (the `agent-distro.nix` found from the working directory up to the git
  * root), `variable` (AI_PROFILE) or `builtin`, and `origin` is that reference,
- * the path to that `agent-distro.nix`, or the built-in name. The picker's own
+ * the path to that `agent-distro.nix`, or the built-in name. `over`, when
+ * present, is the profile it is composed over, in the same shape: a
+ * repository's over AI_PROFILE. The launcher's built-in profile, beneath
+ * every other but a positional one, is never named there. The picker's own
  * menu has no `profile`; `--list --json` always does.
  *
  * A profile's bundle is self-describing, so a consumer reads files rather than
@@ -55,6 +60,8 @@ export type InEffect = {
   source: Source;
   /** The reference, the path to the `agent-distro.nix`, or the built-in name. */
   origin: string;
+  /** The profile this one is composed over, unless that is the launcher's built-in one. */
+  over?: InEffect;
 };
 
 export type Listing = {
@@ -66,11 +73,18 @@ export type Listing = {
 /** Names are selectors: one shell word, no `/`. */
 export const isName = (value: unknown): value is string => typeof value === 'string' && /^[^\s/]+$/.test(value);
 
-/** Where the profile in effect came from, in a few words. */
-export function sourceText({ source, origin }: Pick<InEffect, 'source' | 'origin'>): string {
+/** The profile in effect's name, then those it is composed over: `repo + juspay`. */
+export function nameText({ name, over }: Pick<InEffect, 'name' | 'over'>): string {
+  return over ? `${name} + ${nameText(over)}` : name;
+}
+
+/** Where the profile in effect came from, in a few words, then what it is composed over. */
+export function sourceText({ source, origin, over }: Pick<InEffect, 'source' | 'origin' | 'over'>): string {
+  const beneath = (layer?: InEffect): string =>
+    (layer ? ` over ${layer.source === 'variable' ? 'AI_PROFILE=' : ''}${layer.origin}${beneath(layer.over)}` : '');
   if (source === 'positional') return `chosen as ${origin}`;
-  if (source === 'repository') return `from ${origin}`;
-  if (source === 'variable') return `from AI_PROFILE=${origin}`;
+  if (source === 'repository') return `from ${origin}${beneath(over)}`;
+  if (source === 'variable') return `from AI_PROFILE=${origin}${beneath(over)}`;
   return 'built in';
 }
 
@@ -113,9 +127,11 @@ function unique(names: string[], path: string) {
 /** Check a parsed `--list --json` value against `Listing`; throws naming the first bad field. */
 export function parseListing(value: unknown): Listing {
   const listing = record(value, 'listing', { profiles: 'list', profile: 'object' }, ['profile']) as Listing;
-  if (listing.profile !== undefined) {
-    record(listing.profile, 'listing.profile', { name: 'name', description: 'string', source: 'source', origin: 'string' });
-  }
+  const inEffect = (value: unknown, path: string) => {
+    const profile = record(value, path, { name: 'name', description: 'string', source: 'source', origin: 'string', over: 'object' }, ['over']);
+    if (profile.over !== undefined) inEffect(profile.over, `${path}.over`);
+  };
+  if (listing.profile !== undefined) inEffect(listing.profile, 'listing.profile');
   listing.profiles.forEach((profile, i) => {
     record(profile, `profiles[${i}]`, { name: 'name', description: 'string', harnesses: 'list' });
     profile.harnesses.forEach((harness, j) => {

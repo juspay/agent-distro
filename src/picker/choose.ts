@@ -22,7 +22,7 @@ import { emitKeypressEvents, createInterface, type Key } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { WriteStream } from 'node:tty';
 import { parseArgs } from 'node:util';
-import { parseListing, sourceText, type InEffect, type Listing, type Profile } from '../listing.ts';
+import { nameText, parseListing, sourceText, type InEffect, type Listing, type Profile } from '../listing.ts';
 import { log } from '../log.ts';
 import { isResolved } from '../profile/resolve.ts';
 import { probe, spec, type Io, type Scheme, type Status } from './auth.ts';
@@ -139,7 +139,8 @@ export class Menu {
 
   constructor(listing: Listing, remembered = '', profile?: InEffect) {
     const builtIn = listing.profiles[0];
-    this.active = profile ? { ...builtIn, name: profile.name, description: profile.description } : builtIn;
+    // Named with the profiles it is composed over: `repo + juspay`.
+    this.active = profile ? { ...builtIn, name: nameText(profile), description: profile.description } : builtIn;
     this.source = sourceText(profile ?? { source: 'builtin', origin: builtIn.name });
     // Releases that chose a profile too remembered `profile/harness`.
     this.remembered = remembered.split('/').at(-1) ?? '';

@@ -115,8 +115,8 @@
             grep -q '"nixpkgs":"github:NixOS/nixpkgs/' ${agent-distro.packages.${system}.default.passthru.infoFile}
             touch "$out"
           '';
-          # The profile in effect without a VM: discovery, precedence,
-          # references, the evaluation cache and the no-compile policy, with a
+          # The profile in effect without a VM: discovery, the stack and how
+          # it composes, references, the evaluation cache and the no-compile policy, with a
           # fake nix.
           profile-resolve = pkgs.runCommand "profile-resolve-check" { } ''
             export HOME="$TMPDIR"

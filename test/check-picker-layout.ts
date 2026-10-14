@@ -61,13 +61,20 @@ const listing = (harnesses = HARNESSES): Listing => ({
   profiles: [{ name: 'vanilla', description: 'Upstream harnesses with your own provider', harnesses }],
 });
 // The profile in effect: the built-in one, or one found in a repository, whose
-// path can be long enough to wrap the profile row.
+// path can be long enough to wrap the profile row, or one composed over
+// AI_PROFILE, which the header names too.
 const IN_EFFECT = [
   undefined,
   { name: 'juspay', description: 'Juspay skills + Kolu, via Juspay\'s LiteLLM gateway', source: 'repository',
     origin: '/home/someone/src/github.com/juspay/a-rather-long-repository-name/agent-distro.nix' },
   { name: 'ekala', description: 'Ekala\'s Nix development skills', source: 'positional', origin: 'github:ekala-project/ekala-ai-skills' },
+  { name: 'repo', description: 'The repository\'s own tools', source: 'repository', origin: '/home/someone/src/repo/agent-distro.nix',
+    over: { name: 'juspay', description: 'Juspay skills + Kolu', source: 'variable', origin: 'github:juspay/skills' } },
 ] as const;
+// What the header names, and what the profile row says it came from.
+const HEADER = ['vanilla', 'juspay', 'ekala', 'repo + juspay'];
+const FROM = ['built in', `from ${IN_EFFECT[1].origin}`, `chosen as ${IN_EFFECT[2].origin}`,
+  `from ${IN_EFFECT[3].origin} over AI_PROFILE=github:juspay/skills`];
 
 /** The cells a frame draws, one string per row, exactly as written. */
 function cells(frame: string, columns: number, rows: number): string[] {
@@ -146,7 +153,7 @@ const panelText = (menu: InstanceType<typeof Menu>, columns: number, rows: numbe
 // every row keeps its version on the list's right edge; nothing in the body is
 // cut; and the highlighted harness's tagline, status items and the profile
 // line are all there.
-for (const profile of IN_EFFECT) {
+for (const [i, profile] of IN_EFFECT.entries()) {
   for (const [columns, rows] of [[80, 24], [60, 24], [120, 30]] as const) {
     const menu = new Menu(listing(), 'claude', profile);
     const l = layout(menu, columns, rows)!;
@@ -167,10 +174,10 @@ for (const profile of IN_EFFECT) {
     // The header names the profile in effect; the profile row under it
     // describes it and says where it came from.
     const header = screen(frame(menu, rows, columns), columns, rows)[l.y - 1];
-    assert.ok(header.includes(`agent-distro · ${profile?.name ?? 'vanilla'}`), header);
+    assert.ok(header.includes(`agent-distro · ${HEADER[i]}`), header);
     const row = profileRow(menu, columns, rows);
     assert.ok(row.includes(`${menu.active.name} · ${menu.active.description} · `), row);
-    const from = profile === undefined ? 'built in' : profile.source === 'repository' ? `from ${profile.origin}` : `chosen as ${profile.origin}`;
+    const from = FROM[i];
     // A long path may be broken across lines, which the row joins with a space.
     assert.ok(row.replace(/ /g, '').includes(from.replace(/ /g, '')), row);
   }

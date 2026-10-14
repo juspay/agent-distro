@@ -92,9 +92,14 @@ for (const [bad, message] of [
   [{ profiles: [profile()], profile: { name: 'a', description: '', source: 'builtin' } }, /listing\.profile\.origin is missing/],
   [{ profiles: [profile()], profile: { name: 'a', description: '', source: 'builtin', origin: 'a', reference: 'a' } }, /listing\.profile has unknown field reference/],
   [{ profiles: [profile()], profile: [] }, /listing\.profile is not an object/],
+  [{ profiles: [profile()], profile: { name: 'a', description: '', source: 'repository', origin: 'a', over: { name: 'b', source: 'variable', origin: 'b' } } },
+    /listing\.profile\.over\.description is missing/],
 ] as const) {
   assert.throws(() => parseListing(structuredClone(bad)), message, JSON.stringify(bad));
 }
+// A repository's profile composed over AI_PROFILE names it.
+const over = { name: 'b', description: '', source: 'variable', origin: 'b' };
+assert.deepEqual(parseListing({ profiles: [profile()], profile: { name: 'a', description: '', source: 'repository', origin: 'a', over } }).profile?.over, over);
 assert.deepEqual(parseProfileFile('{"name": "a", "description": ""}'), { name: 'a', description: '' });
 for (const [bad, message] of [
   ['[]', /profile is not an object/],
