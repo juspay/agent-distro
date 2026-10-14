@@ -38,11 +38,11 @@
     "juspay-skills": {
       "flake": false,
       "locked": {
-        "lastModified": 1791824580,
-        "narHash": "sha256-1r5iv3XczXkbTLchgODCb3FP05tKf+gQCfrgT4aCzyQ=",
+        "lastModified": 1791922711,
+        "narHash": "sha256-eiDIcJSNTcD81kDZDf+bpQDBt8f5OhL4VASlgn4Mhcc=",
         "owner": "juspay",
         "repo": "skills",
-        "rev": "78a15d8fbba636720e542b0a94abb157a4256e91",
+        "rev": "262b0c8729df2988ddb2fd74988ff595111ccfb1",
         "type": "github"
       },
       "original": {
@@ -54,11 +54,11 @@
     "kolu": {
       "flake": false,
       "locked": {
-        "lastModified": 1791914626,
-        "narHash": "sha256-paWgN5g/RMqRvRpWb8Maxh7jbUH/IPfkre+PFWkAnyg=",
+        "lastModified": 1791931413,
+        "narHash": "sha256-fsgWqB42KXTCtSKCG5i4KTnhVD0ZIdxvpLZUm0qOqpc=",
         "owner": "juspay",
         "repo": "kolu",
-        "rev": "e1d385b7450a862ccb561c77c62b0bc31cad201b",
+        "rev": "c8914953000739b97d7ece2d53cd7ddcc5361935",
         "type": "github"
       },
       "original": {
