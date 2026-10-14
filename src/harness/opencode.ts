@@ -3,8 +3,11 @@
  *
  * Usage: node opencode.ts OUT ARGS_JSON
  *
- * The profile's gateway is added at launch, by src/gateway/config.ts with
- * `withGateway`, since the profile in effect is only known then.
+ * The session config names the plugins that discover the profile's models
+ * (the vendored opencode-plugin-litellm) for every launch; the profile's
+ * `settings.opencode` is merged over it at launch, by
+ * src/harness/opencode-settings.ts, since the profile in effect is only known
+ * then.
  *
  * At launch, src/plugin/launch.ts uses `adapter` to add AGENT_DISTRO_PLUGINS to
  * the session config.
@@ -15,9 +18,8 @@ import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
-import type { Gateway } from '../gateway/models.ts';
 
-type Args = { bash: string; env: string; descriptions: string[] };
+type Args = { bash: string; env: string; plugin: string; descriptions: string[] };
 type Server = { type: 'remote'; url: string; headers: Record<string, string> } | { type: 'local'; command: string[] };
 type Fragment = { skills: string | null; servers: Record<string, Server> };
 type Inputs = { bash: string; env: string };
@@ -64,6 +66,10 @@ function main(out: string, argsPath: string) {
   const servers: Record<string, Server> = {};
   const config: Record<string, unknown> = {
     $schema: 'https://opencode.ai/config.json',
+    // The vendored opencode-plugin-litellm, in the base config of every
+    // launch: it registers the `litellm` provider when a configuration names
+    // it or LITELLM_BASE_URL is set, and health-probes otherwise.
+    plugins: [args.plugin],
     skills: skillsPaths,
     mcp: { servers },
   };
@@ -84,41 +90,14 @@ function main(out: string, argsPath: string) {
   writeFileSync(join(out, 'opencode.json'), JSON.stringify(config, null, 2));
 }
 
-/**
- * `config` with the profile's gateway as its provider, its default models and
- * the plugin that discovers the models it serves; at launch, by
- * gateway/config.ts.
- */
-export function withGateway(config: Record<string, unknown>, gateway: Gateway, plugin: string): Record<string, unknown> {
-  const url = gateway.url.replace(/\/+$/, '') + '/v1';
-  // No key: the plugin reads LITELLM_API_KEY, which the launcher exports.
-  return {
-    ...config,
-    // OpenCode concatenates `plugins` across config files, so a user's own
-    // survive this document's entry.
-    plugins: [plugin],
-    providers: {
-      litellm: {
-        name: 'LiteLLM',
-        package: '@opencode/ai/providers/openai-compatible',
-        settings: { baseURL: url },
-      },
-    },
-    // The small model has no `small_model` in this schema; upstream's
-    // migration puts it on the hidden title agent.
-    agents: { title: { model: 'litellm/' + gateway.models.small } },
-    model: 'litellm/' + gateway.models.large,
-  };
-}
-
 type LaunchArgs = Inputs & { name: string; config: string; profile: ProfileEntry[] };
 /** The session config the launcher writes, and this adapter merges into. */
 type Session = { skills: string[]; mcp: { servers: Record<string, Server> } };
 
 /**
- * At launch: the launcher's session config, before any gateway, without the
- * replaced profile plugins and with the variable's, written
- * to the cache by content. Prints its path, for OPENCODE_CONFIG.
+ * At launch: the launcher's session config, without the replaced profile
+ * plugins and with the variable's, written to the cache by content. Prints its
+ * path, for OPENCODE_CONFIG.
  */
 export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),

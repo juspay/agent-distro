@@ -101,7 +101,7 @@ def run(steps, expected, overrides=None, status=0, args=None, size=(24, 80), sta
     pending = list(steps)
     pid, fd = pty.fork()
     if pid == 0:
-        env = dict(os.environ, AI_GATEWAY='0', TERM='xterm-256color', XDG_STATE_HOME=home)
+        env = dict(os.environ, AGENT_DISTRO_SETTINGS='0', TERM='xterm-256color', XDG_STATE_HOME=home)
         for name in ('AI_PROFILE', 'AI_HARNESS', 'NO_COLOR'):
             env.pop(name, None)
         env.update(overrides or {})
@@ -153,7 +153,7 @@ def flow(keys):
 def version(harness):
     return subprocess.check_output(
         ['agent-distro', '--version'],
-        env=dict(os.environ, AI_GATEWAY='0', AI_HARNESS=harness),
+        env=dict(os.environ, AGENT_DISTRO_SETTINGS='0', AI_HARNESS=harness),
         timeout=60,
     ).strip()
 
@@ -281,11 +281,11 @@ with tempfile.TemporaryDirectory() as work:
     os.makedirs(os.path.join(repo, '.git'))
     os.makedirs(os.path.join(repo, 'nested', 'deep'))
     with open(os.path.join(repo, 'agent-distro.nix'), 'w') as handle:
-        handle.write('{ name = "repo"; description = "Found in the repository"; plugins = [ ]; gateway = null; }\n')
+        handle.write('{ name = "repo"; description = "Found in the repository"; plugins = [ ]; }\n')
     other = os.path.join(work, 'other')
     os.makedirs(other)
     with open(os.path.join(other, 'agent-distro.nix'), 'w') as handle:
-        handle.write('{ name = "chosen"; description = "Chosen on the command line"; plugins = [ ]; gateway = null; }\n')
+        handle.write('{ name = "chosen"; description = "Chosen on the command line"; plugins = [ ]; }\n')
     nested = os.path.join(repo, 'nested', 'deep')
     found = run(flow(b'\r'), version(NAMES[0]), cwd=nested)
     assert b'agent-distro \xc2\xb7 repo' in found.drawn, found.drawn

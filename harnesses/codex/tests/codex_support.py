@@ -11,7 +11,7 @@ marketplace = sys.argv[2]
 home = Path.home()
 codex_home = home / 'relocated-codex'
 codex_home.mkdir()
-env = dict(os.environ, CODEX_HOME=str(codex_home), AI_GATEWAY='0')
+env = dict(os.environ, CODEX_HOME=str(codex_home), AGENT_DISTRO_SETTINGS='0')
 config = codex_home / 'config.toml'
 config.write_text('# personal settings\nmodel = "my-model"\n[mcp_servers.personal]\ncommand = "true"\n')
 auth = codex_home / 'auth.json'

@@ -30,7 +30,14 @@ in
   inherit (profile) name;
   description = profile.description or "";
   plugins = map plugin (profile.plugins or [ ]);
-  gateway = profile.gateway or null;
+  # Exported before the harness starts, and merged into its own configuration:
+  # both opaque here, validated by the resolver.
+  env = profile.env or { };
+  settings = profile.settings or { };
+  # Attributes the resolver no longer reads but warns about, so a profile
+  # written for an older agent-distro says so on every launch, not only the
+  # one that evaluated it.
+  deprecated = if profile ? gateway then [ "gateway" ] else [ ];
   packages =
     if !(profile ? packages) then [ ]
     else if nixpkgs == null then null

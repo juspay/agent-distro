@@ -1,5 +1,7 @@
 /**
- * Adapter policy checks without starting OpenCode or reaching a gateway.
+ * Adapter policy checks without starting OpenCode or reaching a LiteLLM
+ * server: the session config's own contents, the profile's `settings.opencode`
+ * merged over it at launch, and the session defaults.
  *
  * Usage: node check-adapter.ts SRC HARNESS_DIR
  */
@@ -14,10 +16,20 @@ const [src] = process.argv.slice(2);
 const temporary = () => mkdtempSync(join(tmpdir(), 'opencode-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 
+// The vendored opencode-plugin-litellm, as harnesses/opencode/default.nix
+// names it: the session config loads it on every launch.
+const PLUGIN = '/nix/store/example-opencode-plugin-litellm/src';
+
 function writeConfig(out: string, descriptions: string[]) {
   const args = out + '.args.json';
-  writeFileSync(args, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', descriptions }));
+  writeFileSync(args, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', plugin: PLUGIN, descriptions }));
   return spawnSync(process.execPath, [join(src, 'harness/opencode.ts'), out, args], { encoding: 'utf8' });
+}
+
+/** The session config with a profile's `settings.opencode` merged over it, as the launcher does it. */
+function mergeSettings(base: string, settings: unknown, cache: string) {
+  return spawnSync(process.execPath,
+    [join(src, 'harness/opencode-settings.ts'), base, JSON.stringify(settings), cache], { encoding: 'utf8' });
 }
 
 describe('OpenCode', () => {
@@ -51,13 +63,11 @@ describe('OpenCode', () => {
     }
   });
 
-  test('gateway and materialized skills', () => {
+  test('the vendored plugin, materialized skills and the profile\'s settings', () => {
     const root = temporary();
     const source = join(root, 'skills/guide');
     mkdirSync(source, { recursive: true });
     writeFileSync(join(source, 'SKILL.md'), '---\nname: guide\ndescription: Guide\n---\nRead me.\n');
-    const gateway = { url: 'https://gateway.example/', keyEnv: 'TEST_KEY', models: { large: 'large', small: 'small' } };
-    const plugin = '/nix/store/example-opencode-plugin-litellm/src';
     const description = join(root, 'plugin.json');
     writeFileSync(description, JSON.stringify({
       root, manifest: { name: 'example' }, skills: { guide: ['SKILL.md'] },
@@ -68,41 +78,51 @@ describe('OpenCode', () => {
     const out = join(root, 'out');
     assert.equal(writeConfig(out, [description]).status, 0);
     const plain = readJson(join(out, 'opencode.json'));
+    // The plugin that discovers a LiteLLM server's models is loaded by every
+    // launch, profile or not, and nothing names a provider yet.
+    assert.deepEqual(plain.plugins, [PLUGIN]);
     assert.ok(!('providers' in plain));
     assert.deepEqual(plain.skills, [join(out, 'skills/example')]);
     const skills = plain.skills[0];
     assert.equal(readFileSync(join(skills, 'guide/SKILL.md'), 'utf8'), readFileSync(join(source, 'SKILL.md'), 'utf8'));
     assert.equal(plain.mcp.servers.remote.type, 'remote');
-    // The gateway is added at launch, over the session config, into the cache.
+    assert.ok(existsSync(join(out, 'bin')));
+    // The profile's `settings.opencode` is merged over the session config at
+    // launch: a provider it names, and the models it points at.
     const cache = join(root, 'cache');
-    const base = join(out, 'opencode.json');
-    const added = spawnSync(process.execPath,
-      [join(src, 'gateway/config.ts'), 'opencode', JSON.stringify(gateway), cache, base, plugin],
-      { encoding: 'utf8' });
-    assert.equal(added.status, 0, added.stderr);
-    const written = added.stdout.trim();
-    assert.equal(dirname(written), join(cache, 'gateway'));
+    const settings = {
+      providers: { litellm: { package: '@opencode/ai/providers/openai-compatible', settings: { baseURL: 'https://gateway.example/v1' } } },
+      model: 'litellm/large',
+      agents: { title: { model: 'litellm/small' } },
+      plugins: ['opencode-plugin-litellm@1.4.3'],
+      skills: ['/from/the/profile'],
+      mcp: { servers: { profile: { type: 'remote', url: 'https://profile.example/mcp' } }, timeout: 30 },
+    };
+    const merged = mergeSettings(join(out, 'opencode.json'), settings, cache);
+    assert.equal(merged.status, 0, merged.stderr);
+    const written = merged.stdout.trim();
+    assert.equal(dirname(written), cache);
     const config = readJson(written);
-    assert.deepEqual(config.skills, plain.skills);
-    assert.deepEqual(config.mcp, plain.mcp);
-    // The plugin discovers the models, so the provider carries none — and no
-    // key: the launcher exports LITELLM_API_KEY for the plugin to read.
-    assert.deepEqual(config.plugins, [plugin]);
-    assert.deepEqual(config.providers.litellm, {
-      name: 'LiteLLM',
-      package: '@opencode/ai/providers/openai-compatible',
-      settings: { baseURL: 'https://gateway.example/v1' },
-    });
+    // Objects merge key-wise, so the launcher's own document is not replaced.
+    assert.equal(config.$schema, 'https://opencode.ai/config.json');
+    assert.deepEqual(config.providers, settings.providers);
     assert.equal(config.model, 'litellm/large');
     assert.deepEqual(config.agents, { title: { model: 'litellm/small' } });
-    assert.ok(!('small_model' in config));
-    assert.ok(!('provider' in config));
+    // A profile's plugins come after the vendored one: OpenCode concatenates
+    // `plugins` across config files, and this document's entry is the session's.
+    assert.deepEqual(config.plugins, [PLUGIN, 'opencode-plugin-litellm@1.4.3']);
+    // `skills` and `mcp.servers` are the launcher's own — they name what this
+    // launch's plugins resolved to — while the rest of `mcp` is the profile's.
+    assert.deepEqual(config.skills, plain.skills);
+    assert.deepEqual(config.mcp.servers, plain.mcp.servers);
+    assert.equal(config.mcp.timeout, 30);
+    // Nothing here is a key: the launcher exports LITELLM_API_KEY for the
+    // plugin to read, and the plugin reads it from the environment.
     assert.ok(!readFileSync(written, 'utf8').includes('TEST_KEY'));
-    // Without the plugin directory there is nothing to discover the models.
-    const without = spawnSync(process.execPath,
-      [join(src, 'gateway/config.ts'), 'opencode', JSON.stringify(gateway), cache, base], { encoding: 'utf8' });
-    assert.notEqual(without.status, 0);
-    assert.ok(existsSync(join(out, 'bin')));
+    // The merge is content-addressed, and reading it twice writes nothing new.
+    assert.equal(mergeSettings(join(out, 'opencode.json'), settings, cache).stdout.trim(), written);
+    // A profile with no settings for OpenCode is the session config itself.
+    assert.deepEqual(readJson(mergeSettings(join(out, 'opencode.json'), {}, cache).stdout.trim()), plain);
   });
 
   test('the session defaults decide a terminal session', () => {

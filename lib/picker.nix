@@ -29,11 +29,11 @@ let
   };
   menu = builtins.toJSON listing;
   infoFile = pkgs.writeText "agent-distro-profile-info.json" (builtins.toJSON info);
-  # Each harness's auth scheme, for the chooser's auth column; a gateway
-  # harness's probe needs the profile in effect, so the chooser builds it.
-  auth = builtins.toJSON (lib.genAttrs harnesses (harness:
-    let meta = discovered.metadata.${harness}; in
-    meta.auth or (throw "harnesses/${harness}/meta.nix has no `auth`; add `auth = \"anthropic\" | \"openai\" | \"gateway\"`.")));
+  # Each harness's auth scheme, for the chooser's auth column: the harnesses
+  # with a login of their own name it in meta.nix, the rest are the profile's
+  # `secret` variables and the harness's own store, which needs the profile in
+  # effect, so the chooser builds it.
+  auth = builtins.toJSON (lib.genAttrs harnesses (harness: discovered.metadata.${harness}.auth or "secrets"));
   block = indent: lines: lib.concatMapStrings (line: "\n${indent}${line}") lines;
   arms = block "    " (map (harness: "${harness}) exec ${lib.getExe launchers.${harness}} \"$@\" ;;") harnesses);
   builtinNames = map (b: b.name) info.builtins;

@@ -3,10 +3,12 @@
  * name-based precedence, a profile's plugins replacing the built-in ones, the
  * cache's upkeep, the shell a launcher evaluates, and the launches it must fail.
  *
- * Usage: node check-launch-plugins.ts SRC STORE_PLUGIN STORE_SUBDIRECTORY_PLUGIN NIX_HASH
+ * Usage: node check-launch-plugins.ts SRC STORE_PLUGIN STORE_SUBDIRECTORY_PLUGIN NIX_HASH PROMPT_SECRETS_NIX
  *
  * STORE_PLUGIN is a plugin that is a store path of its own, and
  * STORE_SUBDIRECTORY_PLUGIN one inside a larger store path, as kolu ships it.
+ * PROMPT_SECRETS_NIX is lib/prompt-secrets.nix, the shell fragment the
+ * launchers with a secret to ask for embed.
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -18,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 
-const [src, storePlugin, storeSubdirectoryPlugin, nixHash] = process.argv.slice(2);
+const [src, storePlugin, storeSubdirectoryPlugin, nixHash, promptSecrets] = process.argv.slice(2);
 const launch = await import(join(src, 'plugin/launch.ts'));
 const launchModule = launch;
 const { adapter: claude } = await import(join(src, 'harness/claude.ts'));
@@ -49,7 +51,7 @@ function profileEntry(root: string, dir: string) {
   return { description, dir };
 }
 
-const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', gateway: null }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
+const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', env: {}, settings: {} }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
 const claudeArgs = (profile: unknown[] = []) => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile, info });
 
 function resolve(value: string, cache: string, profile: unknown[] = [], reports: string[] = [], adapter = claude) {
@@ -254,16 +256,64 @@ test('a profile composed over the built-in one keeps its plugins, replacing only
 });
 
 test('the shell a launcher evaluates', () => {
-  const gateway = { url: 'https://gateway.example', keyEnv: 'KEY', models: { large: 'l', small: 's' }, keyHint: "it's here" };
-  const text = launchModule.shell("-e '/a b'", gateway, ['/nix/store/x/bin', '/nix/store/y/bin']);
-  const output = spawnSync(BASH, ['-euc', `PATH=/usr/bin; ${text} printf '%s\\n' "$launched" "$profile_gateway" "$profile_gateway_key_env" "$profile_gateway_key_hint" "$PATH"`],
-    { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}' } });
+  const env = {
+    LITELLM_BASE_URL: 'https://gateway.example',
+    OMP_SKIP_SETUP: '1',
+    LITELLM_API_KEY: { secret: true, hint: "it's here" },
+    SECOND_KEY: { secret: true },
+  };
+  const text = launchModule.shell("-e '/a b'", env, '{"modelRoles":{"default":"litellm/large"}}', ['/nix/store/x/bin', '/nix/store/y/bin']);
+  const output = spawnSync(BASH, ['-euc',
+    `PATH=/usr/bin; ${text} printf '%s\\n' "$launched" "\${#profile_env_names[@]}" "\${profile_env_names[1]}"`
+    + ' "\${profile_env_names[0]}" "$profile_settings" "$LITELLM_BASE_URL" "$OMP_SKIP_SETUP" "$PATH"'],
+  { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}' } });
   assert.equal(output.status, 0, output.stderr);
-  assert.deepEqual(output.stdout.split('\n').slice(0, 5),
-    ["-e '/a b'", JSON.stringify(gateway), 'KEY', "it's here", '/nix/store/x/bin:/nix/store/y/bin:/usr/bin']);
-  const none = spawnSync(BASH, ['-euc', `${launchModule.shell('', null, [])} printf '%s|%s' "$profile_gateway" "\${AGENT_DISTRO_PROFILE-unset}"`],
+  assert.deepEqual(output.stdout.split('\n').slice(0, 8), [
+    "-e '/a b'", '2', 'SECOND_KEY', 'LITELLM_API_KEY', '{"modelRoles":{"default":"litellm/large"}}',
+    'https://gateway.example', '1', '/nix/store/x/bin:/nix/store/y/bin:/usr/bin',
+  ]);
+  // The hints ride beside them, and a secret's value is never in the shell.
+  const hints = spawnSync(BASH, ['-euc', `${text} printf '%s|%s' "\${profile_env_hints[0]}" "\${profile_env_hints[1]}"`],
     { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}', PATH: process.env.PATH } });
-  assert.equal(none.stdout, '|unset', none.stderr);
+  assert.equal(hints.stdout, "it's here|", hints.stderr);
+  const none = spawnSync(BASH, ['-euc',
+    `${launchModule.shell('', {}, '', [])} printf '%s|%s|%s' "\${profile_env_names[*]}" "$profile_settings" "\${AGENT_DISTRO_PROFILE-unset}"`],
+  { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}', PATH: process.env.PATH } });
+  assert.equal(none.stdout, '||unset', none.stderr);
+});
+
+test('a launcher asks for a secret the environment does not set, and refuses without a terminal', () => {
+  // The fragment the launchers embed, as nix writes it: its `''${` escaping
+  // undone, and the gum it is handed left as the command it names.
+  const source = readFileSync(promptSecrets, 'utf8');
+  const fragment = source.slice(source.indexOf("''\n") + 3, source.lastIndexOf("''"))
+    .replaceAll("''${", '${').replace('${gum}/bin/gum', 'gum');
+  const shell = (env: Parameters<typeof launchModule.shell>[1], tail: string, extra: NodeJS.ProcessEnv = {}) =>
+    spawnSync(BASH, ['-euc', `${launchModule.shell('', env, '', [])}${fragment}${tail}`],
+      { encoding: 'utf8', env: { PATH: process.env.PATH, ...extra } });
+  const secret = { LITELLM_API_KEY: { secret: true, hint: 'ask the team' } };
+  // Not set, no terminal: the variable and its hint are named, and the launch stops.
+  const refused = shell(secret, 'echo reached');
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.equal(refused.stdout, '', 'the harness is never started');
+  assert.match(refused.stderr, /^agent-distro: warning: LITELLM_API_KEY is not set\.$/m);
+  assert.match(refused.stderr, /^  ask the team$/m);
+  assert.match(refused.stderr, /^  Tip: export LITELLM_API_KEY=\.\.\. to skip this prompt next time\.$/m);
+  assert.match(refused.stderr, /^agent-distro: error: cannot prompt for LITELLM_API_KEY \(stdin is not a terminal\)\.$/m);
+  // Set: nothing is said, and nothing is asked for.
+  const quiet = shell(secret, 'echo reached', { LITELLM_API_KEY: 'k' });
+  assert.equal(quiet.stdout, 'reached\n', quiet.stderr);
+  assert.doesNotMatch(quiet.stderr, /agent-distro/, quiet.stderr);
+  // An empty value counts as unset: the launch asks for it.
+  const empty = shell(secret, 'echo reached', { LITELLM_API_KEY: '' });
+  assert.equal(empty.status, 1, empty.stdout);
+  assert.match(empty.stderr, /LITELLM_API_KEY is not set/);
+  // A secret with no hint, and a profile with none at all.
+  const bare = shell({ LITELLM_API_KEY: { secret: true } }, 'echo reached');
+  assert.match(bare.stderr, /^agent-distro: warning: LITELLM_API_KEY is not set\.$\n\n  Tip:/m);
+  const none = shell({}, 'echo reached');
+  assert.equal(none.stdout, 'reached\n', none.stderr);
+  assert.doesNotMatch(none.stderr, /agent-distro/, none.stderr);
 });
 
 test('reports reach stderr on every launch, cached or not, without control characters', () => {

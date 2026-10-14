@@ -5,35 +5,38 @@
  * its relocation variables; a source that cannot be read or parsed is
  * "unknown" (undefined), and a probe never throws.
  *
- * Each harness's scheme comes from its meta.nix through lib/picker.nix, and
- * `spec` adds the gateway of the profile in effect; `AI_GATEWAY` is read here,
- * at launch, so a gateway-capable harness falls back to its own provider when
- * the gateway is disabled.
+ * Each harness's scheme comes from its meta.nix through lib/picker.nix: the
+ * ones with a login of their own (Claude Code, Codex) name it, and the rest
+ * are `secrets` — the `secret` variables of the profile's `env`, then the
+ * harness's own store, which `spec` fills in from the profile in effect.
+ * `AGENT_DISTRO_SETTINGS` is read here, at launch, so a harness whose
+ * profile's environment is off falls back to its own provider.
  *
  * Checked against the pinned sources: Claude Code 2.1.292, Codex 0.160.1,
  * oh-my-pi 18.7.0, Pi 1.0.4 and OpenCode 2.0.29.
  */
 
 import { log } from '../log.ts';
+import type { ProfileEnv } from '../profile/resolve.ts';
 
 export type Env = NodeJS.ProcessEnv;
 
 /** A harness's auth scheme, as its meta.nix declares it. */
-export type Scheme = 'anthropic' | 'openai' | 'gateway';
+export type Scheme = 'anthropic' | 'openai' | 'secrets';
 
 /** One harness's probe spec, for the profile in effect. */
 export type Spec = {
-  scheme: 'anthropic' | 'openai' | 'gateway' | 'provider';
-  /** gateway: the profile's `gateway.keyEnv`. */
-  keyEnv?: string;
-  /** gateway (when `AI_GATEWAY=0`) and provider: the harness whose own store to read. */
+  scheme: 'anthropic' | 'openai' | 'secrets' | 'provider';
+  /** secrets: the profile's `secret` variables, in the order the profile declares them. */
+  secrets?: string[];
+  /** secrets (when `AGENT_DISTRO_SETTINGS=0`) and provider: the harness whose own store to read. */
   provider?: string;
 };
 
 /**
  * A row's auth status: `text` is the one-line form the fallback list prints,
- * and `items` are the panel's lines — the gateway key first, then the provider
- * ids. An empty list is "not signed in"; unknown is no status at all.
+ * and `items` are the panel's lines — the profile's secrets first, then the
+ * provider ids. An empty list is "not signed in"; unknown is no status at all.
  */
 export type Status = { text: string; items: string[] };
 
@@ -53,13 +56,13 @@ export type Io = {
 export const NOT_SIGNED_IN = 'not signed in';
 
 /**
- * The probe for `harness`: a gateway-capable harness carries the profile's
- * key variable and its own name, or, with no gateway, reads its own provider.
+ * The probe for `harness`: one with a login of its own is that scheme alone,
+ * otherwise the profile's `secret` variables and the harness's own store.
  */
-export function spec(scheme: Scheme, harness: string, gateway: { keyEnv: string } | null): Spec {
-  if (scheme !== 'gateway') return { scheme };
-  if (gateway === null) return { scheme: 'provider', provider: harness };
-  return { scheme: 'gateway', keyEnv: gateway.keyEnv, provider: harness };
+export function spec(scheme: Scheme, harness: string, env: ProfileEnv): Spec {
+  if (scheme !== 'secrets') return { scheme };
+  const secrets = Object.entries(env).filter(([, value]) => typeof value !== 'string').map(([name]) => name);
+  return { scheme: 'secrets', secrets, provider: harness };
 }
 
 /** A source's content, or why there is none: missing is "not signed in", unreadable is unknown. */
@@ -155,7 +158,7 @@ function providerNames(rows: unknown[]): string[] {
   return names;
 }
 
-/** Where each gateway-capable harness keeps its own credentials. */
+/** Where each harness without a login of its own keeps its credentials. */
 const STORES: Record<string, (env: Env, io: Io) => Source<string[]>> = {
   omp: ompStore,
   pi: (env, io) => jsonIds(`${env.PI_CODING_AGENT_DIR ?? `${home(env)}/.pi/agent`}/auth.json`, io),
@@ -238,7 +241,7 @@ function idTokenEmail(token: unknown): string | undefined {
   }
 }
 
-/** The provider ids a gateway-capable harness has credentials for, and the store they came from. */
+/** The provider ids a harness has credentials for, and the store they came from. */
 function providerIds(harness: string, env: Env, io: Io): { ids: string[]; source: Source<string[]> } {
   const source = STORES[harness]?.(env, io) ?? { missing: true };
   const ids = 'value' in source ? [...source.value] : [];
@@ -246,7 +249,7 @@ function providerIds(harness: string, env: Env, io: Io): { ids: string[]; source
   return { ids: [...new Set(ids)].sort(), source };
 }
 
-/** Every provider a gateway-capable harness has credentials for, in its own ids. */
+/** Every provider a harness has credentials for, in its own ids. */
 function provider(harness: string, env: Env, io: Io): Status | undefined {
   const { ids, source } = providerIds(harness, env, io);
   if (ids.length) return signedIn(ids);
@@ -254,18 +257,20 @@ function provider(harness: string, env: Env, io: Io): Status | undefined {
 }
 
 /**
- * A gateway profile: the harness can use the gateway and its own providers at
- * once, so the status lists the key first (when set and non-empty) and then
- * every provider it also has credentials for. `AI_GATEWAY=0` is the harness's
- * own providers alone.
+ * A harness without a login of its own: the profile's `secret` variables are
+ * the login the launch will ask for, and the harness's own providers work
+ * beside them. One the profile declares but the environment does not set is a
+ * login step still to come, so the row is not signed in. With
+ * `AGENT_DISTRO_SETTINGS=0` the launch exports nothing, leaving its own
+ * providers alone.
  */
-function gateway(spec: Spec, env: Env, io: Io): Status | undefined {
-  if (env.AI_GATEWAY === '0') return spec.provider ? provider(spec.provider, env, io) : undefined;
-  if (!spec.keyEnv) return undefined;
-  const { ids, source } = providerIds(spec.provider ?? '', env, io);
-  const key = env[spec.keyEnv] ? spec.keyEnv : undefined;
-  const list = key ? [key, ...ids] : ids;
-  return list.length ? signedIn(list) : absent(source);
+function secrets(spec: Spec, env: Env, io: Io): Status | undefined {
+  if (!spec.provider) return undefined;
+  if (env.AGENT_DISTRO_SETTINGS === '0') return provider(spec.provider, env, io);
+  const { ids, source } = providerIds(spec.provider, env, io);
+  const names = spec.secrets ?? [];
+  if (names.some((name) => !env[name])) return absent(source);
+  return names.length || ids.length ? signedIn([...names, ...ids]) : absent(source);
 }
 
 /** `spec`'s status, or undefined for unknown; never throws. */
@@ -279,8 +284,8 @@ export function probe(spec: Spec, env: Env, io: Io): Status | undefined {
       case 'openai':
         status = openai(env, io);
         break;
-      case 'gateway':
-        status = gateway(spec, env, io);
+      case 'secrets':
+        status = secrets(spec, env, io);
         break;
       case 'provider':
         status = spec.provider ? provider(spec.provider, env, io) : undefined;

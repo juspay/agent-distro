@@ -10,11 +10,17 @@
   plugins = [ ./. ];
   # Commands your plugins' MCP servers name, put on PATH for every harness:
   # packages = pkgs: [ pkgs.mcp-nixos ];
-  # A LiteLLM gateway for OMP, OpenCode and Pi; without one, each uses its own provider:
-  # gateway = {
-  #   url = "https://llm.example.org";
-  #   keyEnv = "LITELLM_API_KEY";
-  #   models = { large = "large"; small = "fast"; };
-  #   keyHint = "Get a key from your gateway administrator.";
+  # Variables every launch exports, and settings for the harnesses that read
+  # them. A `secret = true` variable is asked for when it is not already set,
+  # and never written to a file.
+  # env = {
+  #   LITELLM_BASE_URL = "https://llm.example.org";
+  #   LITELLM_API_KEY = { secret = true; hint = "Get a key from your gateway administrator."; };
+  # };
+  # settings.omp.modelRoles = { default = "litellm/large"; slow = "litellm/large"; task = "litellm/large"; smol = "litellm/fast"; };
+  # settings.opencode = {
+  #   providers.litellm = { package = "@opencode/ai/providers/openai-compatible"; settings.baseURL = "https://llm.example.org/v1"; };
+  #   model = "litellm/large";
+  #   agents.title.model = "litellm/fast";
   # };
 }

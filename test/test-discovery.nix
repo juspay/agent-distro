@@ -39,7 +39,7 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
         legacyPackages.x86_64-linux = pkgs;
       };
       distro = (import (root + \"/flake.nix\")).outputs { nixpkgs = nixpkgsInput; };
-      profile = { name = \"discovery\"; description = \"Discovery\"; plugins = []; gateway = null; };
+      profile = { name = \"discovery\"; description = \"Discovery\"; plugins = []; };
       launchers = distro.lib.mkLaunchers { inherit pkgs profile; };
       checks = import (root + \"/test/lib.nix\") { inherit pkgs profile launchers; };
       testOutputs = (import (root + \"/test/flake.nix\")).outputs {
@@ -58,7 +58,7 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
        assert checks ? discoveryStub;
        assert !(checks ? discoveryStubGateway);
        assert testOutputs.checks.x86_64-linux ? vanilla-discoveryStub;
-       assert testOutputs.checks.x86_64-linux ? juspay-discoveryStubGateway;
+       assert testOutputs.checks.x86_64-linux ? gateway-discoveryStubGateway;
        assert !(testOutputs.checks.x86_64-linux ? vanilla-discoveryStubGateway);
        true
   " > result.json

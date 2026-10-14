@@ -6,7 +6,7 @@ let
   sources = name: pkgs: pkgs.writeShellScriptBin name "command -v profile-tool" // { version = "0"; };
   tool = pkgs.writeShellScriptBin "profile-tool" "";
   decoy = pkgs.writeShellScriptBin "profile-tool" "";
-  profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; gateway = null; };
+  profile = { name = "packaged"; description = "Packaged"; plugins = [ ]; };
   packaged = mkLaunchers { inherit pkgs sources; profile = profile // { packages = _: [ tool ]; }; };
   bare = mkLaunchers { inherit pkgs profile sources; };
   discovery = import ../lib/discover-harnesses.nix;

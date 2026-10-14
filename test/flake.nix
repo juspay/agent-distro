@@ -18,18 +18,33 @@
       inherit (agent-distro.lib) mkLaunchers;
       # Kolu's plugin as kolu ships it: a directory inside a store path.
       koluPlugin = "${kolu}/agent-plugin";
-      # The Juspay profile as it was built in before profiles were read at
-      # launch: the gateway, plugin and Kolu checks run against it.
-      juspayProfile = {
-        name = "juspay";
-        description = "Juspay skills + Kolu, via Juspay's LiteLLM gateway";
+      # A team's profile as a repository would carry one: its skills, and the
+      # LiteLLM gateway it points OMP and OpenCode at, written with `env` and
+      # `settings`. test/support/gateway-fixture.py serves that gateway.
+      gatewayProfile = {
+        name = "gateway";
+        description = "A team's skills, with the LiteLLM gateway it runs them on";
         plugins = [ juspay-skills koluPlugin ];
         packages = pkgs: [ pkgs.mcp-nixos ];
-        gateway = {
-          url = "https://grid.ai.juspay.net";
-          keyEnv = "LITELLM_API_KEY";
-          models = { large = "open-large"; small = "open-fast"; };
-          keyHint = "Requires Juspay VPN to access the dashboard";
+        env = {
+          LITELLM_BASE_URL = "http://127.0.0.1:8080";
+          LITELLM_API_KEY = { secret = true; hint = "Create a key at the team's dashboard"; };
+        };
+        settings = {
+          omp.modelRoles = {
+            default = "litellm/open-large";
+            slow = "litellm/open-large";
+            task = "litellm/open-large";
+            smol = "litellm/open-fast";
+          };
+          opencode = {
+            providers.litellm = {
+              package = "@opencode/ai/providers/openai-compatible";
+              settings.baseURL = "http://127.0.0.1:8080/v1";
+            };
+            model = "litellm/open-large";
+            agents.title.model = "litellm/open-fast";
+          };
         };
       };
       # Profiles are tested through the public builder, the same way a
@@ -40,14 +55,13 @@
       };
       # No plugins of its own, so kolu arrives only through AGENT_DISTRO_PLUGINS.
       vanilla = suite [ "koluLaunch" ] agent-distro.profiles.vanilla;
-      juspay = suite [ "plugins" "gateway" "kolu" ] juspayProfile;
+      gateway = suite [ "plugins" "gateway" "kolu" ] gatewayProfile;
       # Test-only: the plugin shapes the Agent Plugins spec allows beyond what
       # the real profiles happen to use.
       fixtures = suite [ "plugins" "spec" ] {
         name = "fixtures";
         description = "Agent Plugins test fixtures";
         plugins = [ ./fixtures/spec-plugin ./fixtures/mcp-only ./fixtures/my-skills ];
-        gateway = null;
       };
       runtime = import "${agent-distro}/lib/runtime.nix" pkgs;
       reserved = [ "default" ] ++ (import "${agent-distro}/lib/discover-harnesses.nix").ordered;
@@ -56,7 +70,7 @@
     {
       checks.${system} =
         named "vanilla" vanilla
-        // named "juspay" juspay
+        // named "gateway" gateway
         // named "fixtures" fixtures
         // lib.listToAttrs (lib.concatMap
           (harness:
@@ -83,10 +97,11 @@
           '';
           # AGENT_DISTRO_PLUGINS alone, without a VM: cache keys (a store
           # path as is, a checkout by content), re-translation after an edit,
-          # name-based precedence, and the launches that must fail.
+          # name-based precedence, the shell a launcher evaluates (its `env`
+          # and the prompt for a secret), and the launches that must fail.
           launch-plugins = pkgs.runCommand "launch-plugins-check" { } ''
             ${runtime.node} ${./check-launch-plugins.ts} ${runtime.tree}/src \
-              ${./fixtures/my-skills} ${./fixtures}/my-skills ${pkgs.nix}/bin/nix-hash
+              ${./fixtures/my-skills} ${./fixtures}/my-skills ${pkgs.nix}/bin/nix-hash ${../lib/prompt-secrets.nix}
             touch "$out"
           '';
           # The OpenCode launcher's own arguments, without a VM or the harness:

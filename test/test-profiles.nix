@@ -4,12 +4,11 @@
 # Stub harnesses that print what they were started with show the plugins and
 # packages each launch got: path and git+file: references, discovery from a
 # nested directory, the positional selector taken exactly, the repository's
-# agent-distro.nix composed over AI_PROFILE over the built-in profile, an
-# evaluation that sees neither the user's environment nor the network, and
-# the refusal of a package the binary cache lacks. Then a copy of the Juspay
-# profile's agent-distro.nix, its github: plugin reference replaced by a local
-# path, runs the real OMP, Codex and Claude Code as the built-in Juspay
-# profile did.
+# agent-distro.nix composed over AI_PROFILE over the built-in profile, the
+# environment and settings it carries, an evaluation that sees neither the
+# user's environment nor the network, and the refusal of a package the binary
+# cache lacks. Then the gateway profile of test/flake.nix, written out as a
+# repository would carry it, runs the real OMP, Codex and Claude Code.
 { pkgs, agent-distro, nixpkgs, juspay-skills, koluPlugin }:
 let
   inherit (pkgs) lib;
@@ -43,22 +42,41 @@ let
     printf -- '---\nname: ${name}-skill\ndescription: ${name}\n---\n' > "$out/skills/${name}-skill/SKILL.md"
   '';
   plugins = lib.genAttrs [ "alpha" "beta" "gamma" "delta" ] plugin;
-  # The Juspay profile's agent-distro.nix, as its repository carries it.
-  juspayProfile = ''
-    {
-      name = "juspay";
-      description = "Juspay skills + Kolu, via Juspay's LiteLLM gateway";
-      plugins = [ ./. "github:juspay/kolu?dir=agent-plugin" ];
-      packages = pkgs: [ pkgs.mcp-nixos ];
-      gateway = {
-        url = "https://grid.ai.juspay.net";
-        keyEnv = "LITELLM_API_KEY";
-        models = { large = "open-large"; small = "open-fast"; };
-        keyHint = "Requires Juspay VPN to access the dashboard";
+  # The gateway profile of test/flake.nix, as a repository carries it: the same
+  # `env` and `settings`, against the same fixture, its plugin references local
+  # paths since the VM has no network.
+  profileEnv = {
+    LITELLM_BASE_URL = "http://127.0.0.1:8080";
+    LITELLM_API_KEY = { secret = true; hint = "Create a key at the team's dashboard"; };
+  };
+  profileSettings = {
+    omp.modelRoles = {
+      default = "litellm/open-large";
+      slow = "litellm/open-large";
+      task = "litellm/open-large";
+      smol = "litellm/open-fast";
+    };
+    opencode = {
+      providers.litellm = {
+        package = "@opencode/ai/providers/openai-compatible";
+        settings.baseURL = "http://127.0.0.1:8080/v1";
       };
+      model = "litellm/open-large";
+      agents.title.model = "litellm/open-fast";
+    };
+  };
+  # JSON is a Nix expression, so the file and the checks below read one source.
+  profileFile = ''
+    {
+      name = "gateway";
+      description = "A team's skills, with the LiteLLM gateway it runs them on";
+      plugins = [ ./. "${koluPlugin}" ];
+      packages = pkgs: [ pkgs.mcp-nixos ];
+      env = ${builtins.toJSON profileEnv};
+      settings = ${builtins.toJSON profileSettings};
     }
   '';
-  # Skills per plugin, as the built-in Juspay profile's checks expected them.
+  # Skills per plugin, as the profile's checks expect them.
   expected = builtins.listToAttrs (map
     (root:
       let
@@ -119,11 +137,12 @@ in
 
     # A repository whose profile names a plugin beside it, for discovery.
     user("mkdir -p ~/repo/.git ~/repo/nested/deep && cp -r ${plugins.alpha} ~/repo/plugin && chmod -R u+w ~/repo/plugin")
-    write("~/repo/agent-distro.nix", '{ name = "repo"; description = "The repository"; plugins = [ ./plugin ]; gateway = null; }')
-    # A profile directory, for AI_PROFILE and the positional selector, with a
-    # gateway for the repository's to fall back to.
+    write("~/repo/agent-distro.nix", '{ name = "repo"; description = "The repository"; plugins = [ ./plugin ]; }')
+    # A profile directory, for AI_PROFILE and the positional selector, with an
+    # environment and a secret variable for the repository's to fall back to.
     write("~/elsewhere/agent-distro.nix", '{ name = "elsewhere"; plugins = [ ${plugins.beta} ]; '
-          + 'gateway = { url = "https://elsewhere.test"; keyEnv = "ELSEWHERE_KEY"; models = { large = "l"; small = "s"; }; }; }')
+          + 'env = { ELSEWHERE_URL = "https://elsewhere.test"; '
+          + 'ELSEWHERE_KEY = { secret = true; hint = "Ask the team for a key"; }; }; }')
     # A git repository fetched by git+file:, itself a plugin, naming another
     # plugin by git+file: reference.
     user("mkdir -p ~/plugins && cp -r ${plugins.delta} ~/plugins/delta && chmod -R u+w ~/plugins")
@@ -183,10 +202,10 @@ in
         noticed = stderr_of(f"cd ~/repo && {other} probe-claude")
         assert ("agent-distro profile: using repo + elsewhere (from /home/testuser/repo/agent-distro.nix"
                 " over AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n") in noticed, noticed
-        # The repository sets `gateway = null`: AI_PROFILE's is in effect,
-        # asking for its key.
+        # The repository declares no `env`: AI_PROFILE's is in effect, and its
+        # secret variable is what a launch without a terminal refuses.
         output = refused(f"cd ~/repo && {other} probe-omp")
-        assert "ELSEWHERE_KEY is not set" in output and "https://elsewhere.test/dashboard" in output, output
+        assert "ELSEWHERE_KEY is not set" in output and "Ask the team for a key" in output, output
         assert launched(f"{other} probe-claude")[0] == ["beta"]
         assert in_effect("~", other)["source"] == "variable"
         assert "over" not in in_effect("~", other)
@@ -216,15 +235,16 @@ in
             assert "agent-distro never compiles" in output, output
             assert "STUB-STARTED" not in output, output
 
-    with subtest("the Juspay profile's agent-distro.nix behaves as the built-in Juspay profile did"):
-        user("cp -r ${juspay-skills} ~/juspay && chmod -R u+w ~/juspay")
-        write("~/juspay/agent-distro.nix", ${builtins.toJSON (builtins.replaceStrings
-          [ ''"github:juspay/kolu?dir=agent-plugin"'' ] [ ''"${koluPlugin}"'' ] juspayProfile)})
-        juspay = "AI_PROFILE=/home/testuser/juspay"
-        assert in_effect("~", juspay)["name"] == "juspay"
-        user(f"{juspay} python " + shlex.quote("${./profiles/check-juspay.py}") + " " + " ".join(shlex.quote(a) for a in [
-            ${builtins.toJSON (builtins.toJSON expected)}, "juspay-ai",
+    with subtest("the gateway profile, read at launch, behaves as a built-in one would"):
+        user("cp -r ${juspay-skills} ~/gateway && chmod -R u+w ~/gateway")
+        write("~/gateway/agent-distro.nix", ${builtins.toJSON profileFile})
+        gateway = "AI_PROFILE=/home/testuser/gateway"
+        assert in_effect("~", gateway)["name"] == "gateway"
+        user(f"{gateway} python " + shlex.quote("${./profiles/check-gateway-profile.py}") + " " + " ".join(shlex.quote(a) for a in [
+            ${builtins.toJSON (builtins.toJSON expected)}, "gateway-ai",
             "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
-            "${pkgs.mcp-nixos}/bin"]))
+            "${pkgs.mcp-nixos}/bin",
+            ${builtins.toJSON (builtins.toJSON profileEnv)},
+            ${builtins.toJSON (builtins.toJSON profileSettings)}]))
   '';
 }

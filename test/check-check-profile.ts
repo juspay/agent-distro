@@ -53,7 +53,7 @@ const file = join(work, 'agent-distro.nix');
 writeFileSync(file, '{ }\n');
 
 const profile = (...packages: string[]) => JSON.stringify({
-  name: 'p', description: '', plugins: [], gateway: null,
+  name: 'p', description: '', plugins: [], env: {}, settings: {}, deprecated: [],
   packages: packages.map((name) => ({ name, drvPath: store(name, '.drv'), out: store(name), bin: store(name, '/bin') })),
 });
 

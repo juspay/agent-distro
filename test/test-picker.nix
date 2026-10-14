@@ -34,7 +34,7 @@ in
     for selector in ["", "${profile.name}"]:
         for harness in ${builtins.toJSON harnesses}:
             machine.succeed(
-                f"su - testuser -c 'AI_GATEWAY=0 AI_HARNESS={harness} agent-distro {selector} --version </dev/null'"
+                f"su - testuser -c 'AGENT_DISTRO_SETTINGS=0 AI_HARNESS={harness} agent-distro {selector} --version </dev/null'"
             )
 
     # The listing as Nix computed it; the check compares `--list --json` to it.

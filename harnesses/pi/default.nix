@@ -1,7 +1,7 @@
 # Pi's subcommands require resources in settings, not prepended CLI flags.
 { pkgs, plugins, info, package }:
 let
-  inherit (pkgs) lib writeShellApplication runCommand writeText curl gum;
+  inherit (pkgs) lib writeShellApplication runCommand writeText gum;
   pi = package;
 
   runtime = import ../../lib/runtime.nix pkgs;
@@ -21,38 +21,24 @@ writeShellApplication {
   name = "pi";
   derivationArgs.version = pi.version;
   text = ''
-    # The profile in effect and its packages, and its fragment, less the
+    # The profile in effect, its env and packages, and its fragment, less the
     # plugins that profile or AGENT_DISTRO_PLUGINS replaces, plus their own;
     # loading plugins other than the built-in ones fails without a home to
     # merge them into.
     ${launchPlugins}
     fragment=$launched
+    ${import ../../lib/prompt-secrets.nix { inherit gum; }}
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
       agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.pi/agent}"
-      gateway=()
-      if [ -n "$profile_gateway" ] && [ "''${AI_GATEWAY:-1}" != "0" ]; then
-        # The gateway in effect as Pi's provider, with the models it serves
-        # cached beside it under the same name.
-        cache="''${XDG_CACHE_HOME:-''${HOME:-$agent_dir}/.cache}/agent-distro/pi"
-        base=$(${runtime.script "gateway/config.ts"} pi "$profile_gateway" "$cache")
-        gateway=("$base")
-      fi
       status=0
-      ${runtime.script "harness/pi.ts"} merge-state --check "$agent_dir" "$fragment" "''${gateway[@]}" || status=$?
+      ${runtime.script "harness/pi.ts"} merge-state --check "$agent_dir" "$fragment" || status=$?
       if [ "$status" = 1 ]; then exit 1; fi
       if [ "$status" = 2 ] && [ "$fragment" != ${config}/config.json ]; then
         echo 'agent-distro pi: error: cannot load AGENT_DISTRO_PLUGINS: the agent directory cannot be written.' >&2
         exit 1
       fi
       if [ "$status" = 0 ]; then
-        if [ "''${#gateway[@]}" != 0 ]; then
-          ${import ../../lib/gateway-key.nix { inherit gum; }}
-          models=''${base##*/}
-          cached=$(${runtime.script "gateway/models.ts"} "$base" "$cache/''${models%.json}/models.json" \
-            ${curl}/bin/curl "$profile_gateway_key_env" ${./gateway-shape.json})
-          gateway=("$cached")
-        fi
-        ${runtime.script "harness/pi.ts"} merge-state --merge "$agent_dir" "$fragment" "''${gateway[@]}"
+        ${runtime.script "harness/pi.ts"} merge-state --merge "$agent_dir" "$fragment"
       fi
     else
       echo 'agent-distro pi: warning: HOME and PI_CODING_AGENT_DIR are unset; skipping config merges.' >&2

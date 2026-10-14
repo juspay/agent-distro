@@ -1,7 +1,8 @@
 /**
  * The picker's auth probes without a VM or a real home: every harness's file
- * and environment route, relocation variables, `AI_GATEWAY=0`, missing, empty,
- * corrupt and unreadable sources. File reads go through a fixture `Io`.
+ * and environment route, relocation variables, the profile's secrets,
+ * `AGENT_DISTRO_SETTINGS=0`, missing, empty, corrupt and unreadable sources.
+ * File reads go through a fixture `Io`.
  *
  * Usage: node check-picker-auth.ts SRC
  */
@@ -109,36 +110,46 @@ reset();
 files.set('/home/u/.codex/auth.json', 'nonsense');
 assert.equal(read({ scheme: 'openai' }), undefined);
 
-// A gateway profile: the key and the harness's own providers are usable at
-// once, so the status lists the key first and then the providers, sorted.
+// A harness without a login of its own: the profile's secret variables are
+// its login, and its own providers are usable beside them.
 reset();
-const gateway: Spec = { scheme: 'gateway', keyEnv: 'LITELLM_API_KEY', provider: 'omp' };
+const secrets: Spec = { scheme: 'secrets', secrets: ['LITELLM_API_KEY'], provider: 'omp' };
 databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
-assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY', 'anthropic', 'openai'));
-// The panel lists the items one per line, so the key comes first, alone.
-assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' }))!.items, ['LITELLM_API_KEY', 'anthropic', 'openai']);
-// The key alone, with nothing in the store or the environment.
+assert.deepEqual(read(secrets, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY', 'anthropic', 'openai'));
+// The panel lists the items one per line, so the secrets come first, alone.
+assert.deepEqual(read(secrets, home({ LITELLM_API_KEY: 'k' }))!.items, ['LITELLM_API_KEY', 'anthropic', 'openai']);
+// The secret alone, with nothing in the store or the environment.
 reset();
-assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY'));
-// Providers alone, with the key unset; the environment's providers count too.
+assert.deepEqual(read(secrets, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY'));
+// A secret the profile declares and the environment does not set is a login
+// step still to come: the row is not signed in, whatever else is there.
 reset();
 databases.set('/home/u/.omp/agent/agent.db', ['openai']);
-assert.deepEqual(read(gateway, home({ GEMINI_API_KEY: 'k' })), signed('google', 'openai'));
-// Nothing anywhere is "not signed in"; an empty key does not count.
+assert.deepEqual(read(secrets, home({ GEMINI_API_KEY: 'k' })), out);
+assert.deepEqual(read(secrets), out);
+assert.deepEqual(read(secrets, home({ LITELLM_API_KEY: '' })), out);
+// Two secrets are both the login, and both are listed.
 reset();
-assert.deepEqual(read(gateway), out);
-assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: '' })), out);
-// An unreadable store still leaves the key; without the key it is unknown.
+databases.set('/home/u/.omp/agent/agent.db', ['openai']);
+const two: Spec = { scheme: 'secrets', secrets: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'], provider: 'omp' };
+assert.deepEqual(read(two, home({ LITELLM_BASE_URL: 'u', LITELLM_API_KEY: 'k' })),
+  signed('LITELLM_BASE_URL', 'LITELLM_API_KEY', 'openai'));
+assert.deepEqual(read(two, home({ LITELLM_BASE_URL: 'u' })), out);
+// A profile with no secret of its own leaves the harness's store alone.
+reset();
+databases.set('/home/u/.omp/agent/agent.db', ['openai']);
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'omp' }), signed('openai'));
+// An unreadable store still leaves the secret; without it, unknown.
 reset();
 unreadable.add('/home/u/.omp/agent/agent.db');
-assert.deepEqual(read(gateway, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY'));
-assert.equal(read(gateway), undefined);
-// AI_GATEWAY=0 is the harness's own providers alone; the key is ignored.
+assert.deepEqual(read(secrets, home({ LITELLM_API_KEY: 'k' })), signed('LITELLM_API_KEY'));
+assert.equal(read(secrets), undefined);
+// AGENT_DISTRO_SETTINGS=0 exports nothing: the harness's own providers alone.
 reset();
 databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
-assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), signed('anthropic', 'openai'));
+assert.deepEqual(read(secrets, home({ AGENT_DISTRO_SETTINGS: '0', LITELLM_API_KEY: 'k' })), signed('anthropic', 'openai'));
 reset();
-assert.deepEqual(read(gateway, home({ AI_GATEWAY: '0', LITELLM_API_KEY: 'k' })), out);
+assert.deepEqual(read(secrets, home({ AGENT_DISTRO_SETTINGS: '0', LITELLM_API_KEY: 'k' })), out);
 
 // OMP's providers come from the SQLite store, relocated by PI_CODING_AGENT_DIR
 // or XDG_DATA_HOME.
@@ -216,14 +227,15 @@ assert.doesNotMatch(controlled.text, /[\p{Cc}\p{Cf}]/u);
 // A spec that names no harness, or an unknown scheme, is unknown — never a throw.
 reset();
 assert.equal(read({ scheme: 'provider' }), undefined);
-assert.equal(read({ scheme: 'gateway' }), undefined);
+assert.equal(read({ scheme: 'secrets' }), undefined);
 assert.equal(read({ scheme: 'nonesuch' as Spec['scheme'] }), undefined);
 
-// The probe follows the profile in effect: a gateway harness reads the
-// profile's key, or with no gateway its own provider; the others their own login.
-assert.deepEqual(spec('gateway', 'omp', { keyEnv: 'LITELLM_API_KEY' }), { scheme: 'gateway', keyEnv: 'LITELLM_API_KEY', provider: 'omp' });
-assert.deepEqual(spec('gateway', 'pi', null), { scheme: 'provider', provider: 'pi' });
-assert.deepEqual(spec('anthropic', 'claude', { keyEnv: 'LITELLM_API_KEY' }), { scheme: 'anthropic' });
-assert.deepEqual(spec('openai', 'codex', null), { scheme: 'openai' });
+// The probe follows the profile in effect: a harness without a login of its
+// own reads the profile's secrets and its own store, the others their own login.
+assert.deepEqual(spec('secrets', 'omp', { LITELLM_BASE_URL: 'u', LITELLM_API_KEY: { secret: true } }),
+  { scheme: 'secrets', secrets: ['LITELLM_API_KEY'], provider: 'omp' });
+assert.deepEqual(spec('secrets', 'pi', {}), { scheme: 'secrets', secrets: [], provider: 'pi' });
+assert.deepEqual(spec('anthropic', 'claude', { LITELLM_API_KEY: { secret: true } }), { scheme: 'anthropic' });
+assert.deepEqual(spec('openai', 'codex', {}), { scheme: 'openai' });
 
 console.log('picker auth: all checks passed');

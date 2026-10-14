@@ -11,8 +11,8 @@ done
 # An npm tarball pinned as an npins Url pin never moves with `npins update`.
 # Re-pin it to the newest release of the major it is on: a new major is a
 # reviewed change, not a daily one. yaml's Document API is what
-# src/harness/omp.ts reads, and the OpenCode plugin owns model discovery and
-# the gateway key.
+# src/harness/omp.ts reads, and the OpenCode plugin owns the model discovery
+# of the LiteLLM server a profile points it at.
 pin_npm() {
   local name=$1 pins=$2 pinned major newest
   # Unreadable or malformed JSON stops the update; only a missing pin skips.

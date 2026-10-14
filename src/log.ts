@@ -4,8 +4,8 @@
  * One consola instance, from `consola/core` alone: the package's default entry
  * writes info lines to stdout, colors by stdout's TTY state and loads a fancy
  * reporter and prompts at start-up, and stdout here is a protocol channel (the
- * shell launch.ts prints for eval, the JSON of `--list --json`, the path
- * gateway/models.ts prints). The one reporter writes every level to stderr as
+ * shell launch.ts prints for eval, the JSON of `--list --json`, the path a
+ * harness config writer prints). The one reporter writes every level to stderr as
  *
  *   agent-distro <tag>: <message>
  *   agent-distro <tag>: warning: <message>
@@ -127,7 +127,6 @@ export function createLogger({ stream = process.stderr, env = process.env, journ
     unknown,
     profile: tag('profile'),
     update: tag('update'),
-    gateway: tag('gateway'),
     picker: tag('picker'),
     plugin: tag('plugin'),
     claude: tag('claude'),

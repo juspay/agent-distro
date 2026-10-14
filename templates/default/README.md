@@ -1,10 +1,11 @@
 # My coding-agent distribution
 
-This repository is a profile: `agent-distro.nix` names its plugins, packages
-and optional gateway, and the repository itself is an Agent Plugins directory
-(`plugin.json`, `skills/<name>/SKILL.md`, optionally `mcp.json`). Edit
-`agent-distro.nix` to name your distribution, add skills under `skills/`, and
-optionally configure a gateway.
+This repository is a profile: `agent-distro.nix` names its plugins, packages,
+the environment every launch exports and the settings its harnesses default,
+and the repository itself is an Agent Plugins directory (`plugin.json`,
+`skills/<name>/SKILL.md`, optionally `mcp.json`). Edit `agent-distro.nix` to
+name your distribution, add skills under `skills/`, and optionally point OMP
+and OpenCode at a model gateway.
 
 ## Use it from any agent-distro
 
@@ -27,12 +28,15 @@ Check that its `packages` are in the binary cache, for the machine you run it on
 nix run           # choose a harness
 nix run .#omp    # or any directory name under agent-distro/harnesses/
 AI_HARNESS=omp nix run . -- --version
-AI_GATEWAY=0 nix run .#omp   # skip gateway initialization, keep plugins
+AGENT_DISTRO_SETTINGS=0 nix run .#omp   # load the plugins and nothing else
 ```
 
-Codex and Claude Code use their own login. OMP, Pi, and both OpenCode versions use their own providers unless a
-gateway is configured. `AI_GATEWAY=0` preserves existing user settings; select
-personal models in OMP or Pi if you previously used gateway defaults.
+Every harness exports the profile's `env`, and asks for a `secret` variable
+that is not set. OMP and OpenCode also read its `settings`, which fill only
+what the user's own configuration leaves out. `AGENT_DISTRO_SETTINGS=0`
+preserves existing user settings; select personal models in OMP or OpenCode if
+you previously used the profile's defaults. Claude Code and Codex use their own
+login.
 
 Commit `flake.lock` for reproducible builds. Run `nix flake update` to update
 the framework.

@@ -38,10 +38,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, utimesSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import type { Gateway } from '../gateway/models.ts';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
 import { cacheRoot, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
-import { log, slow } from '../log.ts';
+import { log, slow, SITE } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists } from '../util.ts';
 
@@ -49,8 +48,15 @@ export const FILE = 'agent-distro.nix';
 /** The variable a profile reference falls back to. */
 export const VARIABLE = 'AI_PROFILE';
 
-/** A profile built into the launcher. */
-export type Builtin = { name: string; description: string; gateway: Gateway | null };
+/** One `env` entry: a value exported before the harness starts, or a secret it prompts for. */
+export type EnvValue = string | { secret: true; hint?: string };
+/** Environment variables a profile exports, by name. */
+export type ProfileEnv = Record<string, EnvValue>;
+/** Harness configuration a profile defaults, by harness name; opaque to the resolver. */
+export type Settings = Record<string, Record<string, unknown>>;
+
+/** A profile built into the launcher, as lib/runtime.nix passes it. */
+export type Builtin = { name: string; description: string; env: ProfileEnv; settings: Settings };
 
 /** What a launcher knows at build time, from lib/runtime.nix. */
 export type Info = {
@@ -82,7 +88,8 @@ export type Resolved = InEffect & {
   keepsBuiltIn: boolean;
   /** Plugin directories. */
   plugins: string[];
-  gateway: Gateway | null;
+  env: ProfileEnv;
+  settings: Settings;
   /** Directories of the profile's packages' commands, for PATH. */
   paths: string[];
 };
@@ -92,26 +99,46 @@ type Evaluated = {
   name: string;
   description: string;
   plugins: string[];
-  gateway: Gateway | null;
+  env: ProfileEnv;
+  settings: Settings;
+  /** Attributes this build no longer reads; each is warned about once per launch. */
+  deprecated: string[];
   packages: { name: string; drvPath: string; out: string; bin: string }[];
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === 'string';
-// The launcher reads the key with `${!name}`: only a shell variable name is safe.
+// The launcher reads the value with `${!name}`: only a shell variable name is safe.
 const isVariableName = (value: unknown) => isString(value) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 
-/** Why `value` is not a gateway, or null when it is one. */
-function gatewayProblem(value: unknown): string | null {
-  if (value === null) return null;
-  if (!isObject(value)) return 'must be null or an attribute set';
-  if (!isString(value.url)) return '`url` must be a string';
-  if (!isVariableName(value.keyEnv)) return '`keyEnv` must be an environment variable name';
-  if (!isObject(value.models) || !isString(value.models.large) || !isString(value.models.small)) {
-    return '`models` must name a `large` and a `small` model';
+/** The harnesses a profile's `settings` is read for. */
+export const SETTINGS_HARNESSES: Record<string, true> = { omp: true, opencode: true };
+
+/** Why `value` is not a profile's `env`, or null when it is one. */
+function envProblem(value: unknown): string | null {
+  if (!isObject(value)) return 'must be an attribute set';
+  for (const [name, entry] of Object.entries(value)) {
+    if (!isVariableName(name)) return `\`${name}\` is not an environment variable name`;
+    if (isString(entry)) continue;
+    if (!isObject(entry) || entry.secret !== true
+      || Object.keys(entry).some((key) => key !== 'secret' && key !== 'hint')) {
+      return `\`${name}\` must be a string, or \`{ secret = true; }\` with an optional \`hint\``;
+    }
+    if (entry.hint !== undefined && !isString(entry.hint)) return `\`${name}.hint\` must be a string`;
   }
-  if (value.keyHint !== undefined && !isString(value.keyHint)) return '`keyHint` must be a string';
+  return null;
+}
+
+/** Why `value` is not a profile's `settings`, or null when it is one. */
+function settingsProblem(value: unknown): string | null {
+  if (!isObject(value)) return 'must be an attribute set';
+  for (const [name, section] of Object.entries(value)) {
+    if (!Object.hasOwn(SETTINGS_HARNESSES, name)) {
+      return `\`${name}\` is not a harness whose configuration a profile sets (${Object.keys(SETTINGS_HARNESSES).join(', ')})`;
+    }
+    if (!isObject(section)) return `\`${name}\` must be an attribute set`;
+  }
   return null;
 }
 
@@ -122,13 +149,14 @@ function isInEffect(value: unknown): value is InEffect {
 }
 
 export function isResolved(value: unknown): value is Resolved {
-  return isInEffect(value) && typeof value.keepsBuiltIn === 'boolean'
-    && isStrings(value.plugins) && gatewayProblem(value.gateway) === null && isStrings(value.paths);
+  return isInEffect(value) && typeof value.keepsBuiltIn === 'boolean' && isStrings(value.plugins)
+    && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.paths);
 }
 
 function isEvaluated(value: unknown): value is Evaluated {
   return isObject(value) && isName(value.name) && isString(value.description) && isStrings(value.plugins)
-    && gatewayProblem(value.gateway) === null && Array.isArray(value.packages)
+    && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.deprecated)
+    && Array.isArray(value.packages)
     && value.packages.every((p) => isObject(p) && isString(p.name) && isString(p.drvPath) && isString(p.out) && isString(p.bin));
 }
 
@@ -324,8 +352,10 @@ export function evaluate(file: string, info: Info, cache: string, what: string):
   }
   if (isObject(value)) {
     if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
-    const problem = gatewayProblem(value.gateway);
-    if (problem) throw new LaunchError(`${what}: ${file}: \`gateway\` ${problem}`);
+    const env = envProblem(value.env);
+    if (env) throw new LaunchError(`${what}: ${file}: \`env\` ${env}`);
+    const settings = settingsProblem(value.settings);
+    if (settings) throw new LaunchError(`${what}: ${file}: \`settings\` ${settings}`);
   }
   if (!isEvaluated(value)) throw new LaunchError(`${what}: ${file} is not a profile`);
   return value;
@@ -393,9 +423,10 @@ function fileAt(path: string, what: string): string {
 
 /**
  * `upper` composed over `lower`: plugins and packages are both, lower's first;
- * the gateway is upper's, else lower's; the rest is upper's, `over` naming
- * lower unless it is the launcher's built-in default. Only the repository's
- * is ever over another named profile, so `lower` names none beneath it.
+ * `env` and `settings` are key-wise, upper's winning; the rest is upper's,
+ * `over` naming lower unless it is the launcher's built-in default. Only the
+ * repository's is ever over another named profile, so `lower` names none
+ * beneath it.
  */
 function merge(lower: Resolved, upper: Resolved): Resolved {
   const { name, description, source, origin } = lower;
@@ -403,7 +434,8 @@ function merge(lower: Resolved, upper: Resolved): Resolved {
     name: upper.name, description: upper.description, source: upper.source, origin: upper.origin,
     ...(source === 'builtin' ? {} : { over: { name, description, source, origin } }),
     keepsBuiltIn: lower.keepsBuiltIn, plugins: [...lower.plugins, ...upper.plugins],
-    gateway: upper.gateway ?? lower.gateway, paths: [...lower.paths, ...upper.paths],
+    env: { ...lower.env, ...upper.env }, settings: { ...lower.settings, ...upper.settings },
+    paths: [...lower.paths, ...upper.paths],
   };
 }
 
@@ -421,8 +453,17 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
   }
   const { source, origin } = selection;
   if ('builtin' in kind) {
-    const keepsBuiltIn = kind.builtin.name === info.default;
-    return { ...kind.builtin, source, origin, keepsBuiltIn, plugins: [], paths: [] };
+    // The launcher's own profile is data it was built with, not a file to
+    // evaluate: same rules, named for what it is.
+    const { name, description, env, settings } = kind.builtin;
+    const envFault = envProblem(env);
+    if (envFault) throw new LaunchError(`built-in profile ${name}: \`env\` ${envFault}`);
+    const settingsFault = settingsProblem(settings);
+    if (settingsFault) throw new LaunchError(`built-in profile ${name}: \`settings\` ${settingsFault}`);
+    return {
+      name, description, env, settings, source, origin,
+      keepsBuiltIn: name === info.default, plugins: [], paths: [],
+    };
   }
   const cache = cacheRoot(env, what);
   const file = fileAt('path' in kind ? kind.path : fetched(kind.flake, what, cache), what);
@@ -431,10 +472,15 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
   if (profile.packages.some((p) => !existsSync(p.out) && !existsSync(p.drvPath))) {
     profile = evaluated(file, info, cache, what, true);
   }
+  for (const name of profile.deprecated) {
+    // The evaluation is cached per content, so this is what keeps the warning
+    // in front of a profile written for an older agent-distro.
+    log.profile.warn(`\`${name}\` is no longer read; see ${SITE}/#profiles`);
+  }
   const paths = realise(profile, what);
   const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, what, cache)));
   return {
     name: profile.name, description: profile.description, source, origin,
-    keepsBuiltIn: false, plugins, gateway: profile.gateway, paths,
+    keepsBuiltIn: false, plugins, env: profile.env, settings: profile.settings, paths,
   };
 }

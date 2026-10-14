@@ -22,7 +22,7 @@ for (const [text, cells] of [
   ['❤\ufe0f', 2], ['❤', 1], ['日本', 4], ['\u{2000B}', 2], ['한', 2], ['한', 2],
   ['👨\u200d👩\u200d👧 Fam', 6],
   // Plain Latin and punctuation take the fast path, with the same answer.
-  ['gateway · extensions…', 21], ['a\u0301 · b', 5],
+  ['profile models · extensions…', 28], ['a\u0301 · b', 5],
 ] as const) {
   assert.equal(width(text), cells, JSON.stringify(text));
 }
@@ -50,11 +50,11 @@ const AUTH: Record<string, Auth> = {
   pi: { text: 'LITELLM_API_KEY', items: ['LITELLM_API_KEY'] },
 };
 const HARNESSES = [
-  harness('omp', 'Oh My Pi', 'gateway or own provider · extensions', '18.7.0', AUTH.omp),
+  harness('omp', 'Oh My Pi', 'team models or your own · extensions', '18.7.0', AUTH.omp),
   harness('codex', 'Codex', 'OpenAI login · plugins via marketplace', '0.160.1', AUTH.codex),
   harness('claude', 'Claude Code', 'Anthropic login · plugin dirs per session', '2.1.292', AUTH.claude),
   harness('opencode', 'OpenCode', 'private server per launch', '2.0.29', AUTH.opencode),
-  harness('pi', 'Pi', "OMP's upstream · gateway via models.json", '1.0.4', AUTH.pi),
+  harness('pi', 'Pi', "OMP's upstream · plugins per home", '1.0.4', AUTH.pi),
 ];
 const listing = (harnesses = HARNESSES): Listing => ({
   profiles: [{ name: 'vanilla', description: 'Upstream harnesses with your own provider', harnesses }],
@@ -252,8 +252,8 @@ assert.equal(filtered.rows()[filtered.index].name, 'pi');
 // The filter matches a tagline the row no longer shows.
 const byTagline = new Menu(listing(), '');
 byTagline.press('/');
-for (const character of 'gateway') byTagline.press(character);
-assert.deepEqual(byTagline.rows().map((r) => r.name), ['omp', 'pi']);
+for (const character of 'login') byTagline.press(character);
+assert.deepEqual(byTagline.rows().map((r) => r.name), ['codex', 'claude']);
 // No matches blanks the panel, and the list says so.
 const none = new Menu(listing(), '');
 none.press('/');
