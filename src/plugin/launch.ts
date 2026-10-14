@@ -16,10 +16,11 @@
  * PATH.
  *
  * A profile composed over the built-in one keeps the built-in's plugins and
- * adds its own; one chosen positionally replaces them. Either way its plugin
- * directories are translated exactly as the variable's, ahead of them, and its
- * gateway and packages are the ones in effect. Each directory is read exactly as a built-in
- * plugin is, then translated once per content into
+ * adds its own; one that does not include it (chosen positionally, or another
+ * built-in name) replaces them. Either way its plugin directories are
+ * translated exactly as the variable's, ahead of them, and its gateway and
+ * packages are the ones in effect. Each directory is read exactly as a
+ * built-in plugin is, then translated once per content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
  * already content-addressed; otherwise it hashes the directory's NAR

@@ -5,8 +5,9 @@
  * is the picker's leading positional selector, exactly; else a stack, bottom
  * to top, of the launcher's built-in default, AI_PROFILE when set, and the
  * `agent-distro.nix` found from the working directory up to the git root,
- * each composed over the one beneath (`merge`). A selector or AI_PROFILE is
- * a built-in name (`vanilla`, or the launcher's own) or a reference: a path
+ * each composed over the one beneath (`merge`); a built-in name in AI_PROFILE
+ * starts the stack itself. A selector or AI_PROFILE is a built-in name
+ * (`vanilla`, or the launcher's own) or a reference: a path
  * (absolute, or starting with ./, ../ or ~/) to the file or its directory, or
  * else, containing `/` or `:`, a flake reference such as
  * `github:owner/repo?dir=sub`, fetched with `nix flake prefetch`.
@@ -157,12 +158,15 @@ export function workingDirectory(): string | undefined {
 /**
  * The profiles this launch is to use, bottom to top, before anything is read:
  * the positional selector alone, else the built-in default, AI_PROFILE and the
- * repository's, those that are there.
+ * repository's, those that are there. A built-in name in AI_PROFILE is one of
+ * the launcher's own profiles, not an overlay: the stack starts there instead.
  */
 export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv, info: Info): Selection[] {
   if (positional) return [{ source: 'positional', origin: positional }];
-  const stack: Selection[] = [{ source: 'builtin', origin: info.default }];
-  if (env[VARIABLE]) stack.push({ source: 'variable', origin: env[VARIABLE] });
+  const variable = env[VARIABLE];
+  const stack: Selection[] = [];
+  if (!variable || !info.builtins.some((b) => b.name === variable)) stack.push({ source: 'builtin', origin: info.default });
+  if (variable) stack.push({ source: 'variable', origin: variable });
   const found = cwd === undefined ? null : discover(cwd);
   if (found) stack.push({ source: 'repository', origin: found });
   return stack;
@@ -390,13 +394,14 @@ function fileAt(path: string, what: string): string {
 /**
  * `upper` composed over `lower`: plugins and packages are both, lower's first;
  * the gateway is upper's, else lower's; the rest is upper's, `over` naming
- * lower unless it is the launcher's built-in default.
+ * lower unless it is the launcher's built-in default. Only the repository's
+ * is ever over another named profile, so `lower` names none beneath it.
  */
 function merge(lower: Resolved, upper: Resolved): Resolved {
-  const { name, description, source, origin, over } = lower;
+  const { name, description, source, origin } = lower;
   return {
     name: upper.name, description: upper.description, source: upper.source, origin: upper.origin,
-    ...(source === 'builtin' ? {} : { over: { name, description, source, origin, ...(over && { over }) } }),
+    ...(source === 'builtin' ? {} : { over: { name, description, source, origin } }),
     builtin: lower.builtin, plugins: [...lower.plugins, ...upper.plugins],
     gateway: upper.gateway ?? lower.gateway, paths: [...lower.paths, ...upper.paths],
   };

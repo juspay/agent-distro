@@ -10,7 +10,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -221,19 +222,35 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
   });
 });
 
-test('AI_PROFILE naming a built-in profile composes over the launcher\'s own; named positionally it is exact', () => {
+test('a built-in name, in AI_PROFILE or positional, is that profile exactly; a repository\'s composes over it', () => {
   const JUSPAY = { name: 'juspay', description: 'Team', gateway: GATEWAY };
   const team = { ...info, default: 'juspay', builtins: [JUSPAY, VANILLA] };
-  const inEffect = (positional: string | undefined, env: NodeJS.ProcessEnv) =>
-    profile.resolveProfile(team, profile.select(positional, temporary(), env, team), env);
-  // The launcher's own plugins stay (`builtin`), and its gateway with them.
+  const inEffect = (positional: string | undefined, env: NodeJS.ProcessEnv, cwd = temporary()) =>
+    profile.resolveProfile(team, profile.select(positional, cwd, env, team), { XDG_CACHE_HOME: temporary(), ...env });
+  assert.deepEqual(profile.select(undefined, temporary(), { AI_PROFILE: 'vanilla' }, team), [{ source: 'variable', origin: 'vanilla' }]);
+  // Not the launcher's own (`builtin` false): its plugins and gateway are gone.
   assert.deepEqual(inEffect(undefined, { AI_PROFILE: 'vanilla' }), {
-    ...VANILLA, source: 'variable', origin: 'vanilla', builtin: true, plugins: [], gateway: GATEWAY, paths: [],
+    ...VANILLA, source: 'variable', origin: 'vanilla', builtin: false, plugins: [], paths: [],
   });
   assert.deepEqual(inEffect('vanilla', {}), {
     ...VANILLA, source: 'positional', origin: 'vanilla', builtin: false, plugins: [], paths: [],
   });
+  // The launcher's own name keeps its own.
+  assert.deepEqual(inEffect(undefined, { AI_PROFILE: 'juspay' }), {
+    ...JUSPAY, source: 'variable', origin: 'juspay', builtin: true, plugins: [], paths: [],
+  });
   assert.equal(inEffect(undefined, {}).builtin, true);
+  // A repository over AI_PROFILE=vanilla composes over vanilla: no gateway
+  // unless it sets one, and vanilla named beneath it.
+  const mine = plugin('mine');
+  const repo = temporary();
+  mkdirSync(join(repo, '.git'));
+  const file = profileFile(repo, { name: 'repo', description: 'Repo', plugins: [mine] });
+  assert.deepEqual(inEffect(undefined, { AI_PROFILE: 'vanilla' }, repo), {
+    name: 'repo', description: 'Repo', source: 'repository', origin: file,
+    over: { name: VANILLA.name, description: VANILLA.description, source: 'variable', origin: 'vanilla' },
+    builtin: false, plugins: [mine], gateway: null, paths: [],
+  });
 });
 
 test('each profile of the stack is cached on its own, and a second launch evaluates nothing', () => {
@@ -538,9 +555,11 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   // A repository that sets no gateway, and a team profile that does.
   const bare = temporary();
   mkdirSync(join(bare, '.git'));
-  profileFile(bare, { name: 'bare', plugins: [plugin('bare')] });
+  const bareOwn = plugin('bare');
+  profileFile(bare, { name: 'bare', plugins: [bareOwn] });
+  const team = plugin('team');
   const elsewhere = temporary();
-  profileFile(elsewhere, { name: 'elsewhere', plugins: [plugin('team')], gateway: { ...GATEWAY, keyHint: 'team' } });
+  profileFile(elsewhere, { name: 'elsewhere', plugins: [team], gateway: { ...GATEWAY, keyHint: 'team' } });
   const kept = plugin('kept');
   const description = join(temporary(), 'description.json');
   writeFileSync(description, JSON.stringify({ root: kept, version: '1.0.0', manifest: { $schema: SCHEMA, name: 'kept' }, skills: {}, mcpServers: {}, reports: [] }));
@@ -575,8 +594,11 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   // and the team's gateway, which the repository does not replace.
   const [stacked, stackedGateway] = launch(bare, { AI_PROFILE: elsewhere });
   assert.match(noticed, new RegExp(`^agent-distro profile: using bare \\+ elsewhere \\(from \\S+/agent-distro\\.nix over AI_PROFILE=${elsewhere}\\) · `, 'm'));
-  assert.equal(stacked.split('--plugin-dir').length - 1, 3, stacked);
-  assert.ok(stacked.startsWith('--plugin-dir /built-in/kept '), stacked);
+  const translated = stacked.match(/^--plugin-dir \/built-in\/kept --plugin-dir (\S+\/sha256-\S+\/out) --plugin-dir (\S+\/sha256-\S+\/out)$/);
+  assert.ok(translated, stacked);
+  // Each translation records the plugin it came from.
+  const rootOf = (out: string) => JSON.parse(readFileSync(join(out, '../description.json'), 'utf8')).root;
+  assert.deepEqual(translated.slice(1).map(rootOf), [team, bareOwn].map((root) => realpathSync(root)));
   assert.equal(JSON.parse(stackedGateway).keyHint, 'team');
   // The picker's resolution wins over the repository's, and is used as handed.
   const evaluations = calls('eval');

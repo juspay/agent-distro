@@ -379,7 +379,7 @@ agent-distro.lib.mkLaunchers { pkgs; profile; }
 ```
 
 - **Outputs.** `mkFlake` returns `packages`,[^mkflake-packages] `apps`, `homeManagerModules.default`, and the same `lib` attrset `flake.nix` exposes; add other outputs with `//`.
-- **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. `AI_PROFILE` and a repository's `agent-distro.nix` are composed over it, keeping its plugins and, unless they set one, its gateway; only a positional reference, or a positional `vanilla`, replaces it for a launch.
+- **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. `AI_PROFILE` and a repository's `agent-distro.nix` are composed over it, keeping its plugins and, unless they set one, its gateway; only a positional reference, or `vanilla`, positional or in `AI_PROFILE`, replaces it for a launch.
 - **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache, and `caIndex`, the base URL of the index of the content-addressed bundles you publish ([The binary cache](#binary-cache)), defaulting to agent-distro's. Push your own builds to a cache and pass it, and name your own index if you publish one, or your users' updates are skipped.[^cache-only]
 
 [^mkflake-packages]: Every harness, the default picker, and the `<profile.name>` bundle, which carries its own picker as `bin/agent-distro`.
@@ -482,7 +482,8 @@ profile on top of yours.
 | `gateway` | The topmost that sets one |
 | `name`, `description` | The topmost; the chooser and `--list` name both, as `repo + juspay` |
 
-A profile named on the command line is that profile alone, as is a built-in name there.
+A profile named on the command line is that profile alone, as is a built-in name, there or in
+`AI_PROFILE`; a repository's profile still composes over the latter.
 
 - **Nothing to register.** agent-distro ships `vanilla` only. Any repository with an
   `agent-distro.nix` is a profile.
