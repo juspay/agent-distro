@@ -560,7 +560,7 @@ export async function main(argsPath: string): Promise<number> {
     // The built-in profile, the one this launcher was built with, keeps its
     // plugins under any composed over it.
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
-      profile.plugins, !profile.builtin);
+      profile.plugins, !profile.keepsBuiltIn);
     logger = log.harness(args.harness);
     const launched = adapter.launch(launch);
     describe(args.harness, profile, launch, launched);

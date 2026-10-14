@@ -79,13 +79,12 @@ export function nameText({ name, over }: Pick<InEffect, 'name' | 'over'>): strin
 }
 
 /** Where the profile in effect came from, in a few words, then what it is composed over. */
-export function sourceText({ source, origin, over }: Pick<InEffect, 'source' | 'origin' | 'over'>): string {
-  const beneath = (layer?: InEffect): string =>
-    (layer ? ` over ${layer.source === 'variable' ? 'AI_PROFILE=' : ''}${layer.origin}${beneath(layer.over)}` : '');
-  if (source === 'positional') return `chosen as ${origin}`;
-  if (source === 'repository') return `from ${origin}${beneath(over)}`;
-  if (source === 'variable') return `from AI_PROFILE=${origin}${beneath(over)}`;
-  return 'built in';
+export function sourceText(profile: Pick<InEffect, 'source' | 'origin' | 'over'>): string {
+  if (profile.source === 'positional') return `chosen as ${profile.origin}`;
+  if (profile.source === 'builtin') return 'built in';
+  const where = ({ source, origin, over }: Pick<InEffect, 'source' | 'origin' | 'over'>): string =>
+    `${source === 'variable' ? 'AI_PROFILE=' : ''}${origin}${over ? ` over ${where(over)}` : ''}`;
+  return `from ${where(profile)}`;
 }
 
 /** A bundle's `share/agent-distro/profile.json`. */

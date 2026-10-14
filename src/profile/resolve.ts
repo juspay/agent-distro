@@ -78,8 +78,8 @@ export type Selection = Pick<InEffect, 'source' | 'origin'>;
 
 /** The profile in effect, resolved for this launch. */
 export type Resolved = InEffect & {
-  /** The launcher's own built-in profile is part of it, so its plugins and packages are the launcher's own. */
-  builtin: boolean;
+  /** The launcher's own built-in profile is part of it, so the launcher's own plugins stay. */
+  keepsBuiltIn: boolean;
   /** Plugin directories. */
   plugins: string[];
   gateway: Gateway | null;
@@ -122,7 +122,7 @@ function isInEffect(value: unknown): value is InEffect {
 }
 
 export function isResolved(value: unknown): value is Resolved {
-  return isInEffect(value) && typeof value.builtin === 'boolean'
+  return isInEffect(value) && typeof value.keepsBuiltIn === 'boolean'
     && isStrings(value.plugins) && gatewayProblem(value.gateway) === null && isStrings(value.paths);
 }
 
@@ -402,7 +402,7 @@ function merge(lower: Resolved, upper: Resolved): Resolved {
   return {
     name: upper.name, description: upper.description, source: upper.source, origin: upper.origin,
     ...(source === 'builtin' ? {} : { over: { name, description, source, origin } }),
-    builtin: lower.builtin, plugins: [...lower.plugins, ...upper.plugins],
+    keepsBuiltIn: lower.keepsBuiltIn, plugins: [...lower.plugins, ...upper.plugins],
     gateway: upper.gateway ?? lower.gateway, paths: [...lower.paths, ...upper.paths],
   };
 }
@@ -421,8 +421,8 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
   }
   const { source, origin } = selection;
   if ('builtin' in kind) {
-    const builtin = kind.builtin.name === info.default;
-    return { ...kind.builtin, source, origin, builtin, plugins: [], paths: [] };
+    const keepsBuiltIn = kind.builtin.name === info.default;
+    return { ...kind.builtin, source, origin, keepsBuiltIn, plugins: [], paths: [] };
   }
   const cache = cacheRoot(env, what);
   const file = fileAt('path' in kind ? kind.path : fetched(kind.flake, what, cache), what);
@@ -435,6 +435,6 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
   const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, what, cache)));
   return {
     name: profile.name, description: profile.description, source, origin,
-    builtin: false, plugins, gateway: profile.gateway, paths,
+    keepsBuiltIn: false, plugins, gateway: profile.gateway, paths,
   };
 }

@@ -192,7 +192,7 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
   assert.deepEqual(composed, {
     name: 'repo', description: 'Repo', source: 'repository', origin: file,
     over: { name: 'elsewhere', description: 'Team', source: 'variable', origin: elsewhere },
-    builtin: true, plugins: [team, mine], gateway: GATEWAY, paths: [teamPackage.bin, repoPackage.bin],
+    keepsBuiltIn: true, plugins: [team, mine], gateway: GATEWAY, paths: [teamPackage.bin, repoPackage.bin],
   });
   // Handed to the launcher as JSON, and accepted there.
   assert.ok(profile.isResolved(JSON.parse(JSON.stringify(composed))));
@@ -213,12 +213,12 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
   assert.equal(listing.sourceText(alone), `from ${file}`);
   // Outside the repository, AI_PROFILE over the built-in one.
   const variable = inEffect(undefined, temporary());
-  assert.deepEqual([variable.name, variable.source, variable.over, variable.builtin, variable.plugins, variable.gateway],
+  assert.deepEqual([variable.name, variable.source, variable.over, variable.keepsBuiltIn, variable.plugins, variable.gateway],
     ['elsewhere', 'variable', undefined, true, [team], GATEWAY]);
   // A positional profile is that one, exactly: nothing beneath it.
   assert.deepEqual(inEffect(repo, repo), {
     name: 'repo', description: 'Repo', source: 'positional', origin: repo,
-    builtin: false, plugins: [mine], gateway: own, paths: [],
+    keepsBuiltIn: false, plugins: [mine], gateway: own, paths: [],
   });
 });
 
@@ -228,18 +228,18 @@ test('a built-in name, in AI_PROFILE or positional, is that profile exactly; a r
   const inEffect = (positional: string | undefined, env: NodeJS.ProcessEnv, cwd = temporary()) =>
     profile.resolveProfile(team, profile.select(positional, cwd, env, team), { XDG_CACHE_HOME: temporary(), ...env });
   assert.deepEqual(profile.select(undefined, temporary(), { AI_PROFILE: 'vanilla' }, team), [{ source: 'variable', origin: 'vanilla' }]);
-  // Not the launcher's own (`builtin` false): its plugins and gateway are gone.
+  // Not the launcher's own (`keepsBuiltIn` false): its plugins and gateway are gone.
   assert.deepEqual(inEffect(undefined, { AI_PROFILE: 'vanilla' }), {
-    ...VANILLA, source: 'variable', origin: 'vanilla', builtin: false, plugins: [], paths: [],
+    ...VANILLA, source: 'variable', origin: 'vanilla', keepsBuiltIn: false, plugins: [], paths: [],
   });
   assert.deepEqual(inEffect('vanilla', {}), {
-    ...VANILLA, source: 'positional', origin: 'vanilla', builtin: false, plugins: [], paths: [],
+    ...VANILLA, source: 'positional', origin: 'vanilla', keepsBuiltIn: false, plugins: [], paths: [],
   });
   // The launcher's own name keeps its own.
   assert.deepEqual(inEffect(undefined, { AI_PROFILE: 'juspay' }), {
-    ...JUSPAY, source: 'variable', origin: 'juspay', builtin: true, plugins: [], paths: [],
+    ...JUSPAY, source: 'variable', origin: 'juspay', keepsBuiltIn: true, plugins: [], paths: [],
   });
-  assert.equal(inEffect(undefined, {}).builtin, true);
+  assert.equal(inEffect(undefined, {}).keepsBuiltIn, true);
   // A repository over AI_PROFILE=vanilla composes over vanilla: no gateway
   // unless it sets one, and vanilla named beneath it.
   const mine = plugin('mine');
@@ -249,7 +249,7 @@ test('a built-in name, in AI_PROFILE or positional, is that profile exactly; a r
   assert.deepEqual(inEffect(undefined, { AI_PROFILE: 'vanilla' }, repo), {
     name: 'repo', description: 'Repo', source: 'repository', origin: file,
     over: { name: VANILLA.name, description: VANILLA.description, source: 'variable', origin: 'vanilla' },
-    builtin: false, plugins: [mine], gateway: null, paths: [],
+    keepsBuiltIn: false, plugins: [mine], gateway: null, paths: [],
   });
 });
 
@@ -291,7 +291,7 @@ test('a profile of the stack that cannot be read is named as the user gave it', 
 test('a built-in name needs no nix; anything else that is not a reference is refused', () => {
   const before = calls('');
   assert.deepEqual(resolve({ source: 'variable', origin: 'vanilla' }), {
-    ...VANILLA, source: 'variable', origin: 'vanilla', builtin: true, plugins: [], paths: [],
+    ...VANILLA, source: 'variable', origin: 'vanilla', keepsBuiltIn: true, plugins: [], paths: [],
   });
   assert.equal(calls(''), before);
   assert.throws(() => resolve({ source: 'variable', origin: 'juspay' }),
@@ -306,7 +306,7 @@ test('a path reference, as the directory or the file; plugin paths stay where th
   for (const origin of [directory, file]) {
     const resolved = resolve({ source: 'positional', origin });
     assert.deepEqual(resolved, {
-      name: 'mine', description: 'Mine', source: 'positional', origin, builtin: false, plugins: [own], gateway: null, paths: [],
+      name: 'mine', description: 'Mine', source: 'positional', origin, keepsBuiltIn: false, plugins: [own], gateway: null, paths: [],
     });
     assert.ok(profile.isResolved(resolved));
   }
@@ -602,7 +602,7 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   assert.equal(JSON.parse(stackedGateway).keyHint, 'team');
   // The picker's resolution wins over the repository's, and is used as handed.
   const evaluations = calls('eval');
-  const handedOver = JSON.stringify({ ...VANILLA, source: 'positional', origin: 'vanilla', builtin: true, plugins: [], paths: [] });
+  const handedOver = JSON.stringify({ ...VANILLA, source: 'positional', origin: 'vanilla', keepsBuiltIn: true, plugins: [], paths: [] });
   assert.deepEqual(launch(repo, { AGENT_DISTRO_PROFILE: handedOver }).slice(0, 3), ['--plugin-dir /built-in/kept', '', 'unset']);
   assert.equal(calls('eval'), evaluations);
 });
