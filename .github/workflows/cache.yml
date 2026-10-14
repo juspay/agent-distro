@@ -148,7 +148,7 @@ jobs:
           printf 'installables=%s\n' "${installables# }" >> "$GITHUB_OUTPUT"
           { echo "smoke<<PROFILES"; printf '%s' "$smoke"; echo "PROFILES"; } >> "$GITHUB_OUTPUT"
 
-      - uses: juspay/kolu/.github/actions/publish-closure@b1476908938f4fc5683e8b99404c36f01b438ab4 # juspay/kolu#2294
+      - uses: juspay/kolu/.github/actions/publish-closure@5b14790a4eb9c383dfd7fa247bbff1af60f9eb92 # juspay/kolu#2294, on master
         with:
           installables: ${{ steps.profiles.outputs.installables }}
           # Where the bundles go and where their index is written: the
