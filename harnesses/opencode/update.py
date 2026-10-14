@@ -1,42 +1,59 @@
 #!/usr/bin/env python3
-"""Vendor the bun recipe from the nixpkgs that the pinned OpenCode's lock pins.
-
-Upstream's node_modules hashes hold only for that bun. Copying its one recipe
-file keeps evaluation from fetching a second nixpkgs to read it.
-"""
+"""Publish a new pin only once every supported platform has been fetched."""
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
 
+def version(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', value):
+        raise ValueError(f'unusable OpenCode version: {value!r}')
+    return tuple(map(int, value.split('.')))
+
+
 def fetch(url):
-    return subprocess.check_output(
+    return json.loads(subprocess.check_output(
         ['curl', '--fail', '--silent', '--show-error', '--location',
-         '--connect-timeout', '10', '--max-time', '60', url], text=True)
+         '--connect-timeout', '10', '--max-time', '60', url], text=True))
 
 
-here = Path(__file__).parent
-pin = json.loads((here / 'npins/sources.json').read_text())['pins']['opencode']
-owner, repo = pin['repository']['owner'], pin['repository']['repo']
-lock = json.loads(fetch(f'https://raw.githubusercontent.com/{owner}/{repo}/{pin["revision"]}/flake.lock'))
-locked = lock['nodes'][lock['nodes'][lock['root']]['inputs']['nixpkgs']]['locked']
-rev = locked['rev']
-recipe = fetch(f'https://raw.githubusercontent.com/NixOS/nixpkgs/{rev}/pkgs/by-name/bu/bun/package.nix')
+source = Path(__file__).with_name('sources.json')
+pinned = json.loads(source.read_text())
+before = pinned['version']
+version(before)
+try:
+    latest = fetch('https://opencode.ai/update/api/latest/cli/npm')['version']
+    version(latest)
+except (subprocess.SubprocessError, ValueError, KeyError, TypeError):
+    latest = fetch('https://registry.npmjs.org/@opencode/cli-linux-x64/dist-tags')['latest']
 
-target = here / 'bun.nix'
-content = (f'# NixOS/nixpkgs@{rev}:pkgs/by-name/bu/bun/package.nix, vendored by update.py\n'
-           f'# from the nixpkgs OpenCode\'s lock pins. Do not edit.\n{recipe}')
-if not target.exists() or target.read_text() != content:
-    with tempfile.NamedTemporaryFile(mode='w', dir=here, delete=False) as output:
+after = before
+if version(latest) > version(before):
+    hashes = {}
+    for system, target in [('x86_64-linux', 'linux-x64'), ('aarch64-linux', 'linux-arm64'),
+                           ('aarch64-darwin', 'darwin-arm64')]:
+        url = f'https://registry.npmjs.org/@opencode/cli-{target}/-/cli-{target}-{latest}.tgz'
+        result = json.loads(subprocess.check_output(
+            ['nix', 'store', 'prefetch-file', '--json', url], text=True))
+        digest = result['hash']
+        if not isinstance(digest, str) or not re.fullmatch(r'sha256-[A-Za-z0-9+/]{43}=', digest):
+            raise ValueError(f'unusable hash for {system}: {digest!r}')
+        hashes[system] = digest
+    with tempfile.NamedTemporaryFile(mode='w', dir=source.parent, delete=False) as output:
         temporary = Path(output.name)
         try:
-            if target.exists():
-                os.fchmod(output.fileno(), target.stat().st_mode & 0o777)
-            output.write(content)
+            os.fchmod(output.fileno(), source.stat().st_mode & 0o777)
+            json.dump({'version': latest, 'hashes': hashes}, output, indent=2)
+            output.write('\n')
             output.flush()
             os.fsync(output.fileno())
-            temporary.replace(target)
+            temporary.replace(source)
         finally:
             temporary.unlink(missing_ok=True)
+    after = latest
+
+with Path(os.environ.get('GITHUB_OUTPUT', '/dev/stdout')).open('a') as output:
+    output.write(f'before={before}\nafter={after}\nlatest={latest}\n')

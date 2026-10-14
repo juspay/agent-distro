@@ -16,10 +16,10 @@ let
     aarch64-linux = "linux-arm64";
     aarch64-darwin = "darwin-arm64";
   };
-  target = targets.${system} or (throw "OpenCode v2: unsupported system ${system}");
+  target = targets.${system} or (throw "OpenCode: unsupported system ${system}");
 in
 stdenv.mkDerivation {
-  pname = "opencode2";
+  pname = "opencode";
   inherit (sources) version;
   src = fetchurl {
     url = "https://registry.npmjs.org/@opencode/cli-${target}/-/cli-${target}-${sources.version}.tgz";
@@ -39,9 +39,9 @@ stdenv.mkDerivation {
       $CC -shared -fPIC ${./exec-path.c} -ldl \
         -DLOADER='"${stdenv.cc.bintools.dynamicLinker}"' \
         -DSHIM='"'"$out/libexec/exec-path.so"'"' \
-        -DWRAPPER='"'"$out/bin/opencode2"'"' -o "$out/libexec/exec-path.so"
+        -DWRAPPER='"'"$out/bin/opencode"'"' -o "$out/libexec/exec-path.so"
     ''}
-    makeBinaryWrapper ${if stdenv.hostPlatform.isLinux then stdenv.cc.bintools.dynamicLinker else "$out/libexec/opencode"} "$out/bin/opencode2" \
+    makeBinaryWrapper ${if stdenv.hostPlatform.isLinux then stdenv.cc.bintools.dynamicLinker else "$out/libexec/opencode"} "$out/bin/opencode" \
       ${lib.optionalString stdenv.hostPlatform.isLinux "--add-flags $out/libexec/opencode"} \
       --prefix PATH : ${lib.makeBinPath ([ ripgrep ] ++ lib.optional stdenv.hostPlatform.isDarwin sysctl)} \
       ${lib.optionalString stdenv.hostPlatform.isLinux "--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland ]}"} \
@@ -56,16 +56,16 @@ stdenv.mkDerivation {
     export OPENCODE_DISABLE_MODELS_FETCH=true
     # Bun's extraction directory must not collide with the unpacked source.
     export TMPDIR=$(mktemp -d)
-    actual=$("$out/bin/opencode2" --version)
+    actual=$("$out/bin/opencode" --version)
     printf 'OpenCode version: %s\n' "$actual"
     test "$actual" = "opencode v${sources.version}"
     runHook postInstallCheck
   '';
   meta = {
-    description = "OpenCode v2 coding agent, from upstream's prebuilt npm binaries";
+    description = "OpenCode coding agent, from upstream's prebuilt npm binaries";
     homepage = "https://opencode.ai";
     license = lib.licenses.mit;
-    mainProgram = "opencode2";
+    mainProgram = "opencode";
     platforms = builtins.attrNames targets;
   };
 }

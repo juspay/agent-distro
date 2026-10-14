@@ -53,8 +53,7 @@ const HARNESSES = [
   harness('omp', 'Oh My Pi', 'gateway or own provider · extensions', '18.7.0', AUTH.omp),
   harness('codex', 'Codex', 'OpenAI login · plugins via marketplace', '0.160.1', AUTH.codex),
   harness('claude', 'Claude Code', 'Anthropic login · plugin dirs per session', '2.1.292', AUTH.claude),
-  harness('opencode', 'OpenCode', 'v1 · gateway or own provider', '1.18.35', AUTH.opencode),
-  harness('opencode2', 'OpenCode v2', 'v2 preview · private server per launch', '2.0.24'),
+  harness('opencode', 'OpenCode', 'private server per launch', '2.0.29', AUTH.opencode),
   harness('pi', 'Pi', "OMP's upstream · gateway via models.json", '1.0.4', AUTH.pi),
 ];
 const listing = (harnesses = HARNESSES): Listing => ({
@@ -254,7 +253,7 @@ assert.equal(filtered.rows()[filtered.index].name, 'pi');
 const byTagline = new Menu(listing(), '');
 byTagline.press('/');
 for (const character of 'gateway') byTagline.press(character);
-assert.deepEqual(byTagline.rows().map((r) => r.name), ['omp', 'opencode', 'pi']);
+assert.deepEqual(byTagline.rows().map((r) => r.name), ['omp', 'pi']);
 // No matches blanks the panel, and the list says so.
 const none = new Menu(listing(), '');
 none.press('/');

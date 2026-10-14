@@ -1,20 +1,10 @@
 {
   "pins": {
-    "opencode": {
-      "type": "GitRelease",
-      "repository": {
-        "type": "GitHub",
-        "owner": "anomalyco",
-        "repo": "opencode"
-      },
-      "pre_releases": false,
-      "version_upper_bound": "2",
-      "release_prefix": null,
-      "submodules": false,
-      "version": "v1.19.0",
-      "revision": "733b2c627e5aec39cb33cc22373bdce33053ef2c",
-      "url": "https://api.github.com/repos/anomalyco/opencode/tarball/refs/tags/v1.19.0",
-      "hash": "sha256-XL76Qpm4GEFEn7Pt7g84sx+djEKnlpTTZXRgXJF3NRs="
+    "opencode-plugin-litellm": {
+      "type": "Url",
+      "url": "https://registry.npmjs.org/opencode-plugin-litellm/-/opencode-plugin-litellm-1.4.3.tgz",
+      "unpack": true,
+      "hash": "sha256-Zf6FMZsDJuU4H6DtF7bccO+j/qVgg56UlFh7DfOjBJ0="
     }
   },
   "version": 8

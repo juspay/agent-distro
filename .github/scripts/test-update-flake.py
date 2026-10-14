@@ -86,6 +86,42 @@ class UpdateFlakeTests(unittest.TestCase):
             subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
             self.assertEqual((root / 'pin-calls').read_text().splitlines(), ['lib/npins update '])
 
+    def test_plugin_repin_stays_on_its_major(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / 'bin'
+            tools.mkdir()
+            (tools / 'nix').write_text('#!/bin/sh\n'
+                                       '[ "$1" = run ] && [ "$2" = nixpkgs#npins ] && [ "$3" = -- ] || exit 1\n'
+                                       'shift 3\nexec npins "$@"\n')
+            (tools / 'npins').write_text('#!/bin/sh\n'
+                                         '[ "$1" = --directory ] && [ -d "$2" ] || exit 1\n'
+                                         'echo "$2 $3 $7" >> pin-calls\n')
+            # The plugin's registry: its own newer major, and a prerelease that
+            # must both be passed over.
+            (tools / 'curl').write_text('#!/bin/sh\n'
+                                        'echo \'{"versions": {"1.4.3": {}, "1.4.1": {}, "1.5.0": {}, '
+                                        '"2.0.0": {}, "1.6.0-rc.1": {}}}\'\n')
+            for tool in tools.iterdir():
+                tool.chmod(0o755)
+            env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}')
+            sources = root / 'harnesses/opencode/npins/sources.json'
+            sources.parent.mkdir(parents=True)
+            sources.write_text(json.dumps({'pins': {'opencode-plugin-litellm': {
+                'type': 'Url', 'url': 'https://registry.npmjs.org/opencode-plugin-litellm/-/opencode-plugin-litellm-1.4.3.tgz'}},
+                'version': 8}))
+            subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
+            self.assertEqual((root / 'pin-calls').read_text().splitlines(), [
+                'harnesses/opencode/npins update ',
+                'harnesses/opencode/npins add '
+                'https://registry.npmjs.org/opencode-plugin-litellm/-/opencode-plugin-litellm-1.5.0.tgz'])
+
+            # Without the pin there is nothing to re-pin, and the update stands.
+            sources.write_text(json.dumps({'pins': {}, 'version': 8}))
+            (root / 'pin-calls').unlink()
+            subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
+            self.assertEqual((root / 'pin-calls').read_text().splitlines(), ['harnesses/opencode/npins update '])
+
     def test_versions_are_one_json_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

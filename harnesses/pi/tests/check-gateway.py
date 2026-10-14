@@ -22,7 +22,9 @@ pi_user("pi --version")
 models = pi_read("models")
 provider = models["providers"]["litellm"]
 aliases = {gateway['models']['large'], gateway['models']['small']}
-assert {m["id"] for m in provider["models"]} == aliases | {"served-large", "served-small"}
+# The fixture serves the profile's aliases and one model no profile names.
+served = aliases | {"served-only"}
+assert {m["id"] for m in provider["models"]} == served
 assert provider["baseUrl"] == "http://127.0.0.1:8080/v1"
 assert provider["api"] == "openai-completions"
 assert provider["apiKey"] == "$" + gateway['keyEnv'], provider
@@ -30,7 +32,7 @@ assert models["providers"]["personal"] == personal_provider
 assert pi_read("settings")["defaultProvider"] == "litellm"
 assert pi_read("settings")["defaultModel"] == gateway['models']['large']
 listing = pi_user("pi --list-models litellm")
-for model in aliases | {"served-large", "served-small"}:
+for model in served:
     assert model in listing, listing
 cache = pi_user("cat /home/testuser/.cache/agent-distro/pi/*/models.json")
 assert "test-api-key" not in cache

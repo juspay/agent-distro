@@ -89,6 +89,42 @@
               ${./fixtures/my-skills} ${./fixtures}/my-skills ${pkgs.nix}/bin/nix-hash
             touch "$out"
           '';
+          # The OpenCode launcher's own arguments, without a VM or the harness:
+          # an interactive launch has to reach `--standalone`, since the shared
+          # server would otherwise serve one launch's config to the next.
+          # Built against a package that only prints what it was handed.
+          opencode-standalone =
+            let
+              # The adapter takes its version from the package, as it does for
+              # the real one; every harness is built against this stub's argv
+              # printer, and only OpenCode's launcher is realized.
+              argv = pkgs.writeShellScriptBin "opencode" ''printf '%s\n' "$*"'' // { version = "0"; };
+              launcher = (mkLaunchers {
+                inherit pkgs;
+                profile = agent-distro.profiles.vanilla;
+                sources = _: _: argv;
+              }).opencode;
+            in
+            pkgs.runCommand "opencode-standalone-check" { nativeBuildInputs = [ pkgs.bash ]; } ''
+              export HOME="$TMPDIR/home"
+              mkdir -p "$HOME" "$TMPDIR/project"
+              opencode=${lib.getExe launcher}
+              same() {
+                expected=$1
+                shift
+                actual=$("$opencode" "$@")
+                if [ "$actual" != "$expected" ]; then
+                  echo "opencode $*: expected $(printf '%q' "$expected"), got $(printf '%q' "$actual")" >&2
+                  exit 1
+                fi
+              }
+              # An argument-free launch is a terminal session: the session
+              # defaults have to reach the launcher for this to hold. Their
+              # decisions themselves are in tests/check-adapter.ts.
+              same '--standalone'
+              same "--standalone $TMPDIR/project" "$TMPDIR/project"
+              touch "$out"
+            '';
           # `--list --json` alone, without a VM: its type, the picker's menu
           # with the profile in effect, `--list`, versions stripped of `+`
           # suffixes, and the bundle's profile.json.

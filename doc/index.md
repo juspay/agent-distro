@@ -27,16 +27,15 @@ Here the terminal is in a repository whose `agent-distro.nix` is the Juspay prof
 [^chooser-rows]: The panel shows the highlighted harness's tagline and its auth status. Versions reflect the packages pinned at build time, shown without revision suffixes.
 
 ```
-╭─ agent-distro · juspay ────────────────────────────────────── 6 harnesses ─╮
+╭─ agent-distro · juspay ────────────────────────────────────── 5 harnesses ─╮
 │ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway · from         │
 │ /home/me/src/skills/agent-distro.nix                                       │
 ├──────────────────────────────┬─────────────────────────────────────────────┤
 │     ✓ Oh My Pi       18.7.0  │ Pi 1.0.4                                    │
 │     ✓ Codex         0.160.1  │ OMP's upstream · gateway via models.json    │
 │     ✓ Claude Code   2.1.292  │                                             │
-│     ✓ OpenCode      1.18.35  │ Signed in                                   │
-│       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
-│ ❯ • ✓ Pi              1.0.4  │                                             │
+│     ✓ OpenCode       2.0.29  │ Signed in                                   │
+│ ❯ • ✓ Pi              1.0.4  │   LITELLM_API_KEY                           │
 ├──────────────────────────────┴─────────────────────────────────────────────┤
 │ / filter…                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────╯
@@ -547,7 +546,6 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 | Codex | `codex` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/codex/README.md) |
 | Claude Code | `claude` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/claude/README.md) |
 | OpenCode | `opencode` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/opencode/README.md) |
-| OpenCode v2 | `opencode2` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/opencode2/README.md) |
 | Pi | `pi` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/pi/README.md) |
 
 ## How it works
@@ -555,7 +553,7 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 - **Profile.** Harness-independent data: an `agent-distro.nix`, read at launch, or the one a launcher was built with.
 - **Harness.** The agent application.
 - **Plugin.** A portable Agent Plugins directory.
-- **Gateway.** An optional LiteLLM proxy used by OMP, Pi, and OpenCode.
+- **Gateway.** An optional LiteLLM proxy used by OMP, Pi, and OpenCode. OpenCode's gateway models come from [`opencode-plugin-litellm`](https://github.com/yuseferi/opencode-litellm), vendored in `harnesses/opencode/npins`: it discovers them from the proxy's `/v1/models` and `/v1/model/info`, prices and limits included.
 
 Harness design notes live in each directory under [harnesses/](https://github.com/juspay/agent-distro/tree/main/harnesses).
 
@@ -605,7 +603,7 @@ python3 .github/scripts/test-update-flake.py
 The TypeScript's own checks need no VM or KVM, and `nix flake check` at the root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,profile-resolve,vanilla-closure,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,profile-resolve,vanilla-closure,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 | Check | Covers |
@@ -614,6 +612,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,prof
 | `launch-plugins` | `AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence, a profile replacing the built-in plugins, and the launches it fails |
 | `profile-resolve` | the profile in effect, with a fake nix: discovery, the stack and how it composes, references and their offline fallback, the evaluation's isolation, its cache, nixpkgs fetched only for packages, and the no-compile policy |
 | `vanilla-closure` | the `vanilla` bundle names nixpkgs by reference and does not hold its source |
+| `opencode-standalone` | an interactive OpenCode launch reaches the harness with `--standalone`, so one launch's config is not served to the next |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
@@ -633,7 +632,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,prof
 
 For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake update`, and then `bash test/update-lock.sh`.
 
-[^update-sources]: It discovers npins directories under `harnesses/` and `lib/`, re-pins `yaml` to the newest npm release of its major version, and runs each harness's `update.py`.
+[^update-sources]: It discovers npins directories under `harnesses/` and `lib/`, re-pins each npm tarball pinned there (`yaml`, `opencode-plugin-litellm`) to the newest release of its major version, and runs each harness's `update.py`.
 [^shards]: `test` carries `[metadata("odu:shard=8")]`: odu gives each shard `ODU_SHARD_INDEX` and `ODU_SHARD_TOTAL`, and the recipe builds its own slice of `./test`'s checks. With neither variable set it runs them all in one `nix flake check`.
 [^protect]: `odu protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
 [^attic-token]: `ATTIC_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret.

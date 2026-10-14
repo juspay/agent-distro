@@ -11,7 +11,7 @@
  * the gateway is disabled.
  *
  * Checked against the pinned sources: Claude Code 2.1.292, Codex 0.160.1,
- * oh-my-pi 18.7.0, Pi 1.0.4, OpenCode 1.18.35 and OpenCode v2 2.0.24.
+ * oh-my-pi 18.7.0, Pi 1.0.4 and OpenCode 2.0.29.
  */
 
 import { log } from '../log.ts';
@@ -160,7 +160,6 @@ const STORES: Record<string, (env: Env, io: Io) => Source<string[]>> = {
   omp: ompStore,
   pi: (env, io) => jsonIds(`${env.PI_CODING_AGENT_DIR ?? `${home(env)}/.pi/agent`}/auth.json`, io),
   opencode: (env, io) => jsonIds(`${env.XDG_DATA_HOME ?? `${home(env)}/.local/share`}/opencode/auth.json`, io),
-  opencode2: (env, io) => jsonIds(`${env.XDG_DATA_HOME ?? `${home(env)}/.local/share`}/opencode/auth.json`, io),
 };
 
 /**
