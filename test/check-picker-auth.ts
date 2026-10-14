@@ -174,7 +174,6 @@ assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ PI_CODING_A
 reset();
 files.set('/data/opencode/auth.json', JSON.stringify({ google: { type: 'api' }, openai: { type: 'wellknown' } }));
 assert.deepEqual(read({ scheme: 'provider', provider: 'opencode' }, home({ XDG_DATA_HOME: '/data' })), signed('google', 'openai'));
-assert.deepEqual(read({ scheme: 'provider', provider: 'opencode2' }, home({ XDG_DATA_HOME: '/data' })), signed('google', 'openai'));
 reset();
 files.set('/home/u/.local/share/opencode/auth.json', JSON.stringify({ anthropic: { type: 'api' } }));
 assert.deepEqual(read({ scheme: 'provider', provider: 'opencode' }), signed('anthropic'));

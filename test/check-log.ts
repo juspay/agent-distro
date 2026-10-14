@@ -136,12 +136,12 @@ test('tags name the component; the root has none; repeats are never folded', () 
   for (const tag of ['profile', 'update', 'gateway', 'picker', 'plugin', 'claude', 'codex', 'omp', 'opencode', 'pi']) {
     log[tag].info('x');
   }
-  log.harness('opencode2').info('x');
+  log.harness('muse').info('x');
   log.root.info('x');
   for (let i = 0; i < 8; i++) log.update.info('again');
   const lines = text().split('\n').filter(Boolean);
   assert.deepEqual(lines.slice(0, 12), [
-    'profile', 'update', 'gateway', 'picker', 'plugin', 'claude', 'codex', 'omp', 'opencode', 'pi', 'opencode2',
+    'profile', 'update', 'gateway', 'picker', 'plugin', 'claude', 'codex', 'omp', 'opencode', 'pi', 'muse',
   ].map((tag) => `agent-distro ${tag}: x`).concat('agent-distro: x'));
   assert.equal(lines.filter((line) => line === 'agent-distro update: again').length, 8);
 });

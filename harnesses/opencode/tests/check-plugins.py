@@ -2,8 +2,7 @@ from opencode_support import *
 
 original = check_inventory()
 updated = check_inventory('opencode-updated')
-old_paths = set(original['skills']['paths'])
-new_paths = set(updated['skills']['paths'])
+old_paths, new_paths = set(skill_paths(original)), set(skill_paths(updated))
 assert old_paths and new_paths and old_paths.isdisjoint(new_paths), (original, updated)
 check_inventory()
 assert settings.read_bytes() == preserved
@@ -19,7 +18,7 @@ locations = skill_locations(plugins=checkout(name, 'shadowed'))
 assert any(l.endswith(f'/{name}/shadowed/SKILL.md') for l in locations), locations
 assert not any(l.endswith(f'/{name}/{n}/SKILL.md') for n in expected[name] for l in locations), locations
 # Unset, the session config is the profile's again.
-assert check_inventory() == original
+assert set(skill_paths(check_inventory())) == old_paths
 assert settings.read_bytes() == preserved
 
 
@@ -29,12 +28,19 @@ if 'acme.spec-fixture' in expected:
     for plugins in (None, spec):
         with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as records:
             launch = os.path.realpath(launch)
-            extra = {'FIXTURE_RECORDS': records}
-            if plugins is not None:
-                extra['AGENT_DISTRO_PLUGINS'] = plugins
-            listing = subprocess.run(['opencode', '--pure', 'mcp', 'list'], cwd=launch, env=env | extra,
-                                     text=True, capture_output=True, timeout=180)
-            assert 'connected' in listing.stdout.lower(), (listing.stdout, listing.stderr)
+            env['FIXTURE_RECORDS'] = records
+            if plugins is None:
+                env.pop('AGENT_DISTRO_PLUGINS', None)
+            else:
+                env['AGENT_DISTRO_PLUGINS'] = plugins
+            here = os.getcwd()
+            os.chdir(launch)
+            try:
+                listing = api('mcp')['data']
+            finally:
+                os.chdir(here)
+            server = next(entry for entry in listing if entry['name'] == 'placeholders')
+            assert server['status']['status'] == 'connected', listing
             placeholders = json.loads(Path(records, 'placeholders.json').read_text())
             assert placeholders['cwd'] == launch, placeholders
             # A plugin's own `cwd` is its author's instruction, and still wins.

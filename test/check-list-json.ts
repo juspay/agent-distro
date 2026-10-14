@@ -49,8 +49,9 @@ for (const args of [['--list', '--bogus'], ['--list', '--json', 'extra'], ['--li
   assert.match(result.stderr, /usage: agent-distro --list \[--json\]/);
 }
 
-// Each bundle records its launchers' own versions, suffix and all.
-let suffixed = 0;
+// Each bundle records its launchers' own versions, and the listing shows them
+// without a `+` revision suffix (lib/picker.nix `displayVersion`; no pinned
+// harness carries one today, so the two agree as they are).
 assert.deepEqual(bundles.map((b) => b.split('=')[0]), listing.profiles.map((p) => p.name));
 for (const entry of bundles) {
   const [name, bundle] = entry.split('=');
@@ -63,12 +64,9 @@ for (const entry of bundles) {
   const recorded = readFileSync(`${bundle}/share/agent-distro/versions`, 'utf8').trimEnd().split('\n').map((line) => line.split('\t'));
   assert.deepEqual(profile.harnesses.map((h) => [h.name, h.title]), recorded.map(([n, title]) => [n, title]));
   recorded.forEach(([, , version], i) => {
-    if (version.includes('+')) suffixed++;
     assert.equal(profile.harnesses[i].version, version.split('+')[0]);
   });
 }
-// Stripping is only tested while some pinned harness carries a suffix (OpenCode does).
-assert.ok(suffixed > 0, 'no pinned version has a + suffix, so stripping goes untested');
 
 // What the type rejects, each naming the field.
 const harness = { name: 'x', title: 'X', tagline: '', version: '1' };
@@ -112,4 +110,4 @@ for (const [bad, message] of [
 ] as const) {
   assert.throws(() => parseProfileFile(bad), message, bad);
 }
-console.log(`--list --json: ${listing.profiles.length} profiles, ${suffixed} suffixed versions stripped`);
+console.log(`--list --json: ${listing.profiles.length} profiles, ${listing.profiles[0].harnesses.length} harnesses`);

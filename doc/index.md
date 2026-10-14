@@ -27,15 +27,14 @@ Here the terminal is in a repository whose `agent-distro.nix` is the Juspay prof
 [^chooser-rows]: The panel shows the highlighted harness's tagline and its auth status. Versions reflect the packages pinned at build time, shown without revision suffixes.
 
 ```
-╭─ agent-distro · juspay ────────────────────────────────────── 6 harnesses ─╮
+╭─ agent-distro · juspay ────────────────────────────────────── 5 harnesses ─╮
 │ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway · from         │
 │ /home/me/src/skills/agent-distro.nix                                       │
 ├──────────────────────────────┬─────────────────────────────────────────────┤
 │     ✓ Oh My Pi       18.7.0  │ Pi 1.0.4                                    │
 │     ✓ Codex         0.160.1  │ OMP's upstream · gateway via models.json    │
 │     ✓ Claude Code   2.1.292  │                                             │
-│     ✓ OpenCode      1.18.35  │ Signed in                                   │
-│       OpenCode v2    2.0.24  │   LITELLM_API_KEY                           │
+│       OpenCode       2.0.29  │   LITELLM_API_KEY                           │
 │ ❯ • ✓ Pi              1.0.4  │                                             │
 ├──────────────────────────────┴─────────────────────────────────────────────┤
 │ / filter…                                                                  │
@@ -547,7 +546,6 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 | Codex | `codex` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/codex/README.md) |
 | Claude Code | `claude` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/claude/README.md) |
 | OpenCode | `opencode` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/opencode/README.md) |
-| OpenCode v2 | `opencode2` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/opencode2/README.md) |
 | Pi | `pi` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/pi/README.md) |
 
 ## How it works
@@ -555,7 +553,7 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 - **Profile.** Harness-independent data: an `agent-distro.nix`, read at launch, or the one a launcher was built with.
 - **Harness.** The agent application.
 - **Plugin.** A portable Agent Plugins directory.
-- **Gateway.** An optional LiteLLM proxy used by OMP, Pi, and OpenCode.
+- **Gateway.** An optional LiteLLM proxy used by OMP, Pi, and OpenCode. OpenCode's gateway models come from [`opencode-plugin-litellm`](https://github.com/yuseferi/opencode-litellm), vendored in `harnesses/opencode/npins`: it discovers them from the proxy's `/v1/models` and `/v1/model/info`, prices and limits included.
 
 Harness design notes live in each directory under [harnesses/](https://github.com/juspay/agent-distro/tree/main/harnesses).
 

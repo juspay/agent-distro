@@ -6,8 +6,6 @@
  * The profile's gateway is added at launch, by src/gateway/config.ts with
  * `withGateway`, since the profile in effect is only known then.
  *
- * One adapter serves both config schemas: `v1` for OpenCode and `v2` for
- * OpenCode v2, which differ only in where skills, servers and the provider go.
  * At launch, src/plugin/launch.ts uses `adapter` to add AGENT_DISTRO_PLUGINS to
  * the session config.
  */
@@ -19,7 +17,7 @@ import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
 import type { Gateway } from '../gateway/models.ts';
 
-type Args = { schema: string; bash: string; env: string; descriptions: string[] };
+type Args = { bash: string; env: string; descriptions: string[] };
 type Server = { type: 'remote'; url: string; headers: Record<string, string> } | { type: 'local'; command: string[] };
 type Fragment = { skills: string | null; servers: Record<string, Server> };
 type Inputs = { bash: string; env: string };
@@ -46,13 +44,6 @@ const isFragment = (value: unknown): value is Fragment => typeof value === 'obje
   && 'skills' in value && (value.skills === null || typeof value.skills === 'string')
   && 'servers' in value && typeof value.servers === 'object' && value.servers !== null;
 
-/** Where each schema keeps skill paths and servers. */
-function sections(config: Record<string, any>, schema: string): { skills: string[]; servers: Record<string, Server> } {
-  return schema === 'v2'
-    ? { skills: config.skills, servers: config.mcp.servers }
-    : { skills: config.skills.paths, servers: config.mcp };
-}
-
 /** Fail on a server name two plugins declare: OpenCode keeps one silently. */
 function claim(owners: Record<string, string>, description: Description) {
   const plugin = description.manifest.name;
@@ -67,16 +58,14 @@ function claim(owners: Record<string, string>, description: Description) {
 
 function main(out: string, argsPath: string) {
   const args: Args = JSON.parse(readFileSync(argsPath, 'utf8'));
-  const { schema } = args;
-  if (schema !== 'v1' && schema !== 'v2') throw new Error(`Unknown OpenCode schema: ${schema}`);
   const owners: Record<string, string> = {};
   mkdirSync(join(out, 'bin'), { recursive: true });
   const skillsPaths: string[] = [];
   const servers: Record<string, Server> = {};
   const config: Record<string, unknown> = {
     $schema: 'https://opencode.ai/config.json',
-    skills: schema === 'v2' ? skillsPaths : { paths: skillsPaths },
-    mcp: schema === 'v2' ? { servers } : servers,
+    skills: skillsPaths,
+    mcp: { servers },
   };
   for (const path of args.descriptions) {
     const description = readDescription(path);
@@ -95,35 +84,34 @@ function main(out: string, argsPath: string) {
   writeFileSync(join(out, 'opencode.json'), JSON.stringify(config, null, 2));
 }
 
-/** `config` with the profile's gateway as its provider and default models; at launch, by gateway/config.ts. */
-export function withGateway(config: Record<string, unknown>, schema: string, gateway: Gateway): Record<string, unknown> {
-  const models = Object.fromEntries(Object.values(gateway.models).map((model) => [model, { name: model }]));
+/**
+ * `config` with the profile's gateway as its provider, its default models and
+ * the plugin that discovers the models it serves; at launch, by
+ * gateway/config.ts.
+ */
+export function withGateway(config: Record<string, unknown>, gateway: Gateway, plugin: string): Record<string, unknown> {
   const url = gateway.url.replace(/\/+$/, '') + '/v1';
-  const result = { ...config };
-  if (schema === 'v2') {
-    result.providers = {
+  // No key: the plugin reads LITELLM_API_KEY, which the launcher exports.
+  return {
+    ...config,
+    // OpenCode concatenates `plugins` across config files, so a user's own
+    // survive this document's entry.
+    plugins: [plugin],
+    providers: {
       litellm: {
-        name: 'LiteLLM', models, env: [gateway.keyEnv],
-        package: '@opencode/ai/providers/openai-compatible', settings: { baseURL: url },
+        name: 'LiteLLM',
+        package: '@opencode/ai/providers/openai-compatible',
+        settings: { baseURL: url },
       },
-    };
-    // v2's replacement for v1's small_model: upstream's migration puts it on
-    // the hidden title agent.
-    result.agents = { title: { model: 'litellm/' + gateway.models.small } };
-  } else {
-    result.provider = {
-      litellm: {
-        name: 'LiteLLM', models, npm: '@ai-sdk/openai-compatible',
-        options: { baseURL: url, apiKey: '{env:' + gateway.keyEnv + '}' },
-      },
-    };
-    result.small_model = 'litellm/' + gateway.models.small;
-  }
-  result.model = 'litellm/' + gateway.models.large;
-  return result;
+    },
+    // The small model has no `small_model` in this schema; upstream's
+    // migration puts it on the hidden title agent.
+    agents: { title: { model: 'litellm/' + gateway.models.small } },
+    model: 'litellm/' + gateway.models.large,
+  };
 }
 
-type LaunchArgs = Inputs & { schema: string; name: string; config: string; profile: ProfileEntry[] };
+type LaunchArgs = Inputs & { name: string; config: string; profile: ProfileEntry[] };
 
 /**
  * At launch: the launcher's session config, before any gateway, without the
@@ -138,7 +126,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
     const base = join(args.config, 'opencode.json');
     if (!plugins.length && !replaced.length) return base;
     const config = JSON.parse(readFileSync(base, 'utf8'));
-    const { skills, servers } = sections(config, args.schema);
+    const { skills, servers } = config as { skills: string[]; servers: Record<string, Server> };
     const owners: Record<string, string> = {};
     for (const plugin of kept) claim(owners, plugin.description);
     for (const plugin of replaced) {

@@ -1,30 +1,45 @@
 # OpenCode
 
-Generates a session config with skills and MCP servers, loaded
-through `OPENCODE_CONFIG` after global settings and before project settings.
-Custom-provider models come from the launcher's `/v1/models` fetch, with a
-cached list or the profile's two aliases as fallback when unavailable.
-`AI_GATEWAY=0` omits the generated provider configuration.
+Uses its own adapter, emits `skills`, `mcp.servers` and `providers`
+configuration, and adds `--standalone` only to interactive TUI launches so a
+shared background server cannot supply another session's config. There is no
+`small_model`: the gateway's small model is set as the title agent's model
+(`agents.title.model`). For scripted runs use `opencode run --standalone`; for
+inspection use `opencode api --standalone` because `debug config` and
+`mcp list` attach to the shared service.
 
-Each stdio MCP server runs through a generated launcher, in the directory the
-harness was launched in (doc/index.md, "Working directory"). With
-`AGENT_DISTRO_PLUGINS`, each plugin's skills and server launchers are translated
-into the cache, and the launcher writes a session config (the one
-above, less the profile plugins those replace, plus theirs) to the cache by
-content and points `OPENCODE_CONFIG` at it. A profile read at launch (an
-`agent-distro.nix`) takes the same path, its plugins replacing every built-in
-one, and its gateway is added over that config at launch, into the cache, with
-the fetched model list beside it. OpenCode v2 shares this path.
+`AGENT_DISTRO_PLUGINS` reaches it through OpenCode's adapter, and each stdio MCP
+server runs through a generated launcher in the launch directory (doc/index.md,
+"Working directory").
 
-OpenCode v1 uses an npins release pin bounded below v2. Its source build is
-loaded from upstream's lock, except that every nixpkgs in it is the
-distribution's shared nixpkgs. Bun alone comes from `bun.nix`, the recipe in
-upstream's locked nixpkgs, which `update.py` vendors daily so evaluation never
-fetches that nixpkgs: upstream's per-platform `node_modules` hashes hold only
-for that bun.
+OpenCode uses upstream's prebuilt npm binaries because its Nix build is not
+reliable yet. `update.py` advances `sources.json` from upstream's installer
+metadata (or npm's `latest` dist-tag) only after all three platform downloads
+succeed.
 
-The Darwin override supplies `codesign` from nixpkgs' `darwin.sigtool` and
-`codesign_allocate` from `darwin.cctools` for the ad-hoc signing step added in
-v1.18.34. Upstream's `stdenvNoCC` supplies neither tool. Remove the override
-when upstream's Nix recipe supplies both; Linux keeps the upstream derivation
-unchanged.
+## Gateway
+
+A gateway in effect adds two things to the session config:
+
+- `providers.litellm`, an OpenAI-compatible provider pointing at the gateway's
+  `/v1` — no `models` map, and no key: the launcher exports `LITELLM_API_KEY`
+  (the profile's `keyEnv`, under that name) and nothing is written to disk.
+- `plugins`, naming the vendored [`opencode-plugin-litellm`](https://github.com/yuseferi/opencode-litellm)
+  (`harnesses/opencode/npins`, unpacked into the store). It registers the
+  provider's models from the gateway's `/v1/models` and `/v1/model/info` —
+  names, context and output limits, prices, tool/vision/reasoning capabilities —
+  into a cache of its own, and refreshes them in the background on new sessions.
+  OpenCode concatenates `plugins` across config files, so a user's own plugins
+  survive.
+
+The store path handed to OpenCode is the pin's `src` directory: a local plugin
+is a directory OpenCode looks in for `index`/`server`, so the package's own
+`exports` entry does not apply. That is the whole reason the config names
+`<store>/src` rather than the store path npins unpacks the package into.
+
+A launch whose discovery cannot reach the gateway shows no gateway models
+rather than a stale list: the plugin caches what a successful discovery
+returned, and a later launch — or its background refresh — picks that up once
+the gateway answers again.
+
+`AI_GATEWAY=0` omits the provider and the plugin.
