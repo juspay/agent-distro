@@ -6,11 +6,11 @@ let
   opencode = package;
 
   name = "opencode";
-  # The vendored opencode-plugin-litellm, which the gateway config names:
-  # OpenCode loads it, and it discovers the gateway's models and reads
-  # LITELLM_API_KEY. OpenCode takes a local plugin as a directory it finds
-  # `index`/`server` in, so the pin's `src` (not the package root, whose entry
-  # is behind `exports`) is what the config names.
+  # The vendored opencode-plugin-litellm, which the gateway config names. It
+  # discovers the models the gateway serves and reads LITELLM_API_KEY. OpenCode
+  # takes a local plugin as a directory it finds `index`/`server` in, so the
+  # config names the pin's `src`, not the package root whose entry is behind
+  # `exports`.
   plugin = "${(import ./npins).opencode-plugin-litellm { inherit pkgs; }}/src";
   runtime = import ../../lib/runtime.nix pkgs;
   config = runCommand "${name}-config" { } ''
@@ -25,8 +25,7 @@ let
     profile = map (plugin: { description = "${runtime.readPlugin plugin}"; }) plugins;
   };
   # The gateway in effect over the session config, written beside it in the
-  # cache: the provider the launcher's plugin fills in, and the plugin itself.
-  # No key reaches a file — the plugin reads LITELLM_API_KEY.
+  # cache: the provider that plugin fills in, and the plugin itself.
   initialization = ''
     if [ -n "$profile_gateway" ] && [ "''${AI_GATEWAY:-1}" != "0" ]; then
       ${import ../../lib/gateway-key.nix { inherit gum; }}

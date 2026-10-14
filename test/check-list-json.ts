@@ -63,10 +63,12 @@ for (const entry of bundles) {
   const recorded = readFileSync(`${bundle}/share/agent-distro/versions`, 'utf8').trimEnd().split('\n').map((line) => line.split('\t'));
   assert.deepEqual(profile.harnesses.map((h) => [h.name, h.title]), recorded.map(([n, title]) => [n, title]));
   recorded.forEach(([, , version], i) => {
-    // lib/picker.nix `displayVersion` is what keeps the revision suffix off a
-    // bundle's own version; the lines above pair every row with its bundle.
+    // The listing shows the bundle's own version, less the `+` revision
+    // suffix lib/picker.nix `displayVersion` strips off it.
+    assert.equal(profile.harnesses[i].version, version.split('+')[0],
+      `${name} ${profile.harnesses[i].name}: ${profile.harnesses[i].version} is not ${version} without its revision`);
     assert.ok(!profile.harnesses[i].version.includes('+'),
-      `${name} ${profile.harnesses[i].name}: ${profile.harnesses[i].version} keeps the + of ${version}`);
+      `${name} ${profile.harnesses[i].name}: displayVersion left the + of ${version}`);
   });
 }
 

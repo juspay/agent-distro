@@ -25,21 +25,20 @@ A gateway in effect adds two things to the session config:
   `/v1` — no `models` map, and no key: the launcher exports `LITELLM_API_KEY`
   (the profile's `keyEnv`, under that name) and nothing is written to disk.
 - `plugins`, naming the vendored [`opencode-plugin-litellm`](https://github.com/yuseferi/opencode-litellm)
-  (`harnesses/opencode/npins`, unpacked into the store; the daily update re-pins it within its major). It registers the
-  provider's models from the gateway's `/v1/models` and `/v1/model/info` —
-  names, context and output limits, prices, tool/vision/reasoning capabilities —
-  into a cache of its own, and refreshes them in the background on new sessions.
-  OpenCode concatenates `plugins` across config files, so a user's own plugins
-  survive.
+  (`harnesses/opencode/npins`, unpacked into the store; re-pinned daily within
+  its major). It registers the provider's models from the gateway's
+  `/v1/models` and `/v1/model/info` — names, context and output limits,
+  prices, tool/vision/reasoning capabilities — into a cache of its own, and
+  refreshes them in the background on new sessions. OpenCode concatenates
+  `plugins` across config files, so a user's own plugins survive.
 
 The store path handed to OpenCode is the pin's `src` directory: a local plugin
 is a directory OpenCode looks in for `index`/`server`, so the package's own
 `exports` entry does not apply. That is the whole reason the config names
 `<store>/src` rather than the store path npins unpacks the package into.
 
-A launch whose discovery cannot reach the gateway shows no gateway models
-rather than a stale list: the plugin caches what a successful discovery
-returned, and a later launch — or its background refresh — picks that up once
-the gateway answers again.
+A launch that cannot reach the gateway shows no gateway models rather than a
+stale list: the plugin fills its cache when discovery succeeds, and refreshes it
+in the background while OpenCode runs.
 
 `AI_GATEWAY=0` omits the provider and the plugin.

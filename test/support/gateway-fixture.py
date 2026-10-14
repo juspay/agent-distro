@@ -2,9 +2,8 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 
-# The aliases a profile's `gateway.models` names, plus a model only the
-# gateway has: a model list that showed up in the harness can then only have
-# come from discovery.
+# `served-only` is in no profile: a model list that reached the harness can
+# only have come from discovery.
 MODELS = ['open-large', 'open-fast', 'served-only']
 INFO = {
     'mode': 'chat',

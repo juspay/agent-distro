@@ -67,15 +67,15 @@ test('--list --json prints JSON only', () => {
 test('model discovery prints a path only', () => {
   const directory = temporary();
   const base = join(directory, 'base.json');
-  writeFileSync(base, JSON.stringify({ provider: { litellm: { options: { baseURL: 'https://gateway.invalid' }, models: [] } } }));
+  writeFileSync(base, JSON.stringify({ providers: { litellm: { baseUrl: 'https://gateway.invalid', models: [] } } }));
   const shape = join(directory, 'shape.json');
-  writeFileSync(shape, JSON.stringify({ provider: ['provider', 'litellm'], url: ['options', 'baseURL'], label: 'OpenCode' }));
+  writeFileSync(shape, JSON.stringify({ provider: ['providers', 'litellm'], url: ['baseUrl'], label: 'Pi' }));
   const curl = command('curl', `process.stdout.write(JSON.stringify({ data: [{ id: 'served' }] }));\n`);
   const cache = join(directory, 'cache', 'models.json');
   const { stdout, stderr } = run([join(src, 'gateway/models.ts'), base, cache, curl, 'GATEWAY_KEY', shape], { GATEWAY_KEY: 'secret' });
   assert.equal(stdout, cache + '\n');
-  assert.deepEqual(JSON.parse(readFileSync(cache, 'utf8')).provider.litellm.models, [{ id: 'served' }]);
-  assert.match(stderr, /^agent-distro gateway: discovering OpenCode models at https:\/\/gateway\.invalid …$/m);
+  assert.deepEqual(JSON.parse(readFileSync(cache, 'utf8')).providers.litellm.models, [{ id: 'served' }]);
+  assert.match(stderr, /^agent-distro gateway: discovering Pi models at https:\/\/gateway\.invalid …$/m);
   assert.match(stderr, /^agent-distro gateway: gateway https:\/\/gateway\.invalid, key in \$GATEWAY_KEY$/m);
   assert.ok(!stderr.includes('secret'), stderr);
 });

@@ -111,10 +111,10 @@ describe('OpenCode', () => {
     // decided; this is that decision, without building a launcher. An
     // argument-free launch is the case the `opencode-standalone` check builds
     // a launcher for.
+    const probe = join(temporary(), 'session.sh');
+    writeFileSync(probe, `set -eu\n. ${defaults}\nprintf '%s\\n' "$*"\n`);
     const session = (...args: string[]) => {
-      const script = join(temporary(), 'session.sh');
-      writeFileSync(script, `set -eu\n. ${defaults}\nprintf '%s\\n' "$*"\n`);
-      const result = spawnSync('bash', [script, ...args], { encoding: 'utf8' });
+      const result = spawnSync('bash', [probe, ...args], { encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr);
       return result.stdout.trimEnd();
     };

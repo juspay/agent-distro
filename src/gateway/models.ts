@@ -6,8 +6,8 @@
  * Adds the gateway's served models to BASE's provider, writes the result to
  * CACHE, and prints the config to use: CACHE, or BASE when discovery has never
  * succeeded. SHAPE (a JSON file) says where the provider and its URL live in
- * this harness's config; the provider's own `models` is the list of
- * `{ id }` entries the harness reads (Pi's).
+ * this harness's config; the served models are added to that provider's
+ * `models` list as `{ id }` entries.
  *
  * Discovery asks the network, so it says so as it starts (src/log.ts `slow`);
  * a failure is a warning naming the fallback, with curl's own error at debug.
@@ -84,8 +84,8 @@ export function main(base: string, cache: string, curl: string, keyEnv: string, 
     const names = slow(log.gateway, `discovering ${shape.label} models at ${url}`,
       () => served(curl, url, keyEnv), 'debug');
     for (const name of names) {
-      // The gateway's own list first: a model the profile already names keeps
-      // its entry, and the harness's order.
+      // The profile's own aliases keep their places and order; what the
+      // gateway adds is appended in the order it listed it.
       if (!provider.models.some((model: { id: string }) => model.id === name)) provider.models.push({ id: name });
     }
     mkdirSync(dirname(cache), { recursive: true });
