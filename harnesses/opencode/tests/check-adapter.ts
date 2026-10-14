@@ -104,4 +104,32 @@ describe('OpenCode', () => {
     assert.notEqual(without.status, 0);
     assert.ok(existsSync(join(out, 'bin')));
   });
+
+  test('a launch merge lands the plugin\'s skills and servers', async () => {
+    const { adapter } = await import(join(src, 'harness/opencode.ts'));
+    const root = temporary();
+    const config = join(root, 'config');
+    mkdirSync(config, { recursive: true });
+    mkdirSync(join(root, 'skills/guide'), { recursive: true });
+    writeFileSync(join(root, 'skills/guide/SKILL.md'), '---\nname: guide\ndescription: Guide\n---\nRead me.\n');
+    writeFileSync(join(config, 'opencode.json'), JSON.stringify({
+      $schema: 'https://opencode.ai/config.json', skills: [], mcp: { servers: {} },
+    }));
+    const description = {
+      root, manifest: { name: 'example' }, skills: { guide: ['SKILL.md'] },
+      mcpServers: { local: { type: 'stdio', command: 'echo', args: [], env: {} } },
+    };
+    const translation = join(root, 'translation');
+    adapter.translate(description, translation, { bash: '/bin/sh', env: '/usr/bin/env' }, () => {});
+    const launch = {
+      args: { config, name: 'opencode', profile: [] }, kept: [], replaced: [], cache: join(root, 'cache'),
+      report: () => {},
+    };
+    // No plugins to add: the launcher's own config stands.
+    assert.equal(adapter.launch({ ...launch, plugins: [] }), join(config, 'opencode.json'));
+    const merged = readJson(adapter.launch({ ...launch, plugins: [{ name: 'example', description, translation }] })!);
+    assert.deepEqual(merged.skills, [join(translation, 'skills/example')]);
+    assert.equal(merged.mcp.servers.local.type, 'local');
+    assert.ok(merged.mcp.servers.local.command[0].includes('translation'), merged.mcp.servers.local);
+  });
 });

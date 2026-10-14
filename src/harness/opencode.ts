@@ -112,6 +112,8 @@ export function withGateway(config: Record<string, unknown>, gateway: Gateway, p
 }
 
 type LaunchArgs = Inputs & { name: string; config: string; profile: ProfileEntry[] };
+/** The session config the launcher writes, and this adapter merges into. */
+type Session = { skills: string[]; mcp: { servers: Record<string, Server> } };
 
 /**
  * At launch: the launcher's session config, before any gateway, without the
@@ -125,8 +127,9 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
   launch: ({ args, kept, replaced, plugins, cache }) => {
     const base = join(args.config, 'opencode.json');
     if (!plugins.length && !replaced.length) return base;
-    const config = JSON.parse(readFileSync(base, 'utf8'));
-    const { skills, servers } = config as { skills: string[]; servers: Record<string, Server> };
+    const config = JSON.parse(readFileSync(base, 'utf8')) as Session;
+    const skills = config.skills;
+    const servers = config.mcp.servers;
     const owners: Record<string, string> = {};
     for (const plugin of kept) claim(owners, plugin.description);
     for (const plugin of replaced) {
