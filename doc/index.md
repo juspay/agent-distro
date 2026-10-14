@@ -265,12 +265,12 @@ nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
-**Content-addressed bundles, without touching `nix.conf`.** A *content-addressed* store path is trusted by itself: nix copies one from any cache, for any user, without a signature (`require-sigs`, `nix store make-content-addressed`). CI therefore rewrites every profile's bundle that way for each revision it builds, and publishes an index of what it wrote:
+**Content-addressed bundles, without touching `nix.conf`.** A *content-addressed* store path is trusted by itself: nix copies one from any cache, for any user, without a signature (`require-sigs`, `nix store make-content-addressed`). CI therefore rewrites every profile's bundle that way for each revision it builds, through the publisher this distribution shares with kolu ([`.github/actions/publish-closure`](https://github.com/juspay/kolu/tree/main/.github/actions/publish-closure), [juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)), and publishes an index of what it wrote:
 
 ```
 https://raw.githubusercontent.com/juspay/agent-distro/ca-index/<rev>/<system>/<profile>.json
-# {"ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}   ← Linux
-# {"ia": "/nix/store/…-agent-distro-vanilla"}                                            ← macOS
+# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}   ← Linux
+# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla"}                                            ← macOS
 https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<profile>.json
 # {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
 ```
@@ -279,7 +279,7 @@ https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<
 
 This index is agent-distro's. A distribution that publishes its own bundles names it with `caIndex` (`services.agent-distro.caIndex`, or `mkFlake`'s `caIndex`) — an `https://` base URL with no credentials, query or fragment, the only kind the updater will fetch from; anything else is ignored with a warning, and the update skips. Its revisions are not in this index, and an entry that is not there leaves the update skipped too.[^ca-index]
 
-`ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Before the index names a bundle, CI pushes the rewritten paths and reads one back from the cache into a throwaway store, verifying its contents — a rewrite that a consumer's nix cannot verify never reaches the index. Which nix does the rewriting matters for that: 2.35 hashes a self-referential NAR differently than 2.17–2.34 do, so CI rewrites with the release the fleet runs (`install_url` in `cache.yml` pins it), not the newest. **These bundles target Nix 2.34.x, and nothing else.** Measured both ways on a bundle whose closure has such a path (libunistring's `.la` files): a 2.34 rewrite fails to import on 2.35 and a 2.35 rewrite fails on 2.34, each with `ca hash mismatch` naming the same two digests — the lines do not accept each other's form. A host on 2.35 or later therefore cannot take these bundles and takes the ordinary skip; the signed bundle and the cache key above are its route, and so is a single-user install of either line. Anyone can do the same by hand, with the `ca` path the index names:
+`ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Before the index names a bundle, CI pushes the rewritten paths and reads one back from the cache into a throwaway store, verifying its contents — a rewrite that a consumer's nix cannot verify never reaches the index. Which nix does the rewriting matters for that: 2.35 hashes a self-referential NAR differently than 2.17–2.34 do, so CI rewrites with the release the fleet runs (kolu's `publish-closure` action installs 2.34.8 itself, so it is the job's only Nix), not the newest. **These bundles target Nix 2.34.x, and nothing else.** Measured both ways on a bundle whose closure has such a path (libunistring's `.la` files): a 2.34 rewrite fails to import on 2.35 and a 2.35 rewrite fails on 2.34, each with `ca hash mismatch` naming the same two digests — the lines do not accept each other's form. A host on 2.35 or later therefore cannot take these bundles and takes the ordinary skip; the signed bundle and the cache key above are its route, and so is a single-user install of either line. Anyone can do the same by hand, with the `ca` path the index names:
 
 ```sh
 nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
@@ -292,7 +292,7 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
 [^cache-setting]: `cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`.
-[^ca-index]: Where the index lives is stated once, in [lib/ca-index.nix](https://github.com/juspay/agent-distro/blob/main/lib/ca-index.nix): `mkUpdater` reads it, and `.github/scripts/check-cache-config.py` keeps this page and `cache.yml`'s push equal to it.
+[^ca-index]: Where the index lives is stated once, in [lib/ca-index.nix](https://github.com/juspay/agent-distro/blob/main/lib/ca-index.nix): `mkUpdater` reads it, [`binary-cache.json`](https://github.com/juspay/agent-distro/blob/main/binary-cache.json) — the declaration `cache.yml` hands the publisher — carries it and the cache, and `.github/scripts/check-cache-config.py` keeps that file and this page equal to both.
 [^untrusted]: Nothing more is needed when you are a trusted Nix user or run a single-user install. Otherwise the daemon ignores the updater's request unless your system config already lists the cache.
 [^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable and no content-addressed bundle is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
 
@@ -609,7 +609,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,prof
 - **Required checks.** `just protect --dry-run` prints the contexts main's ruleset requires; `just protect` sets them, from what the pipeline and `cache.yml` say they are.[^protect]
 - **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
 - **Report.** The update report reads resolved versions and each harness's release-note metadata.
-- **Cache.** `cache.yml` pushes realised paths to the OSS cache,[^attic-token] and publishes each profile bundle's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository ([The binary cache](#binary-cache)).
+- **Cache.** `cache.yml` pushes realised paths to the OSS cache,[^attic-token] and publishes each profile bundle's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository, through the `publish-closure` action it shares with kolu ([juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)) ([The binary cache](#binary-cache)).
 - **Merge gate.** The daily update PR enables auto-merge, so it lands once every context the ruleset requires is green.[^auto-merge]
 - **Consumers.** They run `nix flake update agent-distro`.
 
@@ -619,7 +619,7 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 [^shards]: `test` carries `[metadata("odu:shard=8")]`: odu gives each shard `ODU_SHARD_INDEX` and `ODU_SHARD_TOTAL`, and the recipe builds its own slice of `./test`'s checks. With neither variable set it runs them all in one `nix flake check`.
 [^protect]: `odu protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
 [^attic-token]: `ATTIC_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret.
-[^auto-merge]: The update workflow approves the runs GitHub holds back for automation-created pull requests and enables auto-merge, so the PR lands as soon as every context `Require CI on main` requires is green — `cache.yml`'s `build (…)`, which that approval starts, and odu's `<recipe>@<platform>`, which someone has to run on the branch.
+[^auto-merge]: The update workflow approves the runs GitHub holds back for automation-created pull requests and enables auto-merge, so the PR lands as soon as every context `Require CI on main` requires is green — `cache.yml`'s `build (…)` and `publish (…)`, which that approval starts, and odu's `<recipe>@<platform>`, which someone has to run on the branch.
 
 ### Test library
 

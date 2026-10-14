@@ -1,0 +1,8 @@
+{
+  "substituters": ["https://cache.nixos.asia/oss"],
+  "trustedPublicKeys": ["oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU="],
+  "index": {
+    "repo": "juspay/agent-distro",
+    "branch": "ca-index"
+  }
+}

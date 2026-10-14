@@ -16,7 +16,7 @@ WORKFLOW = ".github/workflows/cache.yml"
 
 
 def contexts():
-    """`<job> (<os>)` for every runner the cache workflow's one job builds on.
+    """`<job> (<os>)` for every runner each job of the cache workflow builds on.
 
     GitHub names a matrix job's check `<job> (<matrix value>)`, so the job id
     and its `matrix.os` list are the whole vocabulary. `just protect` reads the
@@ -27,16 +27,24 @@ def contexts():
     if "\njobs:\n" not in text:
         sys.exit(f"{WORKFLOW}: no `jobs:` block, so no status contexts to derive")
     jobs = text.split("\njobs:\n", 1)[1]
-    ids = re.findall(r"^  (\S+):", jobs, re.M)
-    if len(ids) != 1:
-        sys.exit(f"{WORKFLOW}: jobs: must hold exactly one job, found {ids}")
-    matrix = re.search(r"^\s+matrix:\s*$(?:.*\n)*?^\s+os:\s*\[([^\]]*)\]\s*$", jobs, re.M)
-    if matrix is None:
-        sys.exit(f"{WORKFLOW}: the job has no inline `os: [...]` matrix to read")
-    runners = [runner.strip() for runner in matrix.group(1).split(",")]
-    if not all(runners):
-        sys.exit(f"{WORKFLOW}: the os matrix names an empty runner: {runners}")
-    return [f"{ids[0]} ({runner})" for runner in runners]
+    # A job is a key at two spaces; everything belonging to one is indented
+    # deeper, so the block a job owns runs to the next such key (comments and
+    # blank lines between jobs included in the one before).
+    keys = list(re.finditer(r"^  (\S+):\s*$", jobs, re.M))
+    if not keys:
+        sys.exit(f"{WORKFLOW}: jobs: holds no job")
+    found = []
+    for position, key in enumerate(keys):
+        end = keys[position + 1].start() if position + 1 < len(keys) else len(jobs)
+        block = jobs[key.start():end]
+        matrix = re.search(r"^\s+os:\s*\[([^\]]*)\]\s*$", block, re.M)
+        if matrix is None:
+            sys.exit(f"{WORKFLOW}: job {key.group(1)!r} has no inline `os: [...]` matrix to read")
+        runners = [runner.strip() for runner in matrix.group(1).split(",")]
+        if not all(runners):
+            sys.exit(f"{WORKFLOW}: job {key.group(1)!r} names an empty runner: {runners}")
+        found += [f"{key.group(1)} ({runner})" for runner in runners]
+    return found
 
 
 if "--contexts" in sys.argv[1:]:
@@ -44,9 +52,9 @@ if "--contexts" in sys.argv[1:]:
         print(context)
     sys.exit(0)
 
-# The drift gate: the workflow must still resolve to one job with an inline
-# `os:` matrix. A restructure that leaves it unreadable fails here, in CI, rather
-# than letting `protect` read an empty context list and write it to the ruleset.
+# The drift gate: the workflow must still resolve to jobs with an inline `os:`
+# matrix. A restructure that leaves one unreadable fails here, in CI, rather
+# than letting `protect` read a short context list and write it to the ruleset.
 contexts()
 
 
@@ -71,14 +79,34 @@ for path in ["flake.nix", WORKFLOW]:
             failed = True
 
 index = indexed("ca-index")
-# The workflow pushes the index to the branch lib/ca-index.nix names.
-branches = re.findall(r"^\s*branch=(\S+)\s*$", (root / WORKFLOW).read_text(), re.M)
-if branches != [index["branch"]]:
-    print(f"{WORKFLOW}: pushes to {branches}, "
-          f"lib/ca-index.nix says {index['branch']!r}", file=sys.stderr)
+# What the publish job hands kolu's publish-closure action is a declaration
+# file in this repository, because that job has no Nix until the action installs
+# its own — the same reason flake.nix's `nixConfig` repeats lib/cache.nix. Its
+# sources are the two files below, so what it says is checked against them here,
+# in full, and the workflow must go on handing it over.
+declaration = {
+    "substituters": [cache["url"]],
+    "trustedPublicKeys": [cache["publicKey"]],
+    "index": {"repo": index["repo"], "branch": index["branch"]},
+}
+try:
+    checked_in = json.loads((root / "binary-cache.json").read_text())
+except (OSError, json.JSONDecodeError) as error:
+    print(f"binary-cache.json: cannot be read as JSON: {error}", file=sys.stderr)
     failed = True
-# The site states the base URL for a reader consuming the index by hand, and
-# is where a reader looks first: every one of them must be this index's.
+else:
+    if checked_in != declaration:
+        print(f"binary-cache.json is {checked_in}, but lib/cache.nix and lib/ca-index.nix "
+              f"say {declaration}", file=sys.stderr)
+        failed = True
+workflow = (root / WORKFLOW).read_text()
+sides = re.findall(r"^\s*sidecar:\s*(\S+)\s*$", workflow, re.M)
+if sides != ["binary-cache.json"]:
+    print(f"{WORKFLOW}: the action's sidecar is {sides}, not the checked-in binary-cache.json",
+          file=sys.stderr)
+    failed = True
+# The site states the base URL for a reader consuming the index by hand, and is
+# where a reader looks first: every one of them must be this index's.
 urls = re.findall(r"https://raw\.githubusercontent\.com/juspay/agent-distro/\S*", (root / "doc/index.md").read_text())
 if not urls:
     print("doc/index.md: names no content-addressed index URL", file=sys.stderr)
