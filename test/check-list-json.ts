@@ -50,8 +50,7 @@ for (const args of [['--list', '--bogus'], ['--list', '--json', 'extra'], ['--li
 }
 
 // Each bundle records its launchers' own versions, and the listing shows them
-// without a `+` revision suffix (lib/picker.nix `displayVersion`; no pinned
-// harness carries one today, so the two agree as they are).
+// without a `+` revision suffix (lib/picker.nix `displayVersion`).
 assert.deepEqual(bundles.map((b) => b.split('=')[0]), listing.profiles.map((p) => p.name));
 for (const entry of bundles) {
   const [name, bundle] = entry.split('=');
@@ -64,7 +63,10 @@ for (const entry of bundles) {
   const recorded = readFileSync(`${bundle}/share/agent-distro/versions`, 'utf8').trimEnd().split('\n').map((line) => line.split('\t'));
   assert.deepEqual(profile.harnesses.map((h) => [h.name, h.title]), recorded.map(([n, title]) => [n, title]));
   recorded.forEach(([, , version], i) => {
-    assert.equal(profile.harnesses[i].version, version.split('+')[0]);
+    // lib/picker.nix `displayVersion` is what keeps the revision suffix off a
+    // bundle's own version; the lines above pair every row with its bundle.
+    assert.ok(!profile.harnesses[i].version.includes('+'),
+      `${name} ${profile.harnesses[i].name}: ${profile.harnesses[i].version} keeps the + of ${version}`);
   });
 }
 

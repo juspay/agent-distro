@@ -105,6 +105,31 @@ describe('OpenCode', () => {
     assert.ok(existsSync(join(out, 'bin')));
   });
 
+  test('the session defaults decide a terminal session', () => {
+    const defaults = join(process.argv[3], 'session-defaults.sh');
+    // The launcher sources this and then execs the harness with what it
+    // decided; this is that decision, without building a launcher. An
+    // argument-free launch is the case the `opencode-standalone` check builds
+    // a launcher for.
+    const session = (...args: string[]) => {
+      const script = join(temporary(), 'session.sh');
+      writeFileSync(script, `set -eu\n. ${defaults}\nprintf '%s\\n' "$*"\n`);
+      const result = spawnSync('bash', [script, ...args], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trimEnd();
+    };
+    const project = temporary();
+    const missing = join(temporary(), 'missing');
+    assert.equal(session(), '--standalone');
+    assert.equal(session(project), `--standalone ${project}`);
+    // An explicit mode, two positionals, a path that is not a directory, or
+    // --help: the arguments stand as they were.
+    assert.equal(session('--standalone', '--prompt', 'hi'), '--standalone --prompt hi');
+    assert.equal(session('one', 'two'), 'one two');
+    assert.equal(session(missing), missing);
+    assert.equal(session('--help'), '--help');
+  });
+
   test('a launch merge lands the plugin\'s skills and servers', async () => {
     const { adapter } = await import(join(src, 'harness/opencode.ts'));
     const root = temporary();

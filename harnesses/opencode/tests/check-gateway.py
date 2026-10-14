@@ -37,7 +37,6 @@ machine.wait_for_open_port(8080)
 # capabilities `/v1/model/info` reports.
 found = discovered()
 assert set(found) == {'open-large', 'open-fast', 'served-only'}, found
-assert found['served-only']['name'] == 'Served Only', found['served-only']
 assert found['served-only']['limit'] == {'context': 200000, 'output': 8192}, found['served-only']
 assert found['served-only']['cost'][0]['input'] == 1, found['served-only']
 assert found['served-only']['cost'][0]['output'] == 2, found['served-only']

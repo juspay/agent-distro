@@ -1,6 +1,6 @@
 # A session config composes with the user's global and project settings, and
 # the gateway's provider with the plugin that fills it in.
-{ pkgs, plugins, info, package, sessionDefaults ? "" }:
+{ pkgs, plugins, info, package }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText gum;
   opencode = package;
@@ -30,9 +30,8 @@ let
   initialization = ''
     if [ -n "$profile_gateway" ] && [ "''${AI_GATEWAY:-1}" != "0" ]; then
       ${import ../../lib/gateway-key.nix { inherit gum; }}
-      if [ "$profile_gateway_key_env" != LITELLM_API_KEY ]; then
-        export LITELLM_API_KEY="''${!profile_gateway_key_env}"
-      fi
+      # The plugin reads LITELLM_API_KEY, whatever the profile calls the key.
+      export LITELLM_API_KEY="''${!profile_gateway_key_env}"
       cache="''${XDG_CACHE_HOME:-$HOME/.cache}/agent-distro/${name}"
       config=$(${runtime.script "gateway/config.ts"} opencode "$profile_gateway" "$cache" "$config" "${plugin}")
     fi
@@ -51,7 +50,7 @@ writeShellApplication {
       echo 'agent-distro opencode: warning: replacing OPENCODE_CONFIG.' >&2
     fi
     export OPENCODE_CONFIG="$config"
-    ${sessionDefaults}
+    ${builtins.readFile ./session-defaults.sh}
     exec ${lib.getExe opencode} "$@"
   '';
 }

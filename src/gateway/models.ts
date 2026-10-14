@@ -5,8 +5,9 @@
  *
  * Adds the gateway's served models to BASE's provider, writes the result to
  * CACHE, and prints the config to use: CACHE, or BASE when discovery has never
- * succeeded. SHAPE (a JSON file) says where the provider, its URL and its
- * models live in this harness's config.
+ * succeeded. SHAPE (a JSON file) says where the provider and its URL live in
+ * this harness's config; the provider's own `models` is the list of
+ * `{ id }` entries the harness reads (Pi's).
  *
  * Discovery asks the network, so it says so as it starts (src/log.ts `slow`);
  * a failure is a warning naming the fallback, with curl's own error at debug.
@@ -28,7 +29,6 @@ export type Gateway = {
 export type Shape = {
   provider: string[];
   url: string[];
-  models: 'map' | 'list';
   label: string;
 };
 
@@ -38,14 +38,6 @@ type Json = any;
 class Unavailable extends Error {}
 
 const atPath = (value: Json, path: string[]) => path.reduce((node, key) => node[key], value);
-
-function addModel(models: Json, name: string, shape: Shape) {
-  if (shape.models === 'list') {
-    if (!models.some((model: { id: string }) => model.id === name)) models.push({ id: name });
-  } else {
-    models[name] = { name };
-  }
-}
 
 /** The ids the gateway serves, from its OpenAI-style /models listing. */
 function served(curl: string, url: string, keyEnv: string): string[] {
@@ -91,7 +83,11 @@ export function main(base: string, cache: string, curl: string, keyEnv: string, 
     // seconds, so it only says so at debug: an info line would print each time.
     const names = slow(log.gateway, `discovering ${shape.label} models at ${url}`,
       () => served(curl, url, keyEnv), 'debug');
-    for (const name of names) addModel(provider.models, name, shape);
+    for (const name of names) {
+      // The gateway's own list first: a model the profile already names keeps
+      // its entry, and the harness's order.
+      if (!provider.models.some((model: { id: string }) => model.id === name)) provider.models.push({ id: name });
+    }
     mkdirSync(dirname(cache), { recursive: true });
     // Concurrent launches must never see a partially written config.
     const temporary = writeTemporary(dirname(cache), '.models-', JSON.stringify(config, null, 2));

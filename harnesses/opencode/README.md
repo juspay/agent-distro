@@ -25,7 +25,7 @@ A gateway in effect adds two things to the session config:
   `/v1` — no `models` map, and no key: the launcher exports `LITELLM_API_KEY`
   (the profile's `keyEnv`, under that name) and nothing is written to disk.
 - `plugins`, naming the vendored [`opencode-plugin-litellm`](https://github.com/yuseferi/opencode-litellm)
-  (`harnesses/opencode/npins`, unpacked into the store). It registers the
+  (`harnesses/opencode/npins`, unpacked into the store; the daily update re-pins it within its major). It registers the
   provider's models from the gateway's `/v1/models` and `/v1/model/info` —
   names, context and output limits, prices, tool/vision/reasoning capabilities —
   into a cache of its own, and refreshes them in the background on new sessions.
