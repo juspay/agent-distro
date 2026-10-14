@@ -84,8 +84,9 @@ jobs:
       # hides that they never ran. This job created the pull request, so it
       # approves those runs itself instead of asking a maintainer to start the
       # same builds every morning. What the runs then prove is unchanged: the
-      # `build (…)` contexts `cache.yml` posts are required by `Require CI on
-      # main`, and they report on the commit this pull request merges.
+      # `build (…)` and `publish (…)` contexts `cache.yml` posts are required by
+      # `Require CI on main`, and they report on the commit this pull request
+      # merges.
       - name: Approve the runs the update pull request is waiting on
         if: steps.update.outputs.pull-request-number != ''
         env:
@@ -115,8 +116,8 @@ jobs:
       # job here has to watch the checks. What it waits on is odu's
       # `<recipe>@<platform>` statuses — posted by whoever runs odu on this
       # pull request, which is how this repository's CI reports now — plus the
-      # `build (…)` contexts of `cache.yml`, whose runs the step above just
-      # approved. GitHub merges the moment they are all green.
+      # `build (…)` and `publish (…)` contexts of `cache.yml`, whose runs the
+      # step above just approved. GitHub merges the moment they are all green.
       - name: Merge once the required checks are green
         if: steps.update.outputs.pull-request-number != ''
         env:

@@ -6,10 +6,14 @@
 # hardcoding one — fetches `<rev>/<system>/<profile>.json` and
 # `latest/<system>/<profile>.json` from.
 #
-# The workflow pushes to `branch`, and the site states `rawBase` for a reader
-# consuming the index by hand, so .github/scripts/check-cache-config.py keeps
-# those copies equal to this file — the same way flake.nix's `nixConfig` and
-# CI's nix config repeat lib/cache.nix's URL and key.
+# CI publishes to `branch` through kolu's shared publisher (the
+# `publish-closure` action, juspay/kolu#2294), which is handed
+# `binary-cache.json` — the declaration this repository checks in, because the
+# job that publishes has no Nix until the action installs its own. That file
+# names this index and the cache the bundles go to, and
+# .github/scripts/check-cache-config.py keeps it equal to this file and to
+# lib/cache.nix, the way flake.nix's `nixConfig` repeats lib/cache.nix's URL and
+# key.
 let
   repo = "juspay/agent-distro";
   branch = "ca-index";

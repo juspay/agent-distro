@@ -136,7 +136,6 @@ picker: flake
 [macos]
 scripts:
     nix shell --accept-flake-config nixpkgs#python3 nixpkgs#jq -c python3 .github/scripts/test-update-flake.py
-    nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/test-ca-index.py
     nix shell --accept-flake-config nixpkgs#python3 -c python3 .github/scripts/check-cache-config.py
 
 # Require what CI posts on main: odu's contexts plus the cache workflow's.
