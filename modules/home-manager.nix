@@ -2,29 +2,42 @@
 # Shims, the updater and the state directory are built by lib/ so any Nix
 # consumer can run the same update machinery; only the OS glue (systemd,
 # launchd, activation) belongs to Home Manager.
-{ bundles, defaultProfile, defaultFlake ? null, cache, caIndex ? import ../lib/ca-index.nix }:
+{ bundles, mkProfile, defaultProfile, defaultFlake ? null, cache, caIndex ? import ../lib/ca-index.nix }:
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.agent-distro;
   available = bundles.${pkgs.stdenv.hostPlatform.system};
-  # A built-in name selects its bundle; a reference (an absolute path or a
-  # flake reference, src/profile/resolve.ts) installs the default bundle and
-  # is read at launch.
-  # A reference may be a store path, whose context no attribute name can carry.
-  reference = !(available ? ${builtins.unsafeDiscardStringContext cfg.profile});
-  bundleName =
-    if !reference then cfg.profile
-    else if lib.hasPrefix "/" cfg.profile || lib.hasInfix ":" cfg.profile then defaultProfile
-    else throw "Unknown agent-distro profile \"${cfg.profile}\"; give a built-in name (${lib.concatStringsSep ", " (builtins.attrNames available)}), an absolute path or a flake reference such as github:juspay/skills.";
+  # What `profiles` means: a string is a reference read at launch
+  # (src/profile/resolve.ts); a path is built by mkProfile, whose store path is
+  # a reference too. One package is installed either way — the harnesses — and
+  # `profiles` is what each command exports as AI_PROFILE, `:`-separated.
+  # `profile` was the one-profile spelling of this; it is deprecated.
+  named = cfg.profile != null
+    && builtins.hasAttr (builtins.unsafeDiscardStringContext cfg.profile) available;
+  reference = cfg.profile != null && !named;
+  unknown = reference && !(lib.hasPrefix "/" cfg.profile) && !(lib.hasInfix ":" cfg.profile);
+  profiles = cfg.profiles ++ lib.optional reference
+    (if unknown then throw "Unknown agent-distro profile \"${cfg.profile}\"; name a reference in services.agent-distro.profiles instead: an absolute path or a flake reference such as github:juspay/skills."
+     else cfg.profile);
+  built = map
+    (entry:
+      if builtins.isPath entry
+      then mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = entry; }
+      else entry)
+    profiles;
+  aiProfile = lib.concatStringsSep ":" (map toString built);
+  # The one package: the default profile's build, whatever `profiles` names.
+  bundleName = defaultProfile;
   bundle = available.${bundleName};
   schedule = import ../lib/schedule.nix lib;
   stateDirectory = import ../lib/state-directory.nix {
-    inherit (cfg) flake profile;
+    inherit (cfg) flake;
+    profile = aiProfile;
     xdgStateHome = config.xdg.stateHome;
   };
   shims = import ../lib/mk-shims.nix {
     inherit pkgs bundle stateDirectory;
-    profile = if reference then cfg.profile else null;
+    profile = if aiProfile == "" then null else aiProfile;
   };
   nix = lib.getExe (if config.nix.package != null then config.nix.package else pkgs.nix);
   updater = import ../lib/mk-updater.nix {
@@ -43,14 +56,35 @@ in
 {
   options.services.agent-distro = {
     enable = lib.mkEnableOption "scheduled updates of every harness";
-    profile = lib.mkOption {
-      type = lib.types.str;
-      default = defaultProfile;
+    profiles = lib.mkOption {
+      type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
+      default = [ ];
+      example = [ "github:juspay/skills" ];
       description = ''
-        The profile: a built-in name selects its bundle; a reference, such as
-        github:juspay/skills or an absolute path to a repository with an
-        agent-distro.nix, installs the ${defaultProfile} bundle and is the
-        AI_PROFILE fallback every command reads at launch.
+        The profiles every installed command exports as AI_PROFILE, composed
+        left to right, later entries winning. A string is a profile reference,
+        read when a harness starts: a flake reference such as the example, or
+        an absolute path to a repository with an agent-distro.nix. A path is
+        built (lib.mkProfile) and read from the store, pinned and offline.
+
+        A repository's own agent-distro.nix composes over them where a harness
+        starts inside one, and is the only profile in effect where none is
+        listed. The environment's own AI_PROFILE, where it is set, wins over
+        this.
+      '';
+    };
+    profile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      # One release of warning, wherever the option is read: the list is what
+      # to set.
+      apply = value: lib.warnIf (value != null)
+        "services.agent-distro.profile is deprecated; set services.agent-distro.profiles instead."
+        value;
+      description = ''
+        Deprecated: use `profiles`. One profile, by a built-in name — which
+        installs the default package and sets no AI_PROFILE — or a reference,
+        which is `profiles = [ it ]`.
       '';
     };
     flake = lib.mkOption ({

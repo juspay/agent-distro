@@ -16,6 +16,9 @@
       discovered = import ./lib/discover-harnesses.nix;
       # Launchers name this nixpkgs by reference rather than hold its source.
       mkLaunchers = args: import ./lib/mk-launchers.nix ({ inherit nixpkgs; } // args);
+      # One profile built into a derivation: agent-distro.lib.mkProfile, which
+      # the Home Manager module builds a `profiles` path with.
+      mkProfile = args: import ./lib/mk-profile.nix ({ inherit nixpkgs; } // args);
       mkFlake = import ./lib/mk-flake.nix { inherit nixpkgs; };
       systems = import ./lib/systems.nix;
       # Unfree so harness recipes (lib/harness-pkgs.nix) share this one instance.
@@ -68,7 +71,7 @@
       # The picker stays the runnable default; profile bundles install every harness command.
       packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; check-profile = checkers.${system}; });
       homeManagerModules.default = import ./modules/home-manager.nix {
-        inherit bundles;
+        inherit bundles mkProfile;
         defaultProfile = default;
         defaultFlake = "github:juspay/agent-distro";
         cache = import ./lib/cache.nix;
