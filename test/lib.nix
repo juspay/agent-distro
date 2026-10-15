@@ -21,10 +21,11 @@ let
   # by a locked reference instead of holding its source (lib/nixpkgs-reference.nix).
   launchers = import ../lib/mk-launchers.nix { inherit pkgs nixpkgs; };
   # What one built profile says: its `env` and `settings`, and its plugins, each
-  # with the skills the reader found in it. The context is discarded as the
-  # files are read: `fromJSON` keeps the whole string it parsed as the context
-  # of every string it returns, and that context mentions the runtime store path
-  # (the `reader`), which a derivation argument may not carry textually.
+  # with the skills the reader found in it. The context is discarded after the
+  # file is read — never before, which would read as empty — because `fromJSON`
+  # keeps the string it parsed as the context of every string it returns, and
+  # that string mentions the runtime store path (the `reader`), which a
+  # derivation argument may not carry textually.
   described = profile:
     let
       read = path: builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile path));
@@ -39,10 +40,14 @@ let
         plugins);
     };
   # The stack, composed left to right as a launch composes it: plugins both, in
-  # order, and `env`/`settings` key-wise with the later profile winning.
+  # order, and the profiles' `env`/`settings` key-wise with the later one
+  # winning. It is `profileEnv` and not `env`, because `mkCheck` destructures a
+  # check's own `env` — its extra variables — a few lines below, and the two
+  # must not be the same name: the check's are the caller's, these come from the
+  # profiles the check launches.
   each = map described profiles;
   expected = builtins.foldl' (all: one: all // one.expected) { } each;
-  env = builtins.foldl' (all: one: all // one.env) { } each;
+  profileEnv = builtins.foldl' (all: one: all // one.env) { } each;
   settings = builtins.foldl' (all: one: all // one.settings) { } each;
   # The stack as one AI_PROFILE value, whitespace-separated, as a launch reads
   # it (src/profile/resolve.ts `entries`).
@@ -53,7 +58,7 @@ let
   # The `secret` variables of the profiles' `env`: a check that needs the
   # harness to start sets them, as a user who has a key would.
   secrets = lib.mapAttrs (_: _: "test-api-key")
-    (lib.filterAttrs (_: value: lib.isAttrs value && (value.secret or false)) env);
+    (lib.filterAttrs (_: value: lib.isAttrs value && (value.secret or false)) profileEnv);
   fixtures = harness: {
     changed = pkgs.writeShellScriptBin "${harness}-changed" ''
       AI_PROFILE=${lib.escapeShellArg (aiProfileOf updated)} \
@@ -103,10 +108,10 @@ let
         # script, which runs inside the VM with its support module beside it
         # (test/guest-script.nix), reads the `env` from its argv instead, after
         # the expected skills and the Codex marketplace prefix.
-        profile_env = json.loads(${builtins.toJSON (builtins.toJSON env)})
+        profile_env = json.loads(${builtins.toJSON (builtins.toJSON profileEnv)})
         profile_settings = json.loads(${builtins.toJSON (builtins.toJSON settings)})
         arguments = ${builtins.toJSON (lib.escapeShellArgs [
-          (builtins.toJSON expected) marketplace (builtins.toJSON env)
+          (builtins.toJSON expected) marketplace (builtins.toJSON profileEnv)
         ])}
         ${script}
       '';
