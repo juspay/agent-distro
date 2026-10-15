@@ -179,12 +179,3 @@ test('slow: a plain function returning a promise is timed as it settles', async 
   assert.equal(await settled, 'a');
   assert.match(text().split('\n')[1], /^agent-distro picker: asking: done in 0\.\ds$/);
 });
-
-test("slow: notice 'debug' records only the time taken", () => {
-  const { stream, text } = sink();
-  assert.equal(slow(createLogger({ stream, env: {} }).omp, 'discovering', () => 1, 'debug'), 1);
-  assert.equal(text(), '');
-  const loud = sink();
-  slow(createLogger({ stream: loud.stream, env: { AGENT_DISTRO_LOG: 'debug' } }).omp, 'discovering', () => 1, 'debug');
-  assert.equal(loud.text().split('\n')[0], 'agent-distro omp: discovering …');
-});

@@ -449,12 +449,12 @@ test('a profile that still carries `gateway` is warned about at every launch', (
   const env = { XDG_CACHE_HOME: temporary() };
   const selection = { source: 'positional', origin: directory };
   // A severity word is coloured on a terminal, as the sandbox's stderr is.
-  const warns = (cached: boolean) =>
+  const warns = () =>
     stderrOf(() => profile.resolveProfile(info, [selection], env)).replace(/\x1b\[[0-9;]*m/g, '');
-  assert.match(warns(false), /^agent-distro profile: warning: `gateway` is no longer read; see https:\/\/agent-distro\.nixos\.asia\/#profiles$/m);
-  // The evaluation is cached per content, so a warning only at evaluation
-  // time would be seen once and never again.
-  const second = warns(true);
+  assert.match(warns(), /^agent-distro profile: warning: `gateway` is no longer read; see https:\/\/agent-distro\.nixos\.asia\/#profiles$/m);
+  // The first launch evaluated the file; this one is served from the cache, so
+  // a warning emitted only at evaluation time would never be seen again.
+  const second = warns();
   assert.match(second, /`gateway` is no longer read/);
   assert.doesNotMatch(second, /evaluating/);
 });

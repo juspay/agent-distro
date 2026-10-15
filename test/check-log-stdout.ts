@@ -32,7 +32,7 @@ function run(args: string[], env: Record<string, string> = {}) {
   return result;
 }
 
-/** A script `node` runs as a command: a fake curl or nix. */
+/** A script `node` runs as a command: a fake nix. */
 function command(name: string, body: string): string {
   const path = join(temporary(), name);
   writeFileSync(path, `#!${process.execPath}\n${body}`);

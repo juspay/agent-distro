@@ -1,7 +1,7 @@
 # Metadata selects the checks; shared code supplies only VM and fixture plumbing.
 # `koluPlugin` is kolu's Agent Plugin directory, for the `koluLaunch` checks:
 # they load it through AGENT_DISTRO_PLUGINS rather than from the profile.
-{ pkgs, launchers, profile, mkLaunchers ? import ../lib/mkLaunchers.nix, features ? [ ], koluPlugin ? null }:
+{ pkgs, launchers, profile, mkLaunchers ? import ../lib/mk-launchers.nix, features ? [ ], koluPlugin ? null }:
 let
   inherit (pkgs) lib;
   common = import ./common.nix;

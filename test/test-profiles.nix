@@ -65,15 +65,17 @@ let
       agents.title.model = "litellm/open-fast";
     };
   };
-  # JSON is a Nix expression, so the file and the checks below read one source.
+  # The file and the checks below read one source: JSON as a string literal,
+  # which Nix parses, handed to `builtins.fromJSON` (pure, so the restricted
+  # evaluation of a profile read at launch is unaffected).
   profileFile = ''
     {
       name = "gateway";
       description = "A team's skills, with the LiteLLM gateway it runs them on";
       plugins = [ ./. "${koluPlugin}" ];
       packages = pkgs: [ pkgs.mcp-nixos ];
-      env = ${builtins.toJSON profileEnv};
-      settings = ${builtins.toJSON profileSettings};
+      env = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileEnv)};
+      settings = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileSettings)};
     }
   '';
   # Skills per plugin, as the profile's checks expect them.

@@ -33,13 +33,22 @@ let
   # system. lib/mk-launchers.nix builds it once, for every adapter and the picker.
   info = profile: nixpkgs: {
     default = profile.name;
-    builtins = map (p: {
-      inherit (p) name description;
-      # A distribution's own profile: what it exports and the harness settings
-      # it defaults, as an `agent-distro.nix` read at launch would.
-      env = p.env or { };
-      settings = p.settings or { };
-    }) ([ profile ] ++ pkgs.lib.optional (profile.name != vanilla.name) vanilla);
+    builtins = map
+      (p:
+        let
+          # A profile built in is never evaluated, so the resolver cannot
+          # report what it no longer reads: the build does.
+          warned = pkgs.lib.warnIf (p ? gateway)
+            "agent-distro: profile ${p.name}: `gateway` is no longer read; see https://agent-distro.nixos.asia/#profiles" p;
+        in
+        {
+          inherit (warned) name description;
+          # A distribution's own profile: what it exports and the harness
+          # settings it defaults, as an `agent-distro.nix` read at launch would.
+          env = warned.env or { };
+          settings = warned.settings or { };
+        })
+      ([ profile ] ++ pkgs.lib.optional (profile.name != vanilla.name) vanilla);
     nixpkgs = import ./nixpkgs-reference.nix pkgs nixpkgs;
     # Without its context, so the launchers do not hold it.
     nixpkgsPath = builtins.unsafeDiscardStringContext (toString pkgs.path);

@@ -29,8 +29,7 @@
  * say it is taking long, so for a synchronous `fn` the start line is printed
  * before it runs: call sites wrap only work known to be slow, once a cache has
  * missed (an evaluation not cached, a reference not in the store, a build
- * the dry run found in the cache). Work that is bounded and runs every launch
- * passes `notice: 'debug'` instead, which only records the time taken.
+ * the dry run found in the cache).
  * An `async` function gets the start line only if it has not settled after
  * NOTICE_MS; a plain function returning a promise is timed as it settles.
  * Either way the time taken is logged at debug.
@@ -150,12 +149,11 @@ const thenable = (value: unknown): value is PromiseLike<unknown> =>
 
 /**
  * Run `fn`, telling a person waiting on it what it is; see the head of this
- * file. `notice` is the level of that line: `debug` for work that is bounded
- * and runs on every launch, where only the time taken is worth recording.
+ * file.
  */
-export function slow<T>(logger: Logger, label: string, fn: () => T, notice: 'info' | 'debug' = 'info'): T {
+export function slow<T>(logger: Logger, label: string, fn: () => T): T {
   const since = performance.now();
-  const start = () => notice === 'info' ? logger.start(`${label} …`) : logger.debug(`${label} …`);
+  const start = () => logger.start(`${label} …`);
   const done = () => logger.debug(`${label}: done in ${seconds(since)}`);
   // Only an `async` function can be left to the timer: a synchronous call
   // blocks the loop, so nothing could print its notice while it runs.

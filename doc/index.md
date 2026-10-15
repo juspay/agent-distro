@@ -538,7 +538,7 @@ Its `agent-distro.nix` is the whole of it:[^litellm-key]
   name = "juspay";
   description = "Juspay skills + Kolu, via Juspay's LiteLLM gateway";
   plugins = [ ./. "github:juspay/kolu?dir=agent-plugin" ];
-  packages = pkgs: [ pkgs.mcp-nixos ];
+  packages = pkgs: pkgs.lib.optionals (pkgs.stdenv.hostPlatform.system == "x86_64-linux") [ pkgs.mcp-nixos ];
   env = {
     LITELLM_BASE_URL = "https://grid.ai.juspay.net";
     OMP_SKIP_SETUP = "1";
@@ -684,7 +684,8 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 
 Consumers can import `test/lib.nix { pkgs; launchers; profile; features; koluPlugin ? null; }`. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
 
-- **Also `mkLaunchers`.** Rebuild checks, and the checks that run against the fixture-backed profile, also accept `mkLaunchers`.
+- **Also `mkLaunchers`.** Rebuild checks also accept `mkLaunchers`. A profile selected by the `gateway` feature must point at the fixture's
+  URL itself (`http://127.0.0.1:8080`): `test/lib.nix` serves it, and no longer rewrites the profile's `env`.
 - **Plugin rebuilds.** Select plugin rebuild checks only for nonempty skill plugins.
 - **Coverage.** The test flake covers vanilla (with kolu's plugin loaded at launch), the Juspay profile built in, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a copy of the Juspay profile's `agent-distro.nix` matching the built-in one in OMP, Codex and Claude Code; and `ca-update`: the update that takes the published content-addressed bundle as an untrusted user, and the skip where the index publishes none.
 

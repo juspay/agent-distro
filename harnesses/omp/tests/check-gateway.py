@@ -63,7 +63,7 @@ assert effective_setting("task.showResolvedModelBadge") is True
 assert effective_setting("hideThinkingBlock") is True
 # Whether the gateway serves anything is OMP's business: the wrapper hands it
 # no model list to keep.
-machine.fail(f"test -e /home/testuser/.omp/agent/models.yml")
+machine.fail("test -e /home/testuser/.omp/agent/models.yml")
 
 # A user's own value is never replaced: an expensive primary and a display
 # default turned off both survive, with the profile's other keys filled in
