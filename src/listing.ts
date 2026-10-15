@@ -1,8 +1,8 @@
 /**
- * What `agent-distro --list --json` prints, and what the picker draws: one
- * value computed in lib/picker.nix from the versions the package ships
- * (lib/mk-launchers.nix), with the profile in effect resolved at launch
- * (src/profile/resolve.ts).
+ * What `agent-distro --list --json` prints, and what the chooser draws: the
+ * menu `lib/picker.nix` computes from the launchers the package carries, plus —
+ * for `--list --json` — the profile in effect, resolved at launch
+ * (src/profile/cli.ts, src/profile/resolve.ts).
  *
  *   { "harnesses": [ { "name": "claude", "tagline": "…",
  *                      "title": "Claude Code", "version": "2.1.291" } ],

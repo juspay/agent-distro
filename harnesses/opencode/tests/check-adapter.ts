@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 
 const [src] = process.argv.slice(2);
+const { adapter } = await import(join(src, 'harness/opencode.ts'));
 const temporary = () => mkdtempSync(join(tmpdir(), 'opencode-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 
@@ -20,10 +21,23 @@ const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 // names it: the session config loads it on every launch.
 const PLUGIN = '/nix/store/example-opencode-plugin-litellm/src';
 
-function writeConfig(out: string, descriptions: string[]) {
+/** The session config a launcher builds: the vendored plugin, and nothing else. */
+function writeConfig(out: string) {
   const args = out + '.args.json';
-  writeFileSync(args, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', plugin: PLUGIN, descriptions }));
+  writeFileSync(args, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', plugin: PLUGIN }));
   return spawnSync(process.execPath, [join(src, 'harness/opencode.ts'), out, args], { encoding: 'utf8' });
+}
+
+/** One plugin's translation, as a launch translates it (`adapter.translate`). */
+function translate(description: unknown, out: string, report: (message: string) => void = () => { }) {
+  mkdirSync(out, { recursive: true });
+  adapter.translate(description, out, { bash: '/bin/sh', env: '/usr/bin/env' }, report);
+  return readJson(join(out, 'fragment.json'));
+}
+
+/** A plugin as a launch holds it: its description, and the translation just made. */
+function plugin(description: unknown, out: string) {
+  return { description, translation: out };
 }
 
 /** The session config with a profile's `settings.opencode` merged over it, as the launcher does it. */
@@ -37,29 +51,29 @@ describe('OpenCode', () => {
     const local = { type: 'stdio', command: 'echo', args: [], env: {} };
     const remote = { type: 'streamable-http', url: 'https://example.com/mcp', headers: {} };
     const root = temporary();
-    const description = (plugin: string, server: unknown) => {
-      const path = join(root, `${plugin}.json`);
-      writeFileSync(path, JSON.stringify({
-        version: '1.0.0', root, manifest: { name: plugin }, skills: {}, mcpServers: { shared: server },
-      }));
-      return path;
-    };
-    const first = description('first-plugin', local);
+    const described = (plugin: string, server: unknown) => ({
+      version: '1.0.0', root, manifest: { name: plugin }, skills: {}, mcpServers: { shared: server },
+    });
+    const first = described('first-plugin', local);
     const out = join(root, 'valid');
-    const result = writeConfig(out, [first]);
-    assert.equal(result.status, 0, String(result.stderr));
-    const config = readJson(join(out, 'opencode.json'));
-    assert.deepEqual(Object.keys(config.mcp.servers), ['shared']);
-    assert.deepEqual(config.skills, []);
+    assert.equal(writeConfig(out).status, 0);
+    const fragment = translate(first, join(root, 'first-out'));
+    assert.deepEqual(Object.keys(fragment.servers), ['shared']);
+    assert.equal(fragment.skills, null);
     for (const server of [local, remote]) {
-      const second = description('second-plugin', server);
-      [[first, second], [second, first]].forEach((order, index) => {
-        const collision = writeConfig(join(root, `collision-${server.type}-${index}`), order);
-        assert.notEqual(collision.status, 0);
-        for (const expected of ['MCP server "shared"', '"first-plugin"', '"second-plugin"']) {
-          assert.ok(String(collision.stderr).includes(expected), String(collision.stderr));
-        }
-      });
+      // Two plugins declaring one name: an OpenCode launch keeps one silently,
+      // so this refuses, naming both, whichever order they come in.
+      const second = described('second-plugin', server);
+      const secondAt = join(root, `second-${server.type}`);
+      translate(second, secondAt);
+      const plugins = [plugin(first, join(root, 'first-out')), plugin(second, secondAt)];
+      for (const order of [plugins, [...plugins].reverse()]) {
+        assert.throws(() => adapter.launch({
+          args: { config: out, name: 'opencode' },
+          plugins: order,
+          cache: temporary(),
+        }), /MCP server "shared" is declared by both/);
+      }
     }
   });
 
@@ -68,25 +82,34 @@ describe('OpenCode', () => {
     const source = join(root, 'skills/guide');
     mkdirSync(source, { recursive: true });
     writeFileSync(join(source, 'SKILL.md'), '---\nname: guide\ndescription: Guide\n---\nRead me.\n');
-    const description = join(root, 'plugin.json');
-    writeFileSync(description, JSON.stringify({
+    const description = {
       root, manifest: { name: 'example' }, skills: { guide: ['SKILL.md'] },
       mcpServers: {
         remote: { type: 'streamable-http', url: 'https://example.com/mcp', headers: { Authorization: 'Bearer {env:TOKEN}' } },
+        local: { type: 'stdio', command: './server', args: [], env: {} },
       },
-    }));
+    };
     const out = join(root, 'out');
-    assert.equal(writeConfig(out, [description]).status, 0);
+    assert.equal(writeConfig(out).status, 0);
     const plain = readJson(join(out, 'opencode.json'));
     // The plugin that discovers a LiteLLM server's models is loaded by every
-    // launch, profile or not, and nothing names a provider yet.
+    // launch, profile or not, and nothing names a provider yet. A profile's
+    // plugins are merged into this at launch, not written into it.
     assert.deepEqual(plain.plugins, [PLUGIN]);
     assert.ok(!('providers' in plain));
-    assert.deepEqual(plain.skills, [join(out, 'skills/example')]);
-    const skills = plain.skills[0];
-    assert.equal(readFileSync(join(skills, 'guide/SKILL.md'), 'utf8'), readFileSync(join(source, 'SKILL.md'), 'utf8'));
-    assert.equal(plain.mcp.servers.remote.type, 'remote');
-    assert.ok(existsSync(join(out, 'bin')));
+    assert.deepEqual(plain.skills, []);
+    assert.deepEqual(plain.mcp.servers, {});
+    // The translation a launch makes: skills materialized beside it, servers
+    // as OpenCode reads them, a stdio one through a generated launcher.
+    const at = join(root, 'translated');
+    const diagnostics: string[] = [];
+    const fragment = translate(description, at, (message: string) => diagnostics.push(message));
+    assert.deepEqual(fragment.skills, join(at, 'skills/example'));
+    assert.equal(readFileSync(join(fragment.skills, 'guide/SKILL.md'), 'utf8'), readFileSync(join(source, 'SKILL.md'), 'utf8'));
+    assert.equal(fragment.servers.remote.type, 'remote');
+    assert.equal(fragment.servers.local.type, 'local');
+    assert.ok(existsSync(fragment.servers.local.command[0]));
+    assert.deepEqual(diagnostics, []);
     // The profile's `settings.opencode` is merged over the session config at
     // launch: a provider it names, and the models it points at.
     const cache = join(root, 'cache');
@@ -111,8 +134,9 @@ describe('OpenCode', () => {
     // A profile's plugins come after the vendored one: OpenCode concatenates
     // `plugins` across config files, and this document's entry is the session's.
     assert.deepEqual(config.plugins, [PLUGIN, 'opencode-plugin-litellm@1.4.3']);
-    // `skills` and `mcp.servers` are the launcher's own — they name what this
-    // launch's plugins resolved to — while the rest of `mcp` is the profile's.
+    // `skills` and `mcp.servers` are the session config's own — a launch's
+    // plugins merge into them and nothing else — while the rest of `mcp` is
+    // the profile's.
     assert.deepEqual(config.skills, plain.skills);
     assert.deepEqual(config.mcp.servers, plain.mcp.servers);
     assert.equal(config.mcp.timeout, 30);

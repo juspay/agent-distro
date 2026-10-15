@@ -16,7 +16,6 @@ let
   config = runCommand "${name}-config" { } ''
     ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON (runtime.launcherInputs // {
       inherit plugin;
-      descriptions = [ ];
     }))}
   '';
   launchPlugins = runtime.launchPlugins (runtime.info nixpkgs // {

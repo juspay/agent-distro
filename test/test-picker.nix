@@ -1,4 +1,4 @@
-{ name ? "picker", menu, profile }:
+{ name ? "picker", menu }:
 let
   common = import ./common.nix;
   harnesses = (import ../lib/discover-harnesses.nix).ordered;

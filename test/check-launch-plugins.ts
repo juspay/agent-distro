@@ -54,7 +54,7 @@ function describedPlugin(root: string) {
 }
 
 const info = { nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
-const claudeArgs = () => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', info });
+const claudeArgs = () => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', ...info });
 
 function resolve(value: string, cache: string, own: string[] = [], reports: string[] = [], adapter = claude) {
   return launch.resolve('claude', adapter, claudeArgs(), value, { XDG_CACHE_HOME: cache },

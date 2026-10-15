@@ -6,10 +6,10 @@
  * every harness launcher before it starts its harness.
  *
  * ARGS_JSON is written by a harness launcher at build time: `harness` names the
- * adapter (`src/harness/<harness>.ts`, which exports `adapter`), `profile` lists
- * the built-in profile's plugins as `{ description, ... }` entries, `info`
- * describes that profile (src/profile/resolve.ts), and the rest is
- * the adapter's own. Stdout is shell for the launcher to `eval`: `launched` is
+ * adapter (`src/harness/<harness>.ts`, which exports `adapter`), `nixpkgs` and
+ * `system` are what it knows of the build — the `Info` a profile's `packages`
+ * are evaluated against (src/profile/resolve.ts) — and the rest is the
+ * adapter's own. Stdout is shell for the launcher to `eval`: `launched` is
  * what the adapter prints (extra arguments as shell words, or a path),
  * `profile_env_secrets` names each `secret` variable of the profile's `env`
  * with its hint, as `NAME=hint`, for the launcher to prompt for, every other
@@ -17,12 +17,11 @@
  * harness as JSON (empty for none), and the profile's packages go first on
  * PATH. `AGENT_DISTRO_SETTINGS=0` leaves all three empty: plugins only.
  *
- * A profile composed over the built-in one keeps the built-in's plugins and
- * adds its own; one that does not include it (chosen positionally, or another
- * built-in name) replaces them. Either way its plugin directories are
- * translated exactly as the variable's, ahead of them, and its env, settings
- * and packages are the ones in effect. Each directory is read exactly as a
- * built-in plugin is, then translated once per content into
+ * Every entry of AI_PROFILE composes over the one before it, left to right, on
+ * top of the launcher's own profile; a positional selector is that profile
+ * alone, over nothing. Plugins accumulate bottom first, and `env`, `settings`
+ * and packages are the topmost entry's. Each directory is read exactly as the
+ * launcher's own is, then translated once per content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
  * already content-addressed; otherwise it hashes the directory's NAR
@@ -35,14 +34,15 @@
  * what is in use rather than every version ever seen.
  *
  * Plugins are matched by manifest name, never by version: a plugin on the
- * variable, or of a composed profile, replaces the built-in plugin of the same
- * name, and among those the last of a name wins.
+ * variable, or of a profile above, replaces the plugin of the same name from a
+ * profile below it, and among those the last of a name wins.
  *
  * A launch names the profile in effect on stderr when a repository's
- * `agent-distro.nix` or AI_PROFILE chose it, worded as `--list` words it and
- * followed by the website (`SITE`), since that line is the only one a plain
- * launch prints and the change to plugins, PATH, env and settings is silent
- * otherwise. At debug it also logs each plugin directory and where it came
+ * `agent-distro.nix` or AI_PROFILE chose it — the whole stack, from the bottom
+ * up, worded as `--list` words it and followed by the website (`SITE`) — since
+ * that line is the only one a plain launch prints and the change to plugins,
+ * PATH, env and settings is silent otherwise. At debug it also logs each plugin
+ * directory and where it came
  * from, the PATH additions, the environment and settings, and the arguments it
  * hands the harness.
  */
@@ -580,7 +580,7 @@ export async function main(argsPath: string): Promise<number> {
   // reports the same profile failure, not by whichever harness was launched.
   let logger = log.profile;
   try {
-    const profile = profileInEffect(args.info, process.env);
+    const profile = profileInEffect(args, process.env);
     logger = log.plugin;
     const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,

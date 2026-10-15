@@ -36,8 +36,11 @@ let
     # What the updater builds — `packages.<system>.${attribute}` — not the
     # AI_PROFILE string: a profile's own store path changes whenever its input
     # does, and keying the state by it would prune `current` and `last-success`
-    # on every `nix flake update`. It is also the value an install that
-    # predates `profiles` already hashed.
+    # on every `nix flake update`. The attribute is what this release names the
+    # one package by, so an install that predates it — which hashed the old
+    # `vanilla` profile name — gets a new state directory once: the update
+    # fetches the package again, and `agent-distro-prune` below removes the
+    # directory it used to read on the same activation.
     profile = attribute;
     xdgStateHome = config.xdg.stateHome;
   };

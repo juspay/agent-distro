@@ -61,7 +61,7 @@
       # the way a caller pinning one reaches them.
       built = list: map (profile: agent-distro.lib.mkProfile { inherit system profile; }) list;
       suite = features: profiles: import ./lib.nix {
-        inherit pkgs features koluPlugin;
+        inherit pkgs nixpkgs features koluPlugin;
         profiles = built profiles;
         updated = built (map rebuilt profiles);
       };
@@ -190,8 +190,9 @@
           '';
           # Profiles read at launch, in a VM: paths and git+file: references,
           # discovery from a nested directory, precedence, the refusal of a
-          # package the binary cache lacks, and a copy of the Juspay profile's
-          # agent-distro.nix behaving as the built-in Juspay profile did.
+          # package the binary cache lacks, and a fixture copy of the Juspay
+          # profile's `agent-distro.nix` read at launch, the way a profile
+          # repository carries one.
           profiles = pkgs.testers.runNixOSTest (import ./test-profiles.nix {
             inherit pkgs agent-distro nixpkgs juspay-skills koluPlugin;
           });

@@ -131,7 +131,7 @@ in
         journal = "journalctl _UID=1000 _SYSTEMD_USER_UNIT=agent-distro-update.service --no-pager"
         machine.wait_until_succeeds(journal + " | grep -F " + shlex.quote(line))
 
-    source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = ""; })}"
+    source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "default"; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     history = "/home/testuser/custom-state/agent-distro/history.log"
     events = []

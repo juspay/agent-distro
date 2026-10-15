@@ -13,8 +13,10 @@ let
   launchers = mkLaunchers { inherit pkgs sources; };
   discovery = import ../lib/discover-harnesses.nix;
   inherit (launchers) package;
+  # The stub's version is the literal the package must carry: comparing the
+  # file against the expression that built it would prove nothing.
   expectedVersions = pkgs.writeText "expected-versions" (lib.concatMapStrings
-    (name: "${name}\t${discovery.metadata.${name}.title}\t${launchers.${name}.version}\n") discovery.ordered);
+    (name: "${name}\t${discovery.metadata.${name}.title}\t0\n") discovery.ordered);
   expectedCommands = pkgs.writeText "expected-commands"
     (lib.concatMapStrings (name: "${name}\n") (lib.sort (a: b: a < b) (discovery.ordered ++ [ "agent-distro" ])));
 in

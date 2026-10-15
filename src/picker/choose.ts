@@ -558,7 +558,7 @@ async function main() {
   const { listing, auth, profile, remembered } = parseArguments(process.argv.slice(2));
   // Auth is a launch-time fact: probe every row once, before drawing.
   // `Row` is the listing's harness plus the picker-only `auth`, which the listing never carries.
-  const rows: Row[] = listing.profiles[0].harnesses;
+  const rows: Row[] = listing.harnesses;
   for (const row of rows) {
     const scheme = auth[row.name];
     if (scheme) row.auth = probe(spec(scheme, row.name, profile?.env ?? {}), process.env, io);

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { writeConfig, mergeState } = await import(join(process.argv[2], 'harness/pi.ts'));
+const { adapter, mergeState, writeConfig } = await import(join(process.argv[2], 'harness/pi.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'pi-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -43,8 +43,7 @@ test('translation and skipped transports', () => {
   writeFileSync(join(root, 'skills/guide/SKILL.md'), 'Guide');
   symlinkSync('SKILL.md', join(root, 'skills/guide/approved'));
   writeFileSync(join(root, 'skills/guide/unapproved'), 'Do not copy');
-  const description = join(root, 'description.json');
-  writeFileSync(description, JSON.stringify({
+  const description = {
     version: '1.0.0', root, manifest: { name: 'example' },
     skills: { guide: ['SKILL.md', 'approved'] },
     mcpServers: {
@@ -53,27 +52,44 @@ test('translation and skipped transports', () => {
       sse: { type: 'sse', url: 'https://example.test/sse', headers: {} },
       equals: { type: 'stdio', command: 'bad=command', args: [], env: {} },
     },
-  }));
-  const args = (name: string, ...descriptions: string[]) => {
-    const path = join(root, `${name}.json`);
-    writeFileSync(path, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', descriptions }));
-    return path;
   };
 
+  // What one launch translates is what this writes: `adapter.translate` is the
+  // whole translation, materialized under its own output path.
   const out = join(root, 'out-pi-config');
-  const diagnostics = captureStderr(() => writeConfig(out, args('single', description)));
-  const config = readJson(join(out, 'config.json'));
-  assert.deepEqual(new Set(Object.keys(config.mcpServers)), new Set(['local', 'http']));
-  assert.ok(diagnostics.includes('Pi does not support SSE'), diagnostics);
-  assert.ok(diagnostics.includes('command containing "="'), diagnostics);
-  const local = config.mcpServers.local;
+  const diagnostics: string[] = [];
+  adapter.translate(description, out, { bash: '/bin/sh', env: '/usr/bin/env' },
+    (message: string) => diagnostics.push(message));
+  const fragment = readJson(join(out, 'fragment.json'));
+  assert.deepEqual(new Set(Object.keys(fragment.mcpServers)), new Set(['local', 'http']));
+  assert.ok(diagnostics.some((line) => line.includes('Pi does not support SSE')), diagnostics);
+  assert.ok(diagnostics.some((line) => line.includes('command containing "="')), diagnostics);
+  const local = fragment.mcpServers.local;
   assert.deepEqual(Object.keys(local), ['command']);
   assert.ok(readFileSync(local.command, 'utf8').includes('PLUGIN_ROOT='));
-  const skills = join(config.skills[0], 'guide');
+  const skills = join(fragment.skills[0], 'guide');
   assert.ok(!lstatSync(join(skills, 'approved')).isSymbolicLink());
   assert.equal(readFileSync(join(skills, 'approved'), 'utf8'), 'Guide');
   assert.ok(!existsSync(join(skills, 'unapproved')));
-  assert.throws(() => writeConfig(join(root, 'collision'), args('double', description, description)), /declared by both/);
+});
+
+test('the launch refuses two plugins naming one server', async () => {
+  const root = temporary();
+  // The base config the launch merges into, as the launcher builds it.
+  await writeConfig(root);
+  const shared = { type: 'stdio', command: '/bin/true', args: [], env: {} };
+  const description = { version: '1.0.0', root, manifest: { name: 'example' }, skills: {}, mcpServers: { shared } };
+  const translated = () => {
+    const translation = temporary();
+    writeFileSync(join(translation, 'fragment.json'),
+      JSON.stringify({ skills: [], mcpServers: { local: { command: '/bin/true' } } }));
+    return { description, translation };
+  };
+  assert.throws(() => adapter.launch({
+    args: { config: root, name: 'pi' },
+    plugins: [translated(), translated()],
+    cache: temporary(),
+  }), /declared by both/);
 });
 
 test('empty contributions keep settings default', () => {

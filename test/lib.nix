@@ -12,12 +12,14 @@
 # content changed is installed again. `koluPlugin` is kolu's Agent Plugin
 # directory, for the `koluLaunch` checks: they load it through
 # AGENT_DISTRO_PLUGINS rather than from the profile.
-{ pkgs, profiles ? [ ], updated ? null, features ? [ ], koluPlugin ? null }:
+{ pkgs, nixpkgs ? null, profiles ? [ ], updated ? null, features ? [ ], koluPlugin ? null }:
 let
   inherit (pkgs) lib;
   common = import ./common.nix;
   discovery = import ../lib/discover-harnesses.nix;
-  launchers = import ../lib/mk-launchers.nix { inherit pkgs; };
+  # `nixpkgs`, the flake input `pkgs` came from, so the guest launchers name it
+  # by a locked reference instead of holding its source (lib/nixpkgs-reference.nix).
+  launchers = import ../lib/mk-launchers.nix { inherit pkgs nixpkgs; };
   # What one built profile says: its `env` and `settings`, and its plugins, each
   # with the skills the reader found in it.
   described = profile:
@@ -41,7 +43,7 @@ let
   expected = builtins.foldl' (all: one: all // one.expected) { } each;
   env = builtins.foldl' (all: one: all // one.env) { } each;
   settings = builtins.foldl' (all: one: all // one.settings) { } each;
-  aiProfile = lib.concatStringsSep ":" (map toString profiles);
+  aiProfile = lib.concatStringsSep " " (map toString profiles);
   # The prefix every one-launch Codex marketplace is named with
   # (src/harness/codex.ts); a check that needs the marketplaces derives the rest.
   marketplace = "agent-distro-";
@@ -51,7 +53,7 @@ let
     (lib.filterAttrs (_: value: lib.isAttrs value && (value.secret or false)) env);
   fixtures = harness: {
     changed = pkgs.writeShellScriptBin "${harness}-changed" ''
-      AI_PROFILE=${lib.escapeShellArg (lib.concatStringsSep ":" (map toString (if updated == null then profiles else updated)))} \
+      AI_PROFILE=${lib.escapeShellArg (lib.concatStringsSep " " (map toString (if updated == null then profiles else updated)))} \
         exec ${lib.getExe launchers.${harness}} "$@"
     '';
     upstream = pkgs.writeShellScriptBin "${harness}-upstream" ''

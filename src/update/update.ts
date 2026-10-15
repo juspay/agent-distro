@@ -50,6 +50,12 @@ type Config = {
   substituters: Record<string, string>;
   /** Base URL of the content-addressed index (lib/ca-index.nix, via mkUpdater). */
   caIndex: string;
+  /**
+   * The flake attribute the index names and the update builds
+   * (`packages.<system>.<attribute>`, lib/mk-updater.nix). Absent in a config
+   * an older build wrote, which named the one package (src/update/ca-index.ts).
+   */
+  attribute?: string;
   /** The launchd schedule: one period per run, phased onto the first hour. */
   periodSeconds: number;
   offsetSeconds: number;
@@ -283,7 +289,7 @@ async function published(nix: string, config: Config, revision: string): Promise
   // The base is a config value, so it is validated before anything is fetched
   // from it (src/update/ca-index.ts): one that is not an https URL without
   // credentials, query or fragment is ignored, and the update then skips.
-  const url = indexEntryUrl(config.caIndex, revision, system);
+  const url = indexEntryUrl(config.caIndex, revision, system, config.attribute ?? ATTRIBUTE);
   if (url === null) {
     log.update.warn(`ignoring caIndex ${JSON.stringify(config.caIndex)}: it must be an https URL `
       + 'with no credentials, query or fragment');
@@ -530,7 +536,7 @@ export async function update(config: Config, report: Report = plain, nixLog?: Ni
       report.result({ result: 'failed', reason: 'cannot resolve flake', ...(detail ? { detail } : {}) });
       return 1;
     }
-    const target = `${ref}#${ATTRIBUTE}`;
+    const target = `${ref}#${config.attribute ?? ATTRIBUTE}`;
     // Never compile on a cache miss, nor when what would be built is unknown.
     const plan = wouldCompile(nix, target, options);
     if ('unknown' in plan) return skip(`cannot tell what the package would build (${plan.unknown})`);

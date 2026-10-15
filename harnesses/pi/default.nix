@@ -1,14 +1,12 @@
 # Pi's subcommands require resources in settings, not prepended CLI flags.
 { pkgs, nixpkgs, package }:
 let
-  inherit (pkgs) lib writeShellApplication runCommand writeText gum;
+  inherit (pkgs) lib writeShellApplication runCommand gum;
   pi = package;
 
   runtime = import ../../lib/runtime.nix pkgs;
   config = runCommand "pi-config" { } ''
-    ${runtime.script "harness/pi.ts"} write-config "$out" ${writeText "pi-args.json" (builtins.toJSON (runtime.launcherInputs // {
-      descriptions = [ ];
-    }))}
+    ${runtime.script "harness/pi.ts"} write-config "$out"
   '';
   launchPlugins = runtime.launchPlugins (runtime.info nixpkgs // {
     harness = "pi";

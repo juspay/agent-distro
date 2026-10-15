@@ -53,8 +53,9 @@
       packages = lib.genAttrs systems (system: lib.removeAttrs launchers.${system} [ "picker" "package" ] // {
         default = agentDistro.${system};
         # The one package under the name the profile-keyed index published it:
-        # the transition the installed updates are served from, removed with
-        # the extra index keys .github/workflows/cache.yml writes.
+        # the transition the installed updates are served from until
+        # 2026-11-14, removed with the extra index keys
+        # .github/workflows/cache.yml writes.
         vanilla = agentDistro.${system};
         check-profile = checkers.${system};
       });

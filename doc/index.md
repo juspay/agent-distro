@@ -302,7 +302,7 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro
 [^ca-index]: Where the index lives is stated once, in [lib/ca-index.nix](https://github.com/juspay/agent-distro/blob/main/lib/ca-index.nix): `mkUpdater` reads it, [`binary-cache.json`](https://github.com/juspay/agent-distro/blob/main/binary-cache.json) — the declaration `cache.yml` hands the publisher — carries it and the cache, and `.github/scripts/check-cache-config.py` keeps that file and this page equal to both.
 [^untrusted]: Nothing more is needed when you are a trusted Nix user or run a single-user install. Otherwise the daemon ignores the updater's request unless your system config already lists the cache.
 [^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable and no content-addressed path is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
-[^old-key]: Transition only: CI also writes `<rev>/<system>/vanilla.json` and `latest/<system>/vanilla.json`, the same content under a `vanilla` attribute that aliases the one package, so updaters still reading the old profile-keyed name keep working. Both go away in a later release; the updater here reads `default.json`.
+[^old-key]: Transition only: CI also writes `<rev>/<system>/vanilla.json` and `latest/<system>/vanilla.json`, the same content under a `vanilla` attribute that aliases the one package, so updaters still reading the old profile-keyed name keep working. Both, and `packages.<system>.vanilla`, go away on **2026-11-14**, thirty days after the one-package release: the PR that removes them also drops the alias from `cache.yml` and from `flake.nix`.
 
 ### Troubleshooting
 
@@ -362,7 +362,7 @@ agent-distro.lib.mkLaunchers { pkgs; sources ? …; nixpkgs ? null; }
 #   with `packages`; any other `pkgs` puts its source in the closure. `sources
 #   = name: pkgs: …` substitutes a harness's own package, for fixtures.
 
-agent-distro.lib.mkPicker { pkgs; launchers; }
+agent-distro.lib.mkPicker { pkgs; launchers; nixpkgs ? null; }
 # → lib/picker.nix's derivation: the interactive harness chooser over
 #   `launchers`, a `mkLaunchers` result.
 
@@ -375,11 +375,15 @@ agent-distro.lib.mkProfile { system; profile; }
 #   at launch and has no place in a build.
 
 agent-distro.lib.stateDirectory { xdgStateHome; flake; profile; }
-# → the string "<xdgStateHome>/agent-distro/<sha256 of {flake, profile}>", the
-#   same hash Home Manager computes today, with `profile` what the updater
-#   builds (the module passes the package's attribute), so a profile's own
-#   store path cannot churn what holds `current`. One function, so a consumer
-#   and the updater can never disagree on where `current` lives.
+# → the string "<xdgStateHome>/agent-distro/<sha256 of {flake, profile}>", with
+#   `profile` what the updater builds (the module passes the package's
+#   attribute, `default`), not an AI_PROFILE: a profile's own store path
+#   changes whenever its input does, and hashing it would churn what holds
+#   `current` on every `nix flake update`. An install that predates the
+#   one-package release hashed the old `vanilla` name, so its first activation
+#   after the upgrade starts a new state directory and the prune hook removes
+#   the old one. One function, so a consumer and the updater can never
+#   disagree on where `current` lives.
 
 agent-distro.lib.mkShims { pkgs; package; stateDirectory; profile ? null; }
 # → a derivation whose bin/ holds one shim per package.commands, each
@@ -702,12 +706,10 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 
 ### Test library
 
-Consumers can import `test/lib.nix { pkgs; profiles ? [ ]; updated ? null; features ? [ ]; koluPlugin ? null; }`. `profiles` are `mkProfile` derivations, whose store paths are the `AI_PROFILE` the checks launch with; `updated` is the same profiles with their plugins rebuilt to new store paths, for the `changed` fixture. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
+Consumers can import `test/lib.nix { pkgs; nixpkgs ? null; profiles ? [ ]; updated ? null; features ? [ ]; koluPlugin ? null; }`, where `nixpkgs` is the flake input `pkgs` came from, so the guest launchers name it by a locked reference rather than hold its source. `profiles` are `mkProfile` derivations, whose store paths are the `AI_PROFILE` the checks launch with; `updated` is the same profiles with their plugins rebuilt to new store paths, for the `changed` fixture. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
 
-- **Also `mkLaunchers`.** Rebuild checks also accept `mkLaunchers`. A profile selected by the `gateway` feature must point at the fixture's
-  URL itself (`http://127.0.0.1:8080`): `test/lib.nix` serves it, and no longer rewrites the profile's `env`.
 - **Plugin rebuilds.** Select plugin rebuild checks only for nonempty skill plugins.
-- **Coverage.** The test flake covers the package with no profile (with kolu's plugin loaded at launch), the Juspay profile built with `mkProfile`, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a copy of the Juspay profile's `agent-distro.nix` reaching OMP, Codex and Claude Code as the built one does; and `ca-update`: the update that takes the published content-addressed path as an untrusted user, and the skip where the index publishes none.
+- **Coverage.** The test flake covers the package with no profile (with kolu's plugin loaded at launch), the Juspay profile built with `mkProfile`, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a repository's `agent-distro.nix` reaching OMP, Codex and Claude Code as the same profile built by `mkProfile` does; and `ca-update`: the update that takes the published content-addressed path as an untrusted user, and the skip where the index publishes none.
 
 [^features]: The features are `plugins`, `gateway` (the checks that run against the fixture-backed LiteLLM profile), `kolu`, `spec`, and `koluLaunch`, which loads `koluPlugin` through `AGENT_DISTRO_PLUGINS`.
 

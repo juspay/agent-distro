@@ -133,12 +133,12 @@ jobs:
 
       - name: Read the package this publishes
         id: package
-        # The one package per system, and — for one transition window — the same
-        # package under the attribute the profile-keyed index published it as:
-        # an installed updater polls `<rev>/<system>/vanilla.json` until it is
-        # replaced by one that reads `<rev>/<system>/default.json`, and the PR
-        # that moves everyone off the old key removes this alias and the second
-        # installable and smoke line here.
+        # The one package per system, and — until 2026-11-14, thirty days after
+        # the one-package release — the same package under the attribute the
+        # profile-keyed index published it as: an installed updater polls
+        # `<rev>/<system>/vanilla.json` until it is replaced by one that reads
+        # `<rev>/<system>/default.json`, and that PR removes this alias and the
+        # second installable and smoke line here.
         run: |
           set -eu
           echo "installables=.#default .#vanilla" >> "$GITHUB_OUTPUT"

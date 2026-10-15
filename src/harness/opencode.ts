@@ -14,12 +14,11 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
-import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
+import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 
-type Args = { bash: string; env: string; plugin: string; descriptions: string[] };
+type Args = { bash: string; env: string; plugin: string };
 type Server = { type: 'remote'; url: string; headers: Record<string, string> } | { type: 'local'; command: string[] };
 type Fragment = { skills: string | null; servers: Record<string, Server> };
 type Inputs = { bash: string; env: string };
@@ -60,33 +59,20 @@ function claim(owners: Record<string, string>, description: Description) {
 
 function main(out: string, argsPath: string) {
   const args: Args = JSON.parse(readFileSync(argsPath, 'utf8'));
-  const owners: Record<string, string> = {};
-  mkdirSync(join(out, 'bin'), { recursive: true });
-  const skillsPaths: string[] = [];
-  const servers: Record<string, Server> = {};
+  mkdirSync(out, { recursive: true });
+  // No profile contributes to the build any more: the session config carries
+  // the plugin every launch needs, and the plugins of the profiles in effect
+  // are merged into it at launch (`adapter.launch`), which is why `skills` and
+  // `mcp.servers` start empty here.
   const config: Record<string, unknown> = {
     $schema: 'https://opencode.ai/config.json',
     // The vendored opencode-plugin-litellm, in the base config of every
     // launch: it registers the `litellm` provider when a configuration names
     // it or LITELLM_BASE_URL is set, and health-probes otherwise.
     plugins: [args.plugin],
-    skills: skillsPaths,
-    mcp: { servers },
+    skills: [],
+    mcp: { servers: {} },
   };
-  for (const path of args.descriptions) {
-    const description = readDescription(path);
-    try {
-      claim(owners, description);
-    } catch (error) {
-      if (!(error instanceof LaunchError)) throw error;
-      log.opencode.error(error.message);
-      process.exit(1);
-    }
-    const fragment = pluginFragment(description, out, args,
-      (message) => log.opencode.warn(`${description.root}: ${message}`));
-    if (fragment.skills) skillsPaths.push(fragment.skills);
-    Object.assign(servers, fragment.servers);
-  }
   writeFileSync(join(out, 'opencode.json'), JSON.stringify(config, null, 2));
 }
 

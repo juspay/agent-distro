@@ -547,9 +547,9 @@ function builtProfile(directory: string): Built | null {
 /**
  * `upper` composed over `lower`: plugins and packages are both, lower's first;
  * `env` and `settings` are key-wise, upper's winning; the rest is upper's,
- * `over` naming lower unless it is the launcher's built-in default. Only the
- * repository's is ever over another named profile, so `lower` names none
- * beneath it.
+ * `over` naming lower unless it is the launcher's built-in default. Every stack
+ * entry is over the one below it, and that chain is the whole composition, so
+ * `lower` always names what it is over.
  */
 function merge(lower: Resolved, upper: Resolved): Resolved {
   const { name, description, source, origin, over } = lower;

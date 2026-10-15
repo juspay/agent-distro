@@ -59,7 +59,8 @@ let
   stateDirectory = import "${agent-distro}/lib/state-directory.nix" {
     inherit (svc) flake;
     # No `profiles`: the module passes the one package's attribute (the same
-    # one mkUpdater builds), so an install keeps the state directory it has.
+    # one mkUpdater builds), so the hash names what is installed rather than a
+    # profile name.
     profile = "default";
     xdgStateHome = configuration.xdg.stateHome;
   };

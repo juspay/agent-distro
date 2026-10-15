@@ -2,10 +2,10 @@
  * Pi's plugin protocol: resources go into its user JSON files, never global CLI
  * options, because Pi's subcommands reject prepended flags.
  *
- * Usage: node pi.ts write-config OUT ARGS_JSON
+ * Usage: node pi.ts write-config OUT
  *        node pi.ts merge-state --check|--merge AGENT_DIR FRAGMENT_JSON
  *
- * write-config translates plugins once, at build time. merge-state runs at
+ * write-config writes the config a launch merges into. merge-state runs at
  * launch: ours replace ours, user entries stay untouched, and invalid JSON
  * aborts before any write. --check stages every write without replacing a file
  * and exits 2 when the directory cannot be written.
@@ -21,7 +21,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
-import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
+import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
 
 type Servers = Record<string, Record<string, unknown>>;
@@ -83,21 +83,11 @@ function claim(owners: Record<string, string>, description: Description, Failure
   }
 }
 
-export function writeConfig(out: string, argsPath: string) {
-  const args: Inputs & { descriptions: string[] } = JSON.parse(readFileSync(argsPath, 'utf8'));
+export function writeConfig(out: string) {
   mkdirSync(out, { recursive: true });
-  const skills: string[] = [];
-  const servers: Servers = {};
-  const owners: Record<string, string> = {};
-  for (const path of args.descriptions) {
-    const description = readDescription(path);
-    claim(owners, description);
-    const fragment = pluginFragment(description, out, args,
-      (message) => log.pi.warn(`${description.root}: ${message}`));
-    skills.push(...fragment.skills);
-    Object.assign(servers, fragment.mcpServers);
-  }
-  writeFileSync(join(out, 'config.json'), JSON.stringify({ skills, mcpServers: servers }, null, 2));
+  // No profile contributes to the build any more: this is the shape a launch
+  // merges the profiles' plugins into (`adapter.launch`), so both start empty.
+  writeFileSync(join(out, 'config.json'), JSON.stringify({ skills: [], mcpServers: {} }, null, 2));
 }
 
 function readObject(path: string): JsonObject {
@@ -224,13 +214,7 @@ export const adapter: Adapter<LaunchArgs, Inputs> = {
 function run(argv: string[]): number {
   const [command, ...rest] = argv;
   if (command === 'write-config') {
-    try {
-      writeConfig(rest[0], rest[1]);
-    } catch (error) {
-      if (!(error instanceof Invalid)) throw error;
-      log.pi.error(error.message);
-      return 1;
-    }
+    writeConfig(rest[0]);
     return 0;
   }
   if (command !== 'merge-state') throw new Error(`unknown command: ${command}`);
