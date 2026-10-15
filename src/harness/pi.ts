@@ -114,7 +114,11 @@ function prepare(directory: string, fragment: Fragment): Changes {
   const paths = Object.fromEntries(names.map((name) => [name, realpath(join(directory, `${name}.json`))]));
   // Validate every input before any write, including files another merge owns.
   const original = Object.fromEntries(names.map((name) => [name, readObject(paths[name])]));
-  const recordPath = realpath(join(directory, RECORD));
+  // Resolved only when it is there: `realpath` on a path that does not exist
+  // yet is what `--check` would fail on, and a home Pi cannot write must skip
+  // the merge rather than fail the launch.
+  const at = join(directory, RECORD);
+  const recordPath = existsSync(at) ? realpath(at) : at;
   const previous = readRecord(recordPath);
   const data: Record<string, JsonObject> = structuredClone(original);
   const servers = Object.hasOwn(data.mcp, 'mcpServers') ? data.mcp.mcpServers : {};

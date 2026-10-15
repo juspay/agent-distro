@@ -24,9 +24,10 @@ writeShellApplication {
       status=0
       ${runtime.script "harness/pi.ts"} merge-state --check "$agent_dir" "$fragment" || status=$?
       if [ "$status" = 1 ]; then exit 1; fi
-      if [ "$status" = 2 ] && [ "$fragment" != ${config}/config.json ]; then
-        echo 'agent-distro pi: error: cannot load AGENT_DISTRO_PLUGINS: the agent directory cannot be written.' >&2
-        exit 1
+      # An agent directory that cannot be written skips the merge, with a word:
+      # the harness still starts, as it does when there is no home at all.
+      if [ "$status" = 2 ]; then
+        echo 'agent-distro pi: warning: the agent directory cannot be written; skipping plugin merges.' >&2
       fi
       if [ "$status" = 0 ]; then
         ${runtime.script "harness/pi.ts"} merge-state --merge "$agent_dir" "$fragment"
