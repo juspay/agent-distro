@@ -5,8 +5,6 @@ Runs in the gateway suite: the launcher was built with a profile that declares
 `env` (a value and a secret) and `settings.omp` (model roles), and the VM sets
 every secret, as a user with a key would.
 """
-from omp_support import *
-
 CONFIG = "/home/testuser/.omp/agent/config.yml"
 
 

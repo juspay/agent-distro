@@ -67,11 +67,16 @@ let
           machine.wait_for_unit("fake-gateway.service")
           machine.wait_for_open_port(8080)
         ''}
-        # What the profile in effect declares: the checks read it rather than
-        # repeating it, so the fixture and the assertions cannot drift apart.
+        # What the profile in effect declares. A check the driver runs itself
+        # (`builtins.readFile` in meta.nix) reads these two as globals; a guest
+        # script, which runs inside the VM with its support module beside it
+        # (test/guest-script.nix), reads the `env` from its argv instead, after
+        # the expected skills and the marketplace name.
         profile_env = json.loads(${builtins.toJSON (builtins.toJSON (profile.env or { }))})
         profile_settings = json.loads(${builtins.toJSON (builtins.toJSON (profile.settings or { }))})
-        arguments = ${builtins.toJSON (lib.escapeShellArgs [ (builtins.toJSON expected) "${profile.name}-ai" ])}
+        arguments = ${builtins.toJSON (lib.escapeShellArgs [
+          (builtins.toJSON expected) "${profile.name}-ai" (builtins.toJSON (profile.env or { }))
+        ])}
         ${script}
       '';
     };
