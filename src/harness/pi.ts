@@ -189,12 +189,15 @@ export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
-  launch: ({ args, plugins, cache }) => {
+  launch: ({ args, plugins }) => {
     if (!plugins.length) return join(args.config, 'config.json');
-    // Pi reads plugins only from its agent directory; without one they would
-    // be dropped without a word.
+    // Pi reads plugins only from its agent directory, which needs a home: with
+    // neither HOME nor PI_CODING_AGENT_DIR there is nothing to merge into, so
+    // the plugins are skipped — said so, as the launcher's own no-home branch
+    // says it — and the harness starts without them rather than not at all.
     if (!process.env.PI_CODING_AGENT_DIR && !process.env.HOME) {
-      throw new LaunchError('cannot load AGENT_DISTRO_PLUGINS: HOME and PI_CODING_AGENT_DIR are unset');
+      log.pi.warn('HOME and PI_CODING_AGENT_DIR are unset; skipping plugin merges');
+      return join(args.config, 'config.json');
     }
     const base: Fragment = JSON.parse(readFileSync(join(args.config, 'config.json'), 'utf8'));
     const owners: Record<string, string> = {};

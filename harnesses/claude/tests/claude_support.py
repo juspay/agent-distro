@@ -8,6 +8,9 @@ import sys
 
 expected = json.loads(sys.argv[1])
 home = Path.home()
+# Where a launch's translations live: the adapter translates at launch, by
+# content, under this root (src/plugin/launch.ts), never into the store.
+translations = Path(os.environ.get('XDG_CACHE_HOME') or home / '.cache') / 'agent-distro' / 'plugins'
 config_dir = home / 'relocated-claude'
 config_dir.mkdir()
 env = dict(os.environ, CLAUDE_CONFIG_DIR=str(config_dir))

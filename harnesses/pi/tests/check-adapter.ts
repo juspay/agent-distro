@@ -213,7 +213,7 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
   assert.throws(() => mergeState('--merge', agent, profile), /not a launch record|JSON object/);
 });
 
-test('a launch with plugins needs a home; one without is the profile', async () => {
+test('a launch with plugins warns and skips them without a home; no plugins is the profile', async () => {
   const { adapter } = await import(join(process.argv[2], 'harness/pi.ts'));
   const config = temporary();
   writeFileSync(join(config, 'config.json'), JSON.stringify({ skills: [], mcpServers: {} }));
@@ -223,8 +223,19 @@ test('a launch with plugins needs a home; one without is the profile', async () 
   delete process.env.HOME;
   delete process.env.PI_CODING_AGENT_DIR;
   try {
-    assert.throws(() => adapter.launch({ ...launch, cache: temporary(), plugins: [{ name: 'p' }] }),
-      /HOME and PI_CODING_AGENT_DIR are unset/);
+    // Nothing to merge into: warned, said so, and the harness still starts on
+    // the profile's own config (the launcher's no-home branch says the same).
+    const warnings: string[] = [];
+    const write = process.stderr.write;
+    process.stderr.write = ((chunk: string) => (warnings.push(String(chunk)), true)) as typeof process.stderr.write;
+    try {
+      assert.equal(adapter.launch({ ...launch, cache: temporary(), plugins: [{ name: 'p' }] }),
+        join(config, 'config.json'));
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.ok(warnings.some((line) => line.includes('HOME and PI_CODING_AGENT_DIR are unset; skipping plugin merges')),
+      warnings.join(''));
   } finally {
     for (const [name, value] of Object.entries(saved)) if (value !== undefined) process.env[name] = value;
   }

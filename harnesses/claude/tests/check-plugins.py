@@ -23,7 +23,9 @@ updated = json.loads(run('plugin', 'list', '--json', launcher='claude-changed'))
 assert {p['id'] for p in updated} == {p + '@inline' for p in expected}, updated
 previous_paths = {p['installPath'] for p in plugins}
 assert all(p['enabled'] and p['scope'] == 'session' for p in updated), updated
-assert all(p['installPath'].startswith('/nix/store/') and
+# The adapter translates at launch, into the cache, never into the store: a
+# `nix run github:…` could not run a server from a store path it did not build.
+assert all(p['installPath'].startswith(str(translations) + '/') and
            p['installPath'] not in previous_paths for p in updated), updated
 for plugin, names in expected.items():
     assert inventory(plugin, launcher='claude-changed')[0] == set(names)
