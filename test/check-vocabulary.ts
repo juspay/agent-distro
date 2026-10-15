@@ -36,8 +36,12 @@ assert.deepEqual(history.parseHistory(`${history.historyLine('skipped: offline',
   .map((e) => e.kind), ['skipped', 'failed']);
 // Words may be empty, and may hold colons.
 assert.equal(history.parseHistoryLine(`${history.timestamp(at)} failed: a: b`).words, 'a: b');
-// A line written before #115, with its profile, is not this format.
-for (const bad of ['', 'updated: x', `${history.timestamp(at)} default updated: x`, 'yesterday updated: x', `${history.timestamp(at)} done: x`]) {
+// A line written before #115 named its profile; it still reads, and says so.
+assert.deepEqual(history.parseHistoryLine(`${history.timestamp(at)} vanilla updated: Pi 0.3 → 0.4`), {
+  at: history.timestamp(at), kind: 'updated', words: 'Pi 0.3 → 0.4', profile: 'vanilla',
+});
+assert.equal(history.parseHistoryLine(line.slice(0, -1)).profile, undefined);
+for (const bad of ['', 'updated: x', `${history.timestamp(at)} a b updated: x`, 'yesterday updated: x', `${history.timestamp(at)} done: x`]) {
   assert.throws(() => history.parseHistoryLine(bad), /history line is not/, JSON.stringify(bad));
 }
 
