@@ -1,9 +1,10 @@
 # `mkProfile` without a VM: what a launch reads of a built profile — the
 # `profile.json` naming it and its `reader`, one directory per plugin with that
 # reader's description and a symlink to the plugin, and `bin/` from the
-# profile's `packages`. A flake reference among the plugins has no place in a
-# build, so it is refused; the same profile as a directory, a file and an
-# attribute set is the one derivation.
+# profile's `packages`. A flake reference among the plugins is locked only by
+# an impure evaluation, so this one — a flake check, pure — refuses it
+# (test/template.sh builds one impurely); the same profile as a directory, a
+# file and an attribute set is the one derivation.
 { pkgs, agent-distro, mkProfile }:
 let
   inherit (pkgs) lib;

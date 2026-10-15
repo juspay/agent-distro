@@ -371,8 +371,10 @@ agent-distro.lib.mkProfile { system; profile; }
 #   directory holding one, a flake input (whose `outPath` is a store path), or
 #   the attribute set it holds — with its plugins read and its `packages`
 #   realised. Its store path is an `AI_PROFILE` value ([Profiles](#profiles)),
-#   used as it is; its plugins must be paths, since a flake reference is read
-#   at launch and has no place in a build.
+#   used as it is. A plugin named by a flake reference is locked as the
+#   profile is built — fetched once, and built in as that store path — which
+#   needs an impure evaluation (`nix build --impure`); a pure one refuses it,
+#   so there pin it as a flake input and pass that path.
 
 agent-distro.lib.stateDirectory { xdgStateHome; flake; profile; }
 # → the string "<xdgStateHome>/agent-distro/<sha256 of {flake, profile}>", with
@@ -414,6 +416,8 @@ agent-distro.lib.mkUpdater { pkgs; package; flake; attribute ? "default"; stateD
 
 The updater's schedule is one `lib/schedule.nix`, exposed as `agent-distro.lib.schedule`: `updateHoursUTC`, `defaultFrequency`, `updatePeriodSeconds` and `updateOffsetSeconds`. The module, `mkUpdater` and any consumer read the same numbers.
 
+The updater's words are a small TypeScript library a program can import rather than repeat: `src/package.json` names it `@juspay/agent-distro`, with no dependencies and no file I/O. `./update/due` is the due rule (`updateDue`), the scheduled run's `SCHEDULED_ATTEMPTS` and `SCHEDULED_RETRY_SECONDS`, and the `last-success` reader (`parseStamp`); `./update/history` writes and reads a history line (`historyLine`, `parseHistoryLine`, `parseHistory`); `./update/versions` reads a package's `share/agent-distro/versions` (`parseVersions`) and words what changed between two (`changes`); `./listing` is the `--list --json` value and its checker (`parseListing`). kolu, which delivers the package to hosts of its own and appends to the same history log, imports them from its pin of this repository.
+
 ## Profiles
 
 A profile is an `agent-distro.nix` in a git repository:
@@ -451,7 +455,7 @@ A profile is an `agent-distro.nix` in a git repository:
 | `settings` | Optional: what `omp` and `opencode` default, in their own configuration's shape |
 | `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness[^bare-command] |
 
-[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A path is taken relative to the `agent-distro.nix`; a flake reference string is read at launch, so a profile built with `mkProfile` takes paths only.
+[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A path is taken relative to the `agent-distro.nix`; a flake reference string is read at launch, or locked once when `mkProfile` builds the profile (impurely; see [Library](#library)).
 [^bare-command]: An MCP server that a plugin declares by bare command, such as `"command": "mcp-nixos"`, is found on `PATH`. List its package here and it is built, or fetched from a binary cache, so the server starts at once instead of being downloaded when the agent first asks for it, and every user runs the version the profile pinned.
 
 ### Run with a profile

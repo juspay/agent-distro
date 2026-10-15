@@ -1,0 +1,12 @@
+{
+  "name": "@juspay/agent-distro",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./listing": "./listing.ts",
+    "./update/due": "./update/due.ts",
+    "./update/history": "./update/history.ts",
+    "./update/versions": "./update/versions.ts"
+  }
+}

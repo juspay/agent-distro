@@ -26,6 +26,7 @@ assert !(builtins.tryEval (configuration "aarch64-darwin" { frequency = "daily";
 let runtime = import "${agent-distro}/lib/runtime.nix" pkgs; in
 pkgs.runCommand "update-schedule" { } ''
   ${runtime.node} ${./check-update-due.ts} ${runtime.tree}/src
+  ${runtime.node} ${./check-vocabulary.ts} ${runtime.tree}/src
   ${runtime.node} ${./check-cache-usable.ts} ${runtime.tree}/src
   ${runtime.node} ${./check-index-url.ts} ${runtime.tree}/src
   ${runtime.node} ${./check-would-compile.ts} ${runtime.tree}/src
