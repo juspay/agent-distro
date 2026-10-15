@@ -17,9 +17,20 @@ let
     env = { MK_PROFILE_CHECK = "1"; };
     settings.omp.modelRoles.default = "litellm/large";
   };
+  # A profile may name no plugins at all: `env` and `settings` are the whole of
+  # it, and its `plugins/` directory is still there (empty).
+  pluginless = mkProfile {
+    system = pkgs.stdenv.hostPlatform.system;
+    profile = { name = "pluginless"; description = "No plugins"; env.PLAIN = "1"; };
+  };
   build = mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = profile; };
   asDirectory = mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = ./fixtures/profile; };
   asFile = mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = ./fixtures/profile/agent-distro.nix; };
+  # A flake input is a source whose `outPath` is a store path; it is built too.
+  asSource = mkProfile {
+    system = pkgs.stdenv.hostPlatform.system;
+    profile = { outPath = "${./fixtures/profile}"; };
+  };
   referenced = builtins.tryEval (mkProfile {
     system = pkgs.stdenv.hostPlatform.system;
     profile = profile // { plugins = [ "github:juspay/skills" ]; };
@@ -42,9 +53,15 @@ pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq ]; } ''
     and .skills.hello == ["SKILL.md"]' "$built/share/agent-distro/plugins/0/description.json"
   # bin/ is the profile's packages.
   test "$("$built/bin/profile-tool")" = tool
-  # A directory, a file and the attribute set are the same profile.
-  for other in ${asDirectory} ${asFile}; do
+  # A directory, a file, a source and the attribute set are the same profile.
+  for other in ${asDirectory} ${asFile} ${asSource}; do
     test -f "$other/share/agent-distro/profile.json"
   done
+  # A profile with no plugins has an empty `plugins/` and its env.
+  test -d ${pluginless}/share/agent-distro/plugins
+  test -z "$(ls -A ${pluginless}/share/agent-distro/plugins)"
+  test "$(jq -r .env.PLAIN ${pluginless}/share/agent-distro/profile.json)" = 1
+  # `bin/` holds the packages' commands and nothing else of their outputs.
+  test "$(ls ${build}/bin)" = profile-tool
   touch "$out"
 ''
