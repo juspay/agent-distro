@@ -59,7 +59,7 @@ export const adapter: Adapter<LaunchArgs, Inputs> = {
       }],
     }, null, 2));
   },
-  launch: ({ args, plugins }) => {
+  launch: ({ args, plugins, report }) => {
     if (!plugins.length) return '';
     const words: string[] = [];
     const override = (value: string) => words.push('-c', shellQuote(value));
@@ -69,9 +69,16 @@ export const adapter: Adapter<LaunchArgs, Inputs> = {
       const source = `marketplaces.${marketplace}={source_type="local",source=${tomlString(plugin.translation)}}`;
       ensureInstalled(home, args.codex, source, marketplace, plugin.name);
       override(source);
-      // `-c` splits its key at every ".", so one carrying a plugin name is
-      // quoted: Codex reads a quoted key whole, a plugin named `a.b` included.
-      override(`plugins.${tomlString(`${plugin.name}@${marketplace}`)}.enabled=true`);
+      // `-c` splits its key at every ".", and quoting the key — which Codex
+      // accepts for the marketplace above — does not enable a plugin: a
+      // registered-but-unenabled plugin contributes no skills. So the key stays
+      // unquoted, and a name carrying "." is reported and left unenabled rather
+      // than silently registered without its skills.
+      if (plugin.name.includes('.')) {
+        report(`cannot enable plugin ${JSON.stringify(plugin.name)} for one launch: its name contains "."`);
+        continue;
+      }
+      override(`plugins.${plugin.name}@${marketplace}.enabled=true`);
     }
     return words.join(' ');
   },
