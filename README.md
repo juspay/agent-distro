@@ -3,7 +3,7 @@
 # agent-distro
 
 **Your team's coding agents, in one command.** Package your skills, MCP servers,
-and model gateway once, and run them in every harness.
+and harness settings once, and run them in every harness.
 
 ```sh
 nix run github:juspay/agent-distro

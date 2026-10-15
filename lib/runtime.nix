@@ -33,7 +33,21 @@ let
   # system. lib/mk-launchers.nix builds it once, for every adapter and the picker.
   info = profile: nixpkgs: {
     default = profile.name;
-    builtins = map (p: { inherit (p) name description; gateway = p.gateway or null; })
+    builtins = map
+      (p:
+        let
+          # A profile built in is never evaluated, so the resolver cannot
+          # report what it no longer reads: the build does.
+          warned = pkgs.lib.warnIf (p ? gateway)
+            "agent-distro: profile ${p.name}: `gateway` is no longer read; see https://agent-distro.nixos.asia/#profiles" p;
+        in
+        {
+          inherit (warned) name description;
+          # A distribution's own profile: what it exports and the harness
+          # settings it defaults, as an `agent-distro.nix` read at launch would.
+          env = warned.env or { };
+          settings = warned.settings or { };
+        })
       ([ profile ] ++ pkgs.lib.optional (profile.name != vanilla.name) vanilla);
     nixpkgs = import ./nixpkgs-reference.nix pkgs nixpkgs;
     # Without its context, so the launchers do not hold it.
@@ -60,16 +74,17 @@ rec {
   specPlugin = plugin: pkgs.runCommand "agent-plugin-spec" { } ''
     ${script "plugin/write-spec-plugin.ts"} "$out" ${pkgs.writeText "agent-plugin-spec-args.json" (builtins.toJSON (launcherInputs // { description = "${readPlugin plugin}"; }))}
   '';
-  # The shell every launcher runs before its harness: the profile in effect,
-  # its gateway and packages, and the plugins of that profile and of
-  # AGENT_DISTRO_PLUGINS, as `launched` and `profile_gateway*`. `args` names
-  # the adapter (`harness`), the built-in profile's plugins (`profile`, each
-  # with its `description`) and the adapter's `info`; the launcher inputs ride
-  # along, so no adapter spells them. See src/plugin/launch.ts.
+  # The shell every launcher runs before its harness: the profile in effect
+  # and its packages, its environment and its settings for this harness, and
+  # the plugins of that profile and of AGENT_DISTRO_PLUGINS, as `launched`,
+  # `profile_env_*` and `profile_settings`. `args` names the adapter
+  # (`harness`), the built-in profile's plugins (`profile`, each with its
+  # `description`) and the adapter's `info`; the launcher inputs ride along, so
+  # no adapter spells them. See src/plugin/launch.ts.
   # Captured before eval, so a failed launch stops the launcher; the variables
   # are declared first, for shellcheck to see what the eval assigns.
   launchPlugins = args: ''
-    : "''${launched=}" "''${profile_gateway=}" "''${profile_gateway_url=}" "''${profile_gateway_key_env=}" "''${profile_gateway_key_hint=}"
+    : "''${launched=}" "''${profile_env_secrets=}" "''${profile_settings=}"
     launch=$(${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON (launcherInputs // args))})
     eval "$launch"'';
 }

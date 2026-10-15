@@ -60,7 +60,7 @@
     <div class="wrap hero-inner">
       <img class="hero-logo" src="/logo.svg" alt="" width="64" height="64">
       <h1 id="hero-title" class="hero-title">Your team's coding agents,<br>in <em>one</em> command.</h1>
-      <p class="hero-lede">Package your skills, MCP servers and model gateway once. Run them in Claude Code, Codex, OpenCode, Oh My Pi and Pi, each at its latest release, with nothing to install.</p>
+      <p class="hero-lede">Package your skills, MCP servers and harness settings once. Run them in Claude Code, Codex, OpenCode, Oh My Pi and Pi, each at its latest release, with nothing to install.</p>
       <div class="command">
         <span class="command-prompt" aria-hidden="true">$$</span>
         <code class="command-text">nix run github:juspay/agent-distro</code>
@@ -111,7 +111,7 @@
       </li>
       <li class="prop" data-icon="yours">
         <h2>Make it yours</h2>
-        <p><code>nix flake init -t github:juspay/agent-distro</code> starts a distribution with your plugins and, optionally, your LiteLLM gateway.</p>
+        <p><code>nix flake init -t github:juspay/agent-distro</code> starts a distribution with your plugins and, optionally, the environment and settings they run with.</p>
       </li>
     </ul>
   </section>
@@ -138,14 +138,15 @@
   <section class="fits wrap" aria-labelledby="fits-title">
     <div class="section-head">
       <h2 id="fits-title">How it fits together</h2>
-      <p>A profile is data. agent-distro translates it once per harness, and each harness starts with your plugins and gateway already in place.</p>
+      <p>A profile is data. agent-distro reads it once per launch, and each harness starts with your plugins, environment and settings already in place.</p>
     </div>
-    <div class="flow" role="img" aria-label="Your profile, holding plugins and a gateway, flows into agent-distro, which launches every harness.">
+    <div class="flow" role="img" aria-label="Your profile, holding plugins, environment variables and settings, flows into agent-distro, which launches every harness.">
       <div class="flow-node flow-profile">
         <span class="flow-label">Your profile</span>
         <ul>
           <li><a href="https://agent-plugins.org">Agent Plugins</a> <span class="flow-sub">skills · MCP servers</span></li>
-          <li>LiteLLM gateway <span class="flow-opt">optional</span></li>
+          <li>Environment variables <span class="flow-opt">optional</span> <span class="flow-sub">a <code>secret</code> one is asked for, never written to a file</span></li>
+          <li>Harness settings <span class="flow-opt">optional</span> <span class="flow-sub">OMP's roles, OpenCode's provider</span></li>
           <li>Nix packages <span class="flow-sub">anything in <a href="https://search.nixos.org/packages">nixpkgs</a>, on <code>PATH</code> for the plugins' MCP servers</span></li>
         </ul>
       </div>

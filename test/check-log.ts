@@ -133,15 +133,15 @@ test('control characters are escaped once, in the reporter; newlines and tabs st
 test('tags name the component; the root has none; repeats are never folded', () => {
   const { stream, text } = sink();
   const log = createLogger({ stream, env: {} });
-  for (const tag of ['profile', 'update', 'gateway', 'picker', 'plugin', 'claude', 'codex', 'omp', 'opencode', 'pi']) {
+  for (const tag of ['profile', 'update', 'picker', 'plugin', 'claude', 'codex', 'omp', 'opencode', 'pi']) {
     log[tag].info('x');
   }
   log.harness('muse').info('x');
   log.root.info('x');
   for (let i = 0; i < 8; i++) log.update.info('again');
   const lines = text().split('\n').filter(Boolean);
-  assert.deepEqual(lines.slice(0, 12), [
-    'profile', 'update', 'gateway', 'picker', 'plugin', 'claude', 'codex', 'omp', 'opencode', 'pi', 'muse',
+  assert.deepEqual(lines.slice(0, 11), [
+    'profile', 'update', 'picker', 'plugin', 'claude', 'codex', 'omp', 'opencode', 'pi', 'muse',
   ].map((tag) => `agent-distro ${tag}: x`).concat('agent-distro: x'));
   assert.equal(lines.filter((line) => line === 'agent-distro update: again').length, 8);
 });
@@ -163,28 +163,19 @@ test('slow: a synchronous call says so first, and its time at debug', () => {
 test('slow: an async call says so only once it has taken NOTICE_MS', async () => {
   const { stream, text } = sink();
   const log = createLogger({ stream, env: {} });
-  assert.equal(await slow(log.gateway, 'quick', async () => 'q'), 'q');
+  assert.equal(await slow(log.picker, 'quick', async () => 'q'), 'q');
   assert.equal(text(), '');
-  await slow(log.gateway, 'waiting', async () => new Promise((resolve) => setTimeout(resolve, NOTICE_MS + 200)));
-  assert.equal(text(), 'agent-distro gateway: waiting …\n');
+  await slow(log.picker, 'waiting', async () => new Promise((resolve) => setTimeout(resolve, NOTICE_MS + 200)));
+  assert.equal(text(), 'agent-distro picker: waiting …\n');
 });
 
 test('slow: a plain function returning a promise is timed as it settles', async () => {
   const { stream, text } = sink();
   const log = createLogger({ stream, env: { AGENT_DISTRO_LOG: 'debug' } });
   const answer = Promise.withResolvers<string>();
-  const settled = slow(log.gateway, 'asking', () => answer.promise);
-  assert.equal(text(), 'agent-distro gateway: asking …\n');
+  const settled = slow(log.picker, 'asking', () => answer.promise);
+  assert.equal(text(), 'agent-distro picker: asking …\n');
   setTimeout(() => answer.resolve('a'), 50);
   assert.equal(await settled, 'a');
-  assert.match(text().split('\n')[1], /^agent-distro gateway: asking: done in 0\.\ds$/);
-});
-
-test("slow: notice 'debug' records only the time taken", () => {
-  const { stream, text } = sink();
-  assert.equal(slow(createLogger({ stream, env: {} }).gateway, 'discovering', () => 1, 'debug'), 1);
-  assert.equal(text(), '');
-  const loud = sink();
-  slow(createLogger({ stream: loud.stream, env: { AGENT_DISTRO_LOG: 'debug' } }).gateway, 'discovering', () => 1, 'debug');
-  assert.equal(loud.text().split('\n')[0], 'agent-distro gateway: discovering …');
+  assert.match(text().split('\n')[1], /^agent-distro picker: asking: done in 0\.\ds$/);
 });

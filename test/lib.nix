@@ -19,9 +19,13 @@ let
       })
     profile.plugins);
   updated = common.updatedLaunchers mkLaunchers pkgs profile;
-  upstream = mkLaunchers { inherit pkgs; profile = profile // { plugins = [ ]; gateway = null; }; };
-  gatewayProfile = profile // { gateway = profile.gateway // { url = "http://127.0.0.1:8080"; }; };
-  gatewayLaunchers = mkLaunchers { inherit pkgs; profile = gatewayProfile; };
+  # The same distribution with nothing of its own: no plugins, no environment
+  # and no settings, for the checks that prove a launch's are the profile's.
+  upstream = mkLaunchers { inherit pkgs; profile = profile // { plugins = [ ]; env = { }; settings = { }; }; };
+  # The `secret` variables of the profile's `env`: a check that needs the
+  # harness to start sets them, as a user who has a key would.
+  secrets = lib.mapAttrs (_: _: "test-api-key")
+    (lib.filterAttrs (_: value: lib.isAttrs value && (value.secret or false)) (profile.env or { }));
   fixtures = harness: {
     updated = pkgs.writeShellScriptBin "${harness}-updated" ''
       exec ${lib.getExe updated.${harness}} "$@"
@@ -39,16 +43,15 @@ let
   mkCheck = harness: { name, script, requires ? [ ], packages ? [ ], env ? { }, diskSize ? null }:
     let
       gateway = builtins.elem "gateway" requires;
-      selected = if gateway then gatewayLaunchers else launchers;
     in
     pkgs.testers.runNixOSTest {
       inherit name;
       nodes.machine = { ... }: {
         imports = [ common.baseNode ] ++ lib.optional gateway common.gatewayNode;
         virtualisation.diskSize = if diskSize == null then 1024 else diskSize;
-        environment.systemPackages = [ selected.${harness} pkgs.python3 ] ++ map (key: (fixtures harness).${key}) packages;
+        environment.systemPackages = [ launchers.${harness} pkgs.python3 ] ++ map (key: (fixtures harness).${key}) packages;
         # Plugins a check may put on AGENT_DISTRO_PLUGINS; it is never set globally.
-        environment.variables = lib.optionalAttrs gateway { ${profile.gateway.keyEnv} = "test-api-key"; }
+        environment.variables = lib.optionalAttrs gateway secrets
           // { AGENT_DISTRO_TEST_PLUGIN = "${./fixtures/launch-plugin}"; }
           // { AGENT_DISTRO_TEST_SPEC = "${./fixtures/spec-plugin}"; }
           // lib.optionalAttrs (builtins.elem "koluLaunch" requires) {
@@ -64,8 +67,16 @@ let
           machine.wait_for_unit("fake-gateway.service")
           machine.wait_for_open_port(8080)
         ''}
-        gateway = json.loads(${builtins.toJSON (builtins.toJSON (profile.gateway or null))})
-        arguments = ${builtins.toJSON (lib.escapeShellArgs [ (builtins.toJSON expected) "${profile.name}-ai" (if gateway then gatewayProfile.gateway.url else if (profile.gateway or null) == null then "" else profile.gateway.url) ])}
+        # What the profile in effect declares. A check the driver runs itself
+        # (`builtins.readFile` in meta.nix) reads these two as globals; a guest
+        # script, which runs inside the VM with its support module beside it
+        # (test/guest-script.nix), reads the `env` from its argv instead, after
+        # the expected skills and the marketplace name.
+        profile_env = json.loads(${builtins.toJSON (builtins.toJSON (profile.env or { }))})
+        profile_settings = json.loads(${builtins.toJSON (builtins.toJSON (profile.settings or { }))})
+        arguments = ${builtins.toJSON (lib.escapeShellArgs [
+          (builtins.toJSON expected) "${profile.name}-ai" (builtins.toJSON (profile.env or { }))
+        ])}
         ${script}
       '';
     };

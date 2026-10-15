@@ -2,16 +2,17 @@
  * Add absent wrapper defaults to OMP's config.yml without replacing the user's
  * own settings.
  *
- * Usage: node omp.ts CONFIG LAYER... [--gateway GATEWAY_JSON]
+ * Usage: node omp.ts CONFIG LAYER... [--settings SETTINGS_JSON]
  *
  * OMP loads an Agent Plugins directory itself, so `adapter`, which
  * src/plugin/launch.ts runs for AGENT_DISTRO_PLUGINS, only validates a plugin
  * and passes its root as one more `-e`.
  *
- * Layers are YAML files applied in order: a later one adds only keys the
- * earlier ones (and the user) left absent, so each default has one home.
- * `--gateway` adds, in its place, the layer for the profile's gateway (JSON,
- * as the launch prints it): roles on its models and the model badge. The
+ * Layers are applied in order: a later one adds only keys the earlier ones
+ * (and the user) left absent, so each default has one home. A layer is a YAML
+ * file, except `--settings`, which is the profile's `settings.omp` as JSON,
+ * exactly as the launch prints it: since a key the user set is never
+ * replaced, a profile fills the roles and settings OMP has none of. The
  * config goes through yaml's Document API so comments and quoting survive. A
  * config that cannot be written only warns; invalid YAML stops the launch
  * without a write.
@@ -19,7 +20,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Document, isAlias, isMap, isScalar, isSeq, parse, parseDocument, type YAMLMap } from 'yaml';
-import type { Gateway } from '../gateway/models.ts';
 import { log } from '../log.ts';
 import type { Adapter, ProfileEntry } from '../plugin/launch.ts';
 import { shellQuote } from '../plugin/launcher.ts';
@@ -120,25 +120,6 @@ export function fillDefaults(configPath: string, layers: Defaults[]) {
   }
 }
 
-/** The defaults a gateway adds. */
-export function gatewayLayer({ models }: Gateway): Defaults {
-  return {
-    // Without this OMP starts on its own first-available model; the roles are how
-    // our recommendation reaches the agent.
-    modelRoles: {
-      default: `litellm/${models.large}`,
-      slow: `litellm/${models.large}`,
-      smol: `litellm/${models.small}`,
-      task: `litellm/${models.large}`,
-    },
-    // OMP ships this off, so a subagent's row names the agent and nothing else:
-    // which model a worker or reviewer actually resolved to is invisible. Our
-    // roles point at gateway aliases (`open-large`), and an agent can carry its
-    // own model override, so the badge is the only place that answer surfaces.
-    task: { showResolvedModelBadge: true },
-  };
-}
-
 /** At launch: every plugin's `-e` root, as shell words, replacing the launcher's own. */
 export const adapter: Adapter<{ profile: (ProfileEntry & { dir: string })[] }, ProfileEntry & { dir: string }, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
@@ -152,8 +133,8 @@ export const adapter: Adapter<{ profile: (ProfileEntry & { dir: string })[] }, P
 if (import.meta.main) {
   const [config, ...sources] = process.argv.slice(2);
   try {
-    const layers = sources.flatMap((source, i) => (sources[i - 1] === '--gateway' ? [gatewayLayer(JSON.parse(source))]
-      : source === '--gateway' ? [] : [parse(decodeUtf8(readFileSync(source))) ?? {}]));
+    const layers = sources.flatMap((source, i) => (sources[i - 1] === '--settings' ? [JSON.parse(source)]
+      : source === '--settings' ? [] : [parse(decodeUtf8(readFileSync(source))) ?? {}]));
     if (!layers.every(isPlainObject)) throw new Error('every defaults layer must be a YAML mapping');
     fillDefaults(config, layers);
   } catch (error) {

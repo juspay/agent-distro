@@ -3,12 +3,11 @@
  * options, because Pi's subcommands reject prepended flags.
  *
  * Usage: node pi.ts write-config OUT ARGS_JSON
- *        node pi.ts merge-state --check|--merge AGENT_DIR FRAGMENT_JSON [GATEWAY_JSON]
+ *        node pi.ts merge-state --check|--merge AGENT_DIR FRAGMENT_JSON
  *
- * write-config translates plugins once, at build time; the gateway's
- * GATEWAY_JSON is written at launch by src/gateway/config.ts with
- * `gatewayConfig`. merge-state runs at launch: ours replace ours, user entries
- * stay untouched, and invalid JSON aborts before any write. --check stages every write without replacing a file
+ * write-config translates plugins once, at build time. merge-state runs at
+ * launch: ours replace ours, user entries stay untouched, and invalid JSON
+ * aborts before any write. --check stages every write without replacing a file
  * and exits 2 when the directory cannot be written.
  *
  * AGENT_DISTRO_PLUGINS reaches Pi the same way: src/plugin/launch.ts uses
@@ -19,7 +18,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { Gateway } from '../gateway/models.ts';
 import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
@@ -36,7 +34,6 @@ type Fragment = {
   mcpServers: Servers;
   launch?: { skills: string[]; mcpServers: string[]; replaces: Servers };
 };
-type GatewayConfig = { providers: { litellm: unknown }; defaultProvider: string; defaultModel: string };
 type JsonObject = Record<string, any>;
 type Inputs = { bash: string; env: string };
 /** What the last launch-time merge added, so the next one can take it back. */
@@ -103,22 +100,6 @@ export function writeConfig(out: string, argsPath: string) {
   writeFileSync(join(out, 'config.json'), JSON.stringify({ skills, mcpServers: servers }, null, 2));
 }
 
-/** What merge-state applies for the profile's gateway; at launch, by gateway/config.ts. */
-export function gatewayConfig(gateway: Gateway): GatewayConfig {
-  return {
-    providers: {
-      litellm: {
-        baseUrl: gateway.url.replace(/\/+$/, '') + '/v1',
-        api: 'openai-completions',
-        apiKey: '$' + gateway.keyEnv,
-        models: [...new Set(Object.values(gateway.models))].map((id) => ({ id })),
-      },
-    },
-    defaultProvider: 'litellm',
-    defaultModel: gateway.models.large,
-  };
-}
-
 function readObject(path: string): JsonObject {
   const data = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
   if (!isObject(data)) throw new Invalid(`${path} must contain a JSON object`);
@@ -138,8 +119,8 @@ function readRecord(path: string): LaunchRecord {
 type Changes = { writes: Map<string, JsonObject>; remove: string | null };
 
 /** The files to write or remove; none of them touched yet. */
-function prepare(directory: string, fragment: Fragment, gateway: GatewayConfig | null): Changes {
-  const names = ['mcp', 'settings', ...(gateway ? ['models'] : [])];
+function prepare(directory: string, fragment: Fragment): Changes {
+  const names = ['mcp', 'settings'];
   const paths = Object.fromEntries(names.map((name) => [name, realpath(join(directory, `${name}.json`))]));
   // Validate every input before any write, including files another merge owns.
   const original = Object.fromEntries(names.map((name) => [name, readObject(paths[name])]));
@@ -170,14 +151,6 @@ function prepare(directory: string, fragment: Fragment, gateway: GatewayConfig |
   // Thinking blocks are transcript content, not the thinking-level indicator.
   // Absent by default; a user's explicit value, including `false`, survives.
   if (!Object.hasOwn(data.settings, 'hideThinkingBlock')) data.settings.hideThinkingBlock = true;
-  if (gateway) {
-    if (!Object.hasOwn(data.models, 'providers')) data.models.providers = {};
-    if (!isObject(data.models.providers)) throw new Invalid('providers must be a JSON object');
-    data.models.providers.litellm = gateway.providers.litellm;
-    for (const key of ['defaultProvider', 'defaultModel'] as const) {
-      if (!Object.hasOwn(data.settings, key)) data.settings[key] = gateway[key];
-    }
-  }
   const writes = new Map(names.filter((name) => !isDeepStrictEqual(data[name], original[name]))
     .map((name) => [paths[name], data[name]]));
   const launch = fragment.launch;
@@ -195,10 +168,9 @@ function prepare(directory: string, fragment: Fragment, gateway: GatewayConfig |
   return { writes, remove };
 }
 
-export function mergeState(mode: string, directory: string, fragmentPath: string, gatewayPath?: string) {
+export function mergeState(mode: string, directory: string, fragmentPath: string) {
   const fragment: Fragment = JSON.parse(readFileSync(fragmentPath, 'utf8'));
-  const gateway: GatewayConfig | null = gatewayPath ? JSON.parse(readFileSync(gatewayPath, 'utf8')) : null;
-  const { writes, remove } = prepare(directory, fragment, gateway);
+  const { writes, remove } = prepare(directory, fragment);
   const staged: [string, string][] = [];
   try {
     for (const [path, data] of writes) {

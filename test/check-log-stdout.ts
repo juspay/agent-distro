@@ -1,8 +1,7 @@
 /**
  * Stdout is a protocol channel, never a log: at AGENT_DISTRO_LOG=trace the
- * launch still prints only shell assignments, `--list --json` only JSON, model
- * discovery only a path and `update.ts --progress` only JSON lines, while the
- * debug lines all reach stderr.
+ * launch still prints only shell assignments, `--list --json` only JSON, and
+ * `update.ts --progress` only JSON lines, while the debug lines all reach stderr.
  *
  * Usage: node check-log-stdout.ts SRC PLUGIN
  *
@@ -11,14 +10,14 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
 const [src, plugin] = process.argv.slice(2);
 const temporary = () => mkdtempSync(join(tmpdir(), 'log-stdout-'));
-const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', gateway: null }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
+const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', env: {}, settings: {} }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
 
 /** Run a runtime module at trace level, from a directory in no repository. */
 function run(args: string[], env: Record<string, string> = {}) {
@@ -33,7 +32,7 @@ function run(args: string[], env: Record<string, string> = {}) {
   return result;
 }
 
-/** A script `node` runs as a command: a fake curl or nix. */
+/** A script `node` runs as a command: a fake nix. */
 function command(name: string, body: string): string {
   const path = join(temporary(), name);
   writeFileSync(path, `#!${process.execPath}\n${body}`);
@@ -46,12 +45,15 @@ test('a launch prints shell assignments only', () => {
   writeFileSync(args, JSON.stringify({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [], info }));
   const { stdout, stderr } = run([join(src, 'plugin/launch-cli.mjs'), args], { AGENT_DISTRO_PLUGINS: plugin });
   for (const line of stdout.trimEnd().split('\n')) {
-    assert.match(line, /^(unset [A-Za-z_]\w*|export [A-Za-z_]\w*|[A-Za-z_]\w*='(?:[^']|'"'"')*'(?:"\$\{PATH:\+:\$PATH\}")?)$/, stdout);
+    assert.match(line, new RegExp('^(unset [A-Za-z_]\\w*'
+      + '|export [A-Za-z_]\\w*'
+      + "|[A-Za-z_]\\w*='(?:[^']|'\"'\"')*'(?:\"\\$\\{PATH:\\+:\\$PATH\\}\")?"
+      + "|[A-Za-z_]\\w*=\\((?:'(?:[^']|'\"'\"')*' ?)*\\))$"), stdout);
   }
   assert.match(stdout, /^launched='--plugin-dir /m);
   assert.match(stderr, /^agent-distro plugin: .*my-skills: from AGENT_DISTRO_PLUGINS/m);
   assert.match(stderr, /^agent-distro claude: harness arguments: --plugin-dir /m);
-  assert.match(stderr, /^agent-distro gateway: no gateway$/m);
+  assert.match(stderr, /^agent-distro profile: profile vanilla, built in$/m);
 });
 
 test('--list --json prints JSON only', () => {
@@ -62,22 +64,6 @@ test('--list --json prints JSON only', () => {
   assert.equal(JSON.parse(stdout).profile.source, 'builtin');
   assert.equal(stdout.trimEnd().split('\n').length, 1);
   assert.equal(stderr, '');
-});
-
-test('model discovery prints a path only', () => {
-  const directory = temporary();
-  const base = join(directory, 'base.json');
-  writeFileSync(base, JSON.stringify({ providers: { litellm: { baseUrl: 'https://gateway.invalid', models: [] } } }));
-  const shape = join(directory, 'shape.json');
-  writeFileSync(shape, JSON.stringify({ provider: ['providers', 'litellm'], url: ['baseUrl'], label: 'Pi' }));
-  const curl = command('curl', `process.stdout.write(JSON.stringify({ data: [{ id: 'served' }] }));\n`);
-  const cache = join(directory, 'cache', 'models.json');
-  const { stdout, stderr } = run([join(src, 'gateway/models.ts'), base, cache, curl, 'GATEWAY_KEY', shape], { GATEWAY_KEY: 'secret' });
-  assert.equal(stdout, cache + '\n');
-  assert.deepEqual(JSON.parse(readFileSync(cache, 'utf8')).providers.litellm.models, [{ id: 'served' }]);
-  assert.match(stderr, /^agent-distro gateway: discovering Pi models at https:\/\/gateway\.invalid …$/m);
-  assert.match(stderr, /^agent-distro gateway: gateway https:\/\/gateway\.invalid, key in \$GATEWAY_KEY$/m);
-  assert.ok(!stderr.includes('secret'), stderr);
 });
 
 test('update --progress prints JSON lines only', () => {

@@ -6,7 +6,7 @@
  * MENU_JSON is the picker's listing (src/listing.ts). RESOLVED_JSON is the
  * profile in effect (src/profile/resolve.ts), named in the header with where
  * it came from. AUTH_JSON maps each harness to its auth scheme, from which,
- * with that profile's gateway, the probe (src/picker/auth.ts) whose status is
+ * with that profile's `env`, the probe (src/picker/auth.ts) whose status is
  * drawn on its row is built; it is a launch-time fact, so `--list` never
  * carries it. Prints the harness on stdout and exits 0, or prints nothing and
  * exits 0 when the user quits; argument errors exit 2. The menu is drawn on /dev/tty,
@@ -555,7 +555,7 @@ async function main() {
   const rows: Row[] = listing.profiles[0].harnesses;
   for (const row of rows) {
     const scheme = auth[row.name];
-    if (scheme) row.auth = probe(spec(scheme, row.name, profile?.gateway ?? null), process.env, io);
+    if (scheme) row.auth = probe(spec(scheme, row.name, profile?.env ?? {}), process.env, io);
   }
   const menu = new Menu(listing, remembered, profile);
   const term = process.env.TERM ?? '';

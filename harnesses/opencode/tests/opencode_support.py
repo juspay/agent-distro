@@ -17,7 +17,7 @@ settings = config_dir / 'opencode.json'
 # Upstream adds $schema to schema-less files when loading any configuration.
 settings.write_text('{"$schema":"https://opencode.ai/config.json","username":"personal-user"}\n')
 preserved = settings.read_bytes()
-env = dict(os.environ, AI_GATEWAY='0', OPENCODE_DISABLE_MODELS_FETCH='true',
+env = dict(os.environ, AGENT_DISTRO_SETTINGS='0', OPENCODE_DISABLE_MODELS_FETCH='true',
            OPENCODE_DISABLE_AUTOUPDATE='true', OPENCODE_PASSWORD='fixture')
 
 

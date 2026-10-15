@@ -1,14 +1,12 @@
 {
   title = "Pi";
-  tagline = "OMP's upstream · gateway via models.json";
-  auth = "gateway";
+  tagline = "OMP's upstream · plugins per home";
   order = 5;
   releaseNotes = version: "https://github.com/earendil-works/pi/releases/tag/v${builtins.head (builtins.split "\\+" version)}";
   checks = [
-    { name = "piGateway"; script = builtins.readFile ./tests/check-gateway.py; requires = [ "gateway" ]; }
-    { name = "piKolu"; script = import ../../test/guest-script.nix ./tests/check-kolu.py; requires = [ "kolu" ]; packages = [ "koluFixture" ]; env.AI_GATEWAY = "0"; }
-    { name = "piKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; env.AI_GATEWAY = "0"; }
-    { name = "piPlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" ]; env.AI_GATEWAY = "0"; }
-    { name = "pi"; script = import ../../test/guest-script.nix ./tests/check.py; requires = [ ]; packages = [ ]; env.AI_GATEWAY = "0"; }
+    { name = "piKolu"; script = import ../../test/guest-script.nix ./tests/check-kolu.py; requires = [ "kolu" ]; packages = [ "koluFixture" ]; env.AGENT_DISTRO_SETTINGS = "0"; }
+    { name = "piKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; env.AGENT_DISTRO_SETTINGS = "0"; }
+    { name = "piPlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" ]; env.AGENT_DISTRO_SETTINGS = "0"; }
+    { name = "pi"; script = import ../../test/guest-script.nix ./tests/check.py; requires = [ ]; packages = [ ]; env.AGENT_DISTRO_SETTINGS = "0"; }
   ];
 }

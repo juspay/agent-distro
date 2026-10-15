@@ -16,38 +16,37 @@ import { test } from 'node:test';
 const [src] = process.argv.slice(2);
 const script = join(src, 'harness/omp.ts');
 const work = mkdtempSync(join(tmpdir(), 'omp-adapter-'));
-// The two layers the launcher passes: every profile's, then the gateway's in
-// effect, which omp.ts builds from the gateway itself.
+// The two layers the launcher passes: the wrapper's own defaults as
+// harnesses/omp/default.nix generates them, then the profile's
+// `settings.omp` as `--settings` (JSON, as src/plugin/launch.ts prints it).
 const always = join(work, 'always.yml');
-writeFileSync(always, 'hideThinkingBlock: true\n');
-const gatewayJson = JSON.stringify({ url: 'https://gateway.test', keyEnv: 'KEY', models: { large: 'open-large', small: 'open-small' } });
-const gateway = ['--gateway', gatewayJson];
-// The layer the launcher wrote when the gateway was built in.
-const builtGateway = join(work, 'gateway.yml');
-writeFileSync(builtGateway, 'modelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n'
-  + '  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n');
+writeFileSync(always, 'hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n');
+const settings = JSON.stringify({
+  modelRoles: { default: 'litellm/open-large', slow: 'litellm/open-large', smol: 'litellm/open-small', task: 'litellm/open-large' },
+});
+const profile = ['--settings', settings];
 
-function fill(config: string, layers = [always, ...gateway]) {
+function fill(config: string, layers = [always, ...profile]) {
   return spawnSync(process.execPath, [script, config, ...layers], { encoding: 'utf8' });
 }
 
 // [name, config.yml before, config.yml after or null when the launch must stop]
 const cases: [string, string, string | null][] = [
-  ["empty", "", "hideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["comment-only", "# my settings", "# my settings\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["comment-only-nl", "# a\n\n# b\n", "# a\n\n# b\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["setup", "setupVersion: 2\n", "setupVersion: 2\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
+  ["empty", "", "hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["comment-only", "# my settings", "# my settings\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["comment-only-nl", "# a\n\n# b\n", "# a\n\n# b\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["setup", "setupVersion: 2\n", "setupVersion: 2\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
   ["old", "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\n", "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n"],
   ["full", "modelRoles:\n  default: x\n  slow: y\n  smol: z\n  task: w\ntask:\n  showResolvedModelBadge: false\nhideThinkingBlock: false\n", "modelRoles:\n  default: x\n  slow: y\n  smol: z\n  task: w\ntask:\n  showResolvedModelBadge: false\nhideThinkingBlock: false\n"],
-  ["quotes", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n  - x\n  - \"y\"\ne: [1, 2]\nf: {g: h}\n", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n- x\n- \"y\"\ne: [1, 2]\nf: {g: h}\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["seq-noindent", "list:\n- a\n- b\nnested:\n  inner:\n  - c\n", "list:\n- a\n- b\nnested:\n  inner:\n  - c\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["long", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word \n", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["multiline", "block: |\n  line one\n  line two\nfolded: >\n  folded text\n  here\n", "block: |\n  line one\n  line two\nfolded: >\n  folded text here\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["anchors", "base: &b\n  k: v\nother: *b\n", "base: &b\n  k: v\nother: *b\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
+  ["quotes", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n  - x\n  - \"y\"\ne: [1, 2]\nf: {g: h}\n", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n- x\n- \"y\"\ne: [1, 2]\nf: {g: h}\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["seq-noindent", "list:\n- a\n- b\nnested:\n  inner:\n  - c\n", "list:\n- a\n- b\nnested:\n  inner:\n  - c\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["long", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word \n", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["multiline", "block: |\n  line one\n  line two\nfolded: >\n  folded text\n  here\n", "block: |\n  line one\n  line two\nfolded: >\n  folded text here\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["anchors", "base: &b\n  k: v\nother: *b\n", "base: &b\n  k: v\nother: *b\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
   ["task-partial", "task:\n  other: 1 # keep\n", "task:\n  other: 1 # keep\n  showResolvedModelBadge: true\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["tilde", "~\n", "hideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["docstart", "---\nkey: v\n", "---\nkey: v\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
-  ["unicode", "name: \"h\u00e9llo \u2713\"\n", "name: \"h\u00e9llo \u2713\"\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\ntask:\n  showResolvedModelBadge: true\n"],
+  ["tilde", "~\n", "hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["docstart", "---\nkey: v\n", "---\nkey: v\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["unicode", "name: \"héllo ✓\"\n", "name: \"héllo ✓\"\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
   ["bad-roles", "modelRoles: []\n", null],
   ["null-roles", "modelRoles: null\n", null],
   ["invalid", "modelRoles: [", null],
@@ -85,13 +84,24 @@ for (const [name, before, after] of cases) {
   });
 }
 
-test('a config needing nothing is not rewritten', () => {
+test('a config that needs nothing is not rewritten', () => {
   const config = join(work, 'complete.yml');
   writeFileSync(config, cases.find(([name]) => name === 'full')![1]);
   const before = statSync(config, { bigint: true });
   assert.equal(fill(config).status, 0);
   const after = statSync(config, { bigint: true });
   assert.deepEqual([after.ino, after.mtimeNs], [before.ino, before.mtimeNs]);
+});
+
+test('the layers are applied in order, and each fills only what is absent', () => {
+  // The wrapper's own defaults win over a profile's, and a profile's role
+  // reaches OMP where the user has none: exactly the two the user did not set.
+  const config = join(work, 'ordered.yml');
+  writeFileSync(config, 'modelRoles:\n  slow: mine\nhideThinkingBlock: true\n');
+  const own = JSON.stringify({ modelRoles: { default: 'litellm/large', slow: 'litellm/large' }, hideThinkingBlock: false });
+  assert.equal(fill(config, [always, '--settings', own]).status, 0);
+  assert.equal(readFileSync(config, 'utf8'),
+    'modelRoles:\n  slow: mine\n  default: litellm/large\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n');
 });
 
 test('a config that is not UTF-8 stops the launch unchanged', () => {
@@ -116,20 +126,11 @@ test('mode and symlink are kept; no temporary file is left', () => {
   const fd = openSync(real, 'r');
   try {
     assert.equal(fstatSync(fd).mode & 0o777, 0o640);
-    assert.equal(readFileSync(fd, 'utf8'), 'setupVersion: 2\nhideThinkingBlock: true\n');
+    assert.equal(readFileSync(fd, 'utf8'), 'setupVersion: 2\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n');
   } finally {
     closeSync(fd);
   }
   assert.deepEqual(readdirSync(directory).sort(), ['config.yml', 'real.yml']);
-});
-
-test('the gateway layer is the one the build used to write', () => {
-  const [built, launched] = ['built', 'launched'].map((name) => join(work, `${name}.yml`));
-  writeFileSync(built, '# mine\n');
-  writeFileSync(launched, '# mine\n');
-  assert.equal(fill(built, [always, builtGateway]).status, 0);
-  assert.equal(fill(launched).status, 0);
-  assert.equal(readFileSync(launched, 'utf8'), readFileSync(built, 'utf8'));
 });
 
 test('an unwritable agent directory only warns', () => {

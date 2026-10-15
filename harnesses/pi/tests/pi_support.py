@@ -18,7 +18,7 @@ user_settings = {'theme': 'light', 'defaultProvider': 'personal', 'defaultModel'
                  'skills': []}
 settings.write_text(json.dumps(user_settings))
 mcp.write_text(json.dumps({'mcpServers': {'personal': user_server}, 'personalSetting': True}))
-env = dict(os.environ, AI_GATEWAY='0', PI_OFFLINE='1')
+env = dict(os.environ, AGENT_DISTRO_SETTINGS='0', PI_OFFLINE='1')
 
 
 def run(*args, launcher='pi', overrides=None, success=True):

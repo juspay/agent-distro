@@ -4,13 +4,12 @@
  * Usage: node check-adapter.ts SRC HARNESS_DIR
  */
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { writeConfig, mergeState, gatewayConfig } = await import(join(process.argv[2], 'harness/pi.ts'));
+const { writeConfig, mergeState } = await import(join(process.argv[2], 'harness/pi.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'pi-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -55,7 +54,6 @@ test('translation and skipped transports', () => {
       equals: { type: 'stdio', command: 'bad=command', args: [], env: {} },
     },
   }));
-  const gateway = { url: 'https://gateway.test/', keyEnv: 'TEST_KEY', models: { large: 'large', small: 'small' } };
   const args = (name: string, ...descriptions: string[]) => {
     const path = join(root, `${name}.json`);
     writeFileSync(path, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', descriptions }));
@@ -75,11 +73,6 @@ test('translation and skipped transports', () => {
   assert.ok(!lstatSync(join(skills, 'approved')).isSymbolicLink());
   assert.equal(readFileSync(join(skills, 'approved'), 'utf8'), 'Guide');
   assert.ok(!existsSync(join(skills, 'unapproved')));
-  assert.ok(!existsSync(join(out, 'gateway.json')), 'the gateway is the launch\'s, not the build\'s');
-  const provider = gatewayConfig(gateway).providers.litellm;
-  assert.equal(provider.apiKey, '$TEST_KEY');
-  assert.equal(provider.baseUrl, 'https://gateway.test/v1');
-  assert.deepEqual(provider.models, [{ id: 'large' }, { id: 'small' }]);
   assert.throws(() => writeConfig(join(root, 'collision'), args('double', description, description)), /declared by both/);
 });
 
@@ -231,70 +224,5 @@ test('a launch with plugins needs a home; one without is the profile', async () 
       /HOME and PI_CODING_AGENT_DIR are unset/);
   } finally {
     for (const [name, value] of Object.entries(saved)) if (value !== undefined) process.env[name] = value;
-  }
-});
-
-test('gateway discovery, caching and fallback', () => {
-  const root = temporary();
-  const base = join(root, 'base.json');
-  const cache = join(root, 'cache/models.json');
-  const shape = join(process.argv[3], 'gateway-shape.json');
-  writeFileSync(base, JSON.stringify({
-    providers: { litellm: { baseUrl: 'https://gateway.example/v1', models: [{ id: 'large' }, { id: 'small' }] } },
-  }));
-  const key = 'test"key\\value';
-  // A stand-in curl: records its argv and stdin, then answers or fails.
-  const curl = join(root, 'curl');
-  writeFileSync(curl, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.argv"\ncat > "$0.stdin"\n`
-    + `[ -e "$0.down" ] && exit 7\n[ -e "$0.body" ] && exec cat "$0.body"\necho '{"data":[{"id":"served"}]}'\n`);
-  chmodSync(curl, 0o755);
-  const invoke = (env: Record<string, string> = {}) => {
-    const result = spawnSync(process.execPath,
-      [join(process.argv[2], 'gateway/models.ts'), base, cache, curl, 'TEST_KEY', shape],
-      { encoding: 'utf8', env: { ...process.env, TEST_KEY: key, ...env } });
-    assert.equal(result.status, 0, result.stderr);
-    return [result.stdout.trim(), result.stderr];
-  };
-  const ids = (config: string) =>
-    (JSON.parse(config).providers.litellm.models as { id: string }[]).map((model) => model.id).sort();
-
-  let [selected, warning] = invoke();
-  const argv = readFileSync(curl + '.argv', 'utf8').split('\n');
-  assert.ok(!argv.join(' ').includes(key));
-  assert.ok(!argv.includes('--header'));
-  assert.equal(argv[argv.indexOf('--config') + 1], '-');
-  assert.equal(readFileSync(curl + '.stdin', 'utf8'), 'header = "Authorization: Bearer test\\"key\\\\value"\n');
-  assert.equal(selected, cache);
-  // Discovery runs on every launch, so it says nothing unless asked.
-  assert.equal(warning, '');
-  assert.match(invoke({ AGENT_DISTRO_LOG: 'debug' })[1], /^agent-distro gateway: discovering \S+ models at \S+ …$/m);
-  const saved = readFileSync(cache, 'utf8');
-  assert.ok(!saved.includes(key));
-  assert.deepEqual(ids(saved), ['large', 'served', 'small']);
-
-  // A gateway that is down falls back to the cache, and to the profile's own
-  // aliases when there is none, leaving both alone.
-  writeFileSync(curl + '.down', '');
-  [selected, warning] = invoke();
-  assert.equal(selected, cache);
-  assert.ok(warning.includes(`cached model list from ${cache}`), warning);
-  assert.equal(warning.trimEnd().split('\n').length, 1, warning);
-  assert.ok(!warning.includes(key));
-  assert.equal(readFileSync(cache, 'utf8'), saved);
-  rmSync(cache);
-  [selected, warning] = invoke();
-  assert.equal(selected, base);
-  assert.ok(warning.includes(`two profile aliases from ${base}`), warning);
-  assert.equal(warning.trimEnd().split('\n').length, 1, warning);
-
-  // An answer we cannot use falls back the same way, and writes nothing.
-  rmSync(curl + '.down');
-  for (const body of [Buffer.from('{"data":[{"id":"caf\xe9"}]}', 'latin1'), '{"data":[{"id":"__proto__"}]}',
-    '{"data":[null]}', '{"data":{}}', 'not json']) {
-    writeFileSync(curl + '.body', body);
-    [selected, warning] = invoke();
-    assert.equal(selected, base, String(body));
-    assert.ok(warning.includes(`two profile aliases from ${base}`), warning);
-    assert.ok(!existsSync(cache));
   }
 });

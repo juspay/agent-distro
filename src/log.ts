@@ -4,8 +4,8 @@
  * One consola instance, from `consola/core` alone: the package's default entry
  * writes info lines to stdout, colors by stdout's TTY state and loads a fancy
  * reporter and prompts at start-up, and stdout here is a protocol channel (the
- * shell launch.ts prints for eval, the JSON of `--list --json`, the path
- * gateway/models.ts prints). The one reporter writes every level to stderr as
+ * shell launch.ts prints for eval, the JSON of `--list --json`, the path a
+ * harness config writer prints). The one reporter writes every level to stderr as
  *
  *   agent-distro <tag>: <message>
  *   agent-distro <tag>: warning: <message>
@@ -29,8 +29,7 @@
  * say it is taking long, so for a synchronous `fn` the start line is printed
  * before it runs: call sites wrap only work known to be slow, once a cache has
  * missed (an evaluation not cached, a reference not in the store, a build
- * the dry run found in the cache). Work that is bounded and runs every launch
- * passes `notice: 'debug'` instead, which only records the time taken.
+ * the dry run found in the cache).
  * An `async` function gets the start line only if it has not settled after
  * NOTICE_MS; a plain function returning a promise is timed as it settles.
  * Either way the time taken is logged at debug.
@@ -127,7 +126,6 @@ export function createLogger({ stream = process.stderr, env = process.env, journ
     unknown,
     profile: tag('profile'),
     update: tag('update'),
-    gateway: tag('gateway'),
     picker: tag('picker'),
     plugin: tag('plugin'),
     claude: tag('claude'),
@@ -151,12 +149,11 @@ const thenable = (value: unknown): value is PromiseLike<unknown> =>
 
 /**
  * Run `fn`, telling a person waiting on it what it is; see the head of this
- * file. `notice` is the level of that line: `debug` for work that is bounded
- * and runs on every launch, where only the time taken is worth recording.
+ * file.
  */
-export function slow<T>(logger: Logger, label: string, fn: () => T, notice: 'info' | 'debug' = 'info'): T {
+export function slow<T>(logger: Logger, label: string, fn: () => T): T {
   const since = performance.now();
-  const start = () => notice === 'info' ? logger.start(`${label} …`) : logger.debug(`${label} …`);
+  const start = () => logger.start(`${label} …`);
   const done = () => logger.debug(`${label}: done in ${seconds(since)}`);
   // Only an `async` function can be left to the timer: a synchronous call
   // blocks the loop, so nothing could print its notice while it runs.

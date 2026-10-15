@@ -34,7 +34,7 @@ let
   # A profile by reference: the vanilla bundle, with the shims exporting the
   # reference as AI_PROFILE; a store path, so the VM needs no network.
   referencedProfile = pkgs.writeTextDir "agent-distro.nix" ''
-    { name = "referenced"; description = "Referenced"; plugins = [ ]; gateway = null; }
+    { name = "referenced"; description = "Referenced"; plugins = [ ]; }
   '';
   switchedProfile = switched { profile = "${referencedProfile}"; };
   switchedFlake = switched { flake = "path:/home/testuser/other-flake"; };
@@ -222,7 +222,7 @@ in
     for activation in ["${switchedProfile}", "${switchedFlake}"]:
         machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 " + activation + "/activate"))
         for name in ${builtins.toJSON commands}:
-            output = machine.succeed(user("unset XDG_STATE_HOME; AI_GATEWAY=0 " + name + " --version"))
+            output = machine.succeed(user("unset XDG_STATE_HOME; AGENT_DISTRO_SETTINGS=0 " + name + " --version"))
             assert "updated-" not in output, output
         machine.succeed("test ! -e " + shlex.quote(state.rsplit("/", 1)[0]))
         check_history()
@@ -230,9 +230,9 @@ in
             # The reference is every command's AI_PROFILE fallback; the user's own wins.
             # The shims are the harness commands only, so trace one.
             for name in ${builtins.toJSON commands}:
-                traced = machine.succeed(user("unset XDG_STATE_HOME; AI_GATEWAY=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
+                traced = machine.succeed(user("unset XDG_STATE_HOME; AGENT_DISTRO_SETTINGS=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
                 assert "export AI_PROFILE=${referencedProfile}" in traced, traced
-                traced = machine.succeed(user("unset XDG_STATE_HOME; AI_PROFILE=vanilla AI_GATEWAY=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
+                traced = machine.succeed(user("unset XDG_STATE_HOME; AI_PROFILE=vanilla AGENT_DISTRO_SETTINGS=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
                 assert "export AI_PROFILE" not in traced, traced
             # And the launchers take it as the profile in effect.
             listed = machine.succeed(user("AI_PROFILE=${referencedProfile} ${agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla}/bin/agent-distro --list --json"))

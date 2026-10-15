@@ -1,10 +1,12 @@
 # Pi
 
 Merges plugin MCP servers and materialized skill paths into its user
-JSON files, preserving personal entries, auth, and sessions. Gateway models
-share OpenCode's fetch/cache; model defaults fill only absent settings. Every
-profile defaults `hideThinkingBlock` to `true`; set it to `false` in
-`settings.json` to show thinking blocks again.
+JSON files, preserving personal entries, auth, and sessions. A profile's
+`env` is exported before Pi starts, and a `secret` variable it declares is
+prompted for when it is not already set. Every profile defaults
+`hideThinkingBlock` to `true`; set it to `false` in `settings.json` to show
+thinking blocks again. Pi has no `settings.<harness>` of a profile to read:
+its own files are where its providers live.
 
 Each stdio MCP server runs through a generated launcher, in the directory the
 harness was launched in (doc/index.md, "Working directory"). A plugin on
@@ -18,7 +20,7 @@ write), the launch fails rather than start without the plugins. Launches that ru
 the same moment with different values can see each other's entries, since Pi
 reads them from the same files. A profile read at launch (an
 `agent-distro.nix`) is merged as these are, its plugins replacing every
-built-in one; its gateway's provider is written at launch, into the cache.
+built-in one.
 
 The npins branch pin tracks `sadjow/pi-nix`. Its standalone binary packaging
 recipe is called with the distribution's shared nixpkgs rather than the

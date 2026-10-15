@@ -11,15 +11,17 @@
  * describes that profile (src/profile/resolve.ts), and the rest is
  * the adapter's own. Stdout is shell for the launcher to `eval`: `launched` is
  * what the adapter prints (extra arguments as shell words, or a path),
- * `profile_gateway` the gateway in effect as JSON (empty for none) with its
- * `_url`, `_key_env` and `_key_hint`, and the profile's packages go first on
- * PATH.
+ * `profile_env_secrets` names each `secret` variable of the profile's `env`
+ * with its hint, as `NAME=hint`, for the launcher to prompt for, every other
+ * one is exported here, `profile_settings` is the profile's settings for this
+ * harness as JSON (empty for none), and the profile's packages go first on
+ * PATH. `AGENT_DISTRO_SETTINGS=0` leaves all three empty: plugins only.
  *
  * A profile composed over the built-in one keeps the built-in's plugins and
  * adds its own; one that does not include it (chosen positionally, or another
  * built-in name) replaces them. Either way its plugin directories are
- * translated exactly as the variable's, ahead of them, and its gateway and
- * packages are the ones in effect. Each directory is read exactly as a
+ * translated exactly as the variable's, ahead of them, and its env, settings
+ * and packages are the ones in effect. Each directory is read exactly as a
  * built-in plugin is, then translated once per content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
@@ -39,10 +41,10 @@
  * A launch names the profile in effect on stderr when a repository's
  * `agent-distro.nix` or AI_PROFILE chose it, worded as `--list` words it and
  * followed by the website (`SITE`), since that line is the only one a plain
- * launch prints and the change to plugins, PATH and gateway is silent
+ * launch prints and the change to plugins, PATH, env and settings is silent
  * otherwise. At debug it also logs each plugin directory and where it came
- * from, the PATH additions, the gateway, and the arguments it hands the
- * harness.
+ * from, the PATH additions, the environment and settings, and the arguments it
+ * hands the harness.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -55,8 +57,10 @@ import { readDescription } from './resources.ts';
 import { log, SITE, VARIABLE as LOG_VARIABLE } from '../log.ts';
 import { nameText, sourceText } from '../listing.ts';
 import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
-import type { Gateway } from '../gateway/models.ts';
-import { resolveProfile, select, workingDirectory, isResolved, type Info, type Resolved } from '../profile/resolve.ts';
+import {
+  resolveProfile, select, workingDirectory, isResolved,
+  type Info, type ProfileEnv, type Resolved, type SettingsSection,
+} from '../profile/resolve.ts';
 
 export type Report = (message: string) => void;
 
@@ -504,32 +508,49 @@ function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved {
   return resolveProfile(info, select(undefined, workingDirectory(), env, info), env);
 }
 
-/** The shell a launcher evaluates; see the head of this file. */
-export function shell(launched: string, gateway: Gateway | null, paths: string[], logLevel: string | null = null): string {
+/**
+ * The shell a launcher evaluates; see the head of this file. Every non-secret
+ * `env` entry is exported here; a secret one is named in `profile_env_secrets`
+ * with its hint, for the launcher to prompt for, so no value of it is ever a
+ * file or a command line. `settings` is the profile's settings for this
+ * harness, written as JSON.
+ */
+export function shell(
+  launched: string, env: ProfileEnv, settings: SettingsSection | undefined,
+  paths: string[], logLevel: string | null = null,
+): string {
   const cwd = workingDirectory();
-  const lines = [
-    `launched=${quote(launched)}`,
-    'unset AGENT_DISTRO_PROFILE',
-    `profile_gateway=${quote(gateway ? JSON.stringify(gateway) : '')}`,
-    `profile_gateway_url=${quote(gateway?.url ?? '')}`,
-    `profile_gateway_key_env=${quote(gateway?.keyEnv ?? '')}`,
-    `profile_gateway_key_hint=${quote(gateway?.keyHint ?? '')}`,
-  ];
+  const secrets: string[] = [];
+  const lines = [`launched=${quote(launched)}`, 'unset AGENT_DISTRO_PROFILE'];
+  for (const [name, value] of Object.entries(env)) {
+    if (typeof value === 'string') lines.push(`export ${name}=${quote(value)}`);
+    else secrets.push(`${name}=${value.hint ?? ''}`);
+  }
+  lines.push(
+    `profile_env_secrets=(${secrets.map(quote).join(' ')})`,
+    `profile_settings=${quote(settings ? JSON.stringify(settings) : '')}`,
+  );
   // The directory this launch was typed in, for the launchers a plugin's stdio
   // servers run through (src/plugin/launcher.ts). Exported, because the harness
   // passes its environment on.
   if (cwd) lines.push(`AGENT_DISTRO_CWD=${quote(cwd)}`, 'export AGENT_DISTRO_CWD');
   // The level this launch settled on after warning about the one it was given:
-  // the gateway and harness scripts it runs next take that one as it is,
-  // rather than repeating the warning, once each.
+  // the harness scripts it runs next take that one as it is, rather than
+  // repeating the warning, once each.
   if (logLevel) lines.push(`${LOG_VARIABLE}=${quote(logLevel)}`, `export ${LOG_VARIABLE}`);
   if (paths.length) lines.push(`PATH=${quote(paths.join(':'))}"\${PATH:+:$PATH}"`, 'export PATH');
   return lines.join('\n') + '\n';
 }
 
-/** What a launch says about itself: the profile at info when one was chosen here, the rest at debug. */
+/**
+ * What a launch says about itself: the profile at info when one was chosen
+ * here, the rest at debug. `settings` is this harness's section of the
+ * profile's, absent for a harness it says nothing about, and `opted` whether
+ * `AGENT_DISTRO_SETTINGS=0` left everything the profile sets out.
+ */
 function describe<A extends { profile: E[] }, E extends ProfileEntry>(
   harness: string, profile: Resolved, launch: Launch<A, E>, launched: string,
+  settings: SettingsSection | undefined, opted: boolean,
 ) {
   if (profile.source === 'repository' || profile.source === 'variable') {
     log.profile.info(`using ${nameText(profile)} (${sourceText(profile)}) · ${SITE}`);
@@ -542,8 +563,15 @@ function describe<A extends { profile: E[] }, E extends ProfileEntry>(
     log.plugin.debug(`${plugin.description.root}: from ${from}, as ${plugin.name}, translated at ${plugin.translation}`);
   }
   for (const path of profile.paths) log.profile.debug(`PATH gains ${path}`);
-  if (profile.gateway) log.gateway.debug(`gateway ${profile.gateway.url}, key in $${profile.gateway.keyEnv}`);
-  else log.gateway.debug('no gateway');
+  if (opted) log.profile.debug('AGENT_DISTRO_SETTINGS=0: no environment or settings from the profile');
+  else {
+    for (const [name, value] of Object.entries(profile.env)) {
+      log.profile.debug(typeof value === 'string' ? `exports ${name}=${value}`
+        : `prompts for ${name}${value.hint ? ` (${value.hint})` : ''}`);
+    }
+    if (settings) log.profile.debug(`settings.${harness} from the profile`);
+    else if (profile.settings[harness]) log.profile.debug(`settings.${harness} is for another harness`);
+  }
   log.harness(harness).debug(`harness arguments: ${launched}`);
 }
 
@@ -563,8 +591,14 @@ export async function main(argsPath: string): Promise<number> {
       profile.plugins, !profile.keepsBuiltIn);
     logger = log.harness(args.harness);
     const launched = adapter.launch(launch);
-    describe(args.harness, profile, launch, launched);
-    process.stdout.write(shell(launched, profile.gateway, profile.paths, log.unknown ? log.level : null));
+    // `AGENT_DISTRO_SETTINGS=0` is plugins only: the profile sets nothing, and
+    // a secret variable is not this launch's to export either — the launcher
+    // prompts for it after this shell, so its value is never a file or an argv.
+    const opted = process.env.AGENT_DISTRO_SETTINGS === '0';
+    const settings = opted ? undefined : profile.settings[args.harness];
+    describe(args.harness, profile, launch, launched, settings, opted);
+    process.stdout.write(shell(launched, opted ? {} : profile.env, settings, profile.paths,
+      log.unknown ? log.level : null));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;
     // A cache that cannot be written fails the launch: there is no degraded mode.
