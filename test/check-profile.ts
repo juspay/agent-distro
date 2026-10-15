@@ -2,8 +2,9 @@
  * The profile in effect without a VM or a real nix: discovery up to the git
  * root, the stack and how it composes, references and their offline fallback, the evaluation's
  * isolation, cache and upkeep, nixpkgs fetched only for packages, the
- * no-compile policy for packages, and the launch that uses it all. A fake nix
- * on PATH logs every call; evaluate.nix itself runs in the VM tests.
+ * no-compile policy for packages, and the launch that uses it all. There is no
+ * built-in profile: an empty stack resolves to none. A fake nix on PATH logs
+ * every call; evaluate.nix itself runs in the VM tests.
  *
  * Usage: node check-profile.ts SRC
  */
@@ -82,8 +83,7 @@ function reference(name: string, storePath: string, dir?: string) {
     JSON.stringify({ storePath, locked: dir ? { dir } : {}, original: dir ? { dir } : {} }));
 }
 
-const VANILLA = { name: 'vanilla', description: 'Upstream harnesses with your own provider', env: {}, settings: {} };
-const info = { default: 'vanilla', builtins: [VANILLA], nixpkgs: '/nix/store/00000000000000000000000000000000-nixpkgs', system: 'x86_64-linux' };
+const info = { nixpkgs: '/nix/store/00000000000000000000000000000000-nixpkgs', system: 'x86_64-linux' };
 /** What the fake nix last evaluated: its arguments, what it was given and its environment. */
 const lastEvaluation = () => JSON.parse(readFileSync(join(bin, 'eval.json'), 'utf8'));
 
@@ -177,38 +177,39 @@ test('discovery goes from the working directory up to the git root, and no furth
   assert.equal(profile.discover(worktree), join(worktree, 'agent-distro.nix'));
 });
 
-test('the stack: a positional profile alone, else the built-in one, every AI_PROFILE entry and the repository', () => {
+test('the stack: a positional profile alone, else every AI_PROFILE entry and the repository', () => {
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
   const file = join(repo, 'agent-distro.nix');
   writeFileSync(file, '{ }');
   const outside = temporary();
   const select = (positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv = {}) =>
-    profile.select(positional, cwd, env, info);
-  const builtIn = { source: 'builtin', origin: 'vanilla' };
+    profile.select(positional, cwd, env);
   const entry = (origin: string, position = 1, count = 1) => ({ source: 'variable', origin, entry: { position, count } });
   const repository = { source: 'repository', origin: file };
   assert.deepEqual(select('./mine', repo, { AI_PROFILE: 'github:a/b' }), [{ source: 'positional', origin: './mine' }]);
-  assert.deepEqual(select(undefined, repo, { AI_PROFILE: 'github:a/b' }), [builtIn, entry('github:a/b'), repository]);
+  assert.deepEqual(select(undefined, repo, { AI_PROFILE: 'github:a/b' }), [entry('github:a/b'), repository]);
   // AI_PROFILE is a stack, left to right, each entry named with its position.
   assert.deepEqual(select(undefined, repo, { AI_PROFILE: 'github:a/b ./c' }),
-    [builtIn, entry('github:a/b', 1, 2), entry('./c', 2, 2), repository]);
+    [entry('github:a/b', 1, 2), entry('./c', 2, 2), repository]);
   // Two references with a `:` each, and one that is a path: whitespace
   // separates, and nothing else does.
   assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'github:a/b github:c/d' }),
-    [builtIn, entry('github:a/b', 1, 2), entry('github:c/d', 2, 2)]);
+    [entry('github:a/b', 1, 2), entry('github:c/d', 2, 2)]);
   assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'git+ssh://git@host:2222/team/profile ./y' }),
-    [builtIn, entry('git+ssh://git@host:2222/team/profile', 1, 2), entry('./y', 2, 2)]);
+    [entry('git+ssh://git@host:2222/team/profile', 1, 2), entry('./y', 2, 2)]);
   assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'https://host:8080/team/profile' }),
-    [builtIn, entry('https://host:8080/team/profile')]);
+    [entry('https://host:8080/team/profile')]);
   // Runs of whitespace, and leading or trailing ones, are one separator.
   assert.deepEqual(select(undefined, outside, { AI_PROFILE: '  github:a/b\t\t.' }),
-    [builtIn, entry('github:a/b', 1, 2), entry('.', 2, 2)]);
-  assert.deepEqual(select(undefined, repo), [builtIn, repository]);
-  assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'github:a/b' }), [builtIn, entry('github:a/b')]);
-  assert.deepEqual(select(undefined, outside, { AI_PROFILE: '' }), [builtIn]);
-  assert.deepEqual(select(undefined, outside, { AI_PROFILE: '   ' }), [builtIn]);
-  assert.deepEqual(select(undefined, undefined), [builtIn]);
+    [entry('github:a/b', 1, 2), entry('.', 2, 2)]);
+  assert.deepEqual(select(undefined, repo), [repository]);
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'github:a/b' }), [entry('github:a/b')]);
+  // Nothing chosen and no repository: no profile at all, and nothing resolved.
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: '' }), []);
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: '   ' }), []);
+  assert.deepEqual(select(undefined, undefined), []);
+  assert.equal(profile.resolveProfile(info, [], { XDG_CACHE_HOME: temporary() }), null);
 });
 
 /** A team profile's environment and settings: a value, a secret, and a harness section. */
@@ -222,7 +223,7 @@ function stored(name: string) {
   return { name, drvPath: join(out, `${name}.drv`), out, bin: join(out, 'bin') };
 }
 
-test('a repository\'s profile composes over AI_PROFILE, which composes over the built-in one', () => {
+test('a repository\'s profile composes over AI_PROFILE', () => {
   const team = plugin('team');
   const mine = plugin('mine');
   const teamPackage = stored('team-tool');
@@ -236,20 +237,20 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
   const file = profileFile(repo, { name: 'repo', description: 'Repo', plugins: [mine], packages: [repoPackage] });
   const env = { XDG_CACHE_HOME: temporary(), AI_PROFILE: elsewhere };
   const inEffect = (positional: string | undefined, cwd: string, environment: NodeJS.ProcessEnv = env) =>
-    profile.resolveProfile(info, profile.select(positional, cwd, environment, info), environment);
+    profile.resolveProfile(info, profile.select(positional, cwd, environment), environment);
   // Plugins and packages are both, the user's first; the repository sets no
   // env or settings, so the user's are in effect.
   const composed = inEffect(undefined, repo);
   assert.deepEqual(composed, {
     name: 'repo', description: 'Repo', source: 'repository', origin: file,
     over: { name: 'elsewhere', description: 'Team', source: 'variable', origin: elsewhere },
-    keepsBuiltIn: true, plugins: [team, mine], env: PROFILE_ENV, settings: PROFILE_SETTINGS,
+    plugins: [team, mine], env: PROFILE_ENV, settings: PROFILE_SETTINGS,
     paths: [teamPackage.bin, repoPackage.bin],
   });
   // Handed to the launcher as JSON, and accepted there.
   assert.ok(profile.isResolved(JSON.parse(JSON.stringify(composed))));
   assert.ok(!profile.isResolved({ ...composed, over: { name: 'a b' } }), 'what it is composed over is checked too');
-  // Named from the bottom up: the built-in one beneath is never named.
+  // Named from the bottom up.
   assert.equal(listing.nameText(composed), 'elsewhere + repo');
   assert.equal(listing.sourceText(composed), `from ${file} over AI_PROFILE=${elsewhere}`);
   // A second AI_PROFILE entry: composed left to right, so the later one wins
@@ -265,7 +266,7 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
   assert.deepEqual(stacked, {
     name: 'gateway', description: 'Gateway', source: 'variable', origin: gateway,
     over: { name: 'elsewhere', description: 'Team', source: 'variable', origin: elsewhere },
-    keepsBuiltIn: true, plugins: [team, skills], env: { ...PROFILE_ENV, LITELLM_BASE_URL: 'https://gateway.test', ONLY_HERE: 'yes' },
+    plugins: [team, skills], env: { ...PROFILE_ENV, LITELLM_BASE_URL: 'https://gateway.test', ONLY_HERE: 'yes' },
     settings: { omp: { modelRoles: { default: 'litellm/xl' } } }, paths: [teamPackage.bin],
   });
   assert.equal(listing.nameText(stacked), 'elsewhere + gateway');
@@ -287,70 +288,22 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
   const own = inEffect(undefined, repo);
   assert.deepEqual(own.env, { ...PROFILE_ENV, ...ownEnv });
   assert.deepEqual(own.settings, { ...PROFILE_SETTINGS, ...ownSettings });
-  // Without AI_PROFILE the repository's is over the built-in one alone, and
-  // names nothing beneath it.
+  // Without AI_PROFILE the repository's is the whole stack, and names nothing
+  // beneath it.
   const alone = inEffect(undefined, repo, { XDG_CACHE_HOME: env.XDG_CACHE_HOME });
   assert.equal(alone.over, undefined);
   assert.deepEqual(alone.plugins, [mine]);
   assert.equal(listing.nameText(alone), 'repo');
   assert.equal(listing.sourceText(alone), `from ${file}`);
-  // Outside the repository, AI_PROFILE over the built-in one.
+  // Outside the repository, AI_PROFILE alone.
   const variable = inEffect(undefined, temporary());
-  assert.deepEqual([variable.name, variable.source, variable.over, variable.keepsBuiltIn, variable.plugins,
-    variable.env, variable.settings],
-    ['elsewhere', 'variable', undefined, true, [team], PROFILE_ENV, PROFILE_SETTINGS]);
+  assert.deepEqual([variable.name, variable.source, variable.over, variable.plugins, variable.env, variable.settings],
+    ['elsewhere', 'variable', undefined, [team], PROFILE_ENV, PROFILE_SETTINGS]);
   // A positional profile is that one, exactly: nothing beneath it.
   assert.deepEqual(inEffect(repo, repo), {
     name: 'repo', description: 'Repo', source: 'positional', origin: repo,
-    keepsBuiltIn: false, plugins: [mine], env: ownEnv, settings: ownSettings, paths: [],
+    plugins: [mine], env: ownEnv, settings: ownSettings, paths: [],
   });
-});
-
-test('the launcher\'s own profile is the stack\'s base; a name is not a reference to one', () => {
-  const TEAM = { name: 'team', description: 'Team', env: PROFILE_ENV, settings: PROFILE_SETTINGS };
-  const builtins = { ...info, default: 'team', builtins: [TEAM, VANILLA] };
-  const inEffect = (positional: string | undefined, env: NodeJS.ProcessEnv, cwd = temporary()) =>
-    profile.resolveProfile(builtins, profile.select(positional, cwd, env, builtins), { XDG_CACHE_HOME: temporary(), ...env });
-  // A built-in name is the launcher's own, never a reference to give: the
-  // stack names no entry of its own, so it is refused where it is read.
-  assert.throws(() => inEffect(undefined, { AI_PROFILE: 'vanilla' }),
-    /AI_PROFILE=vanilla \(entry 1 of 1\): not a reference/);
-  assert.throws(() => inEffect('team', {}), /profile team: not a reference/);
-  // With nothing chosen it is in effect, with what it was built with.
-  assert.deepEqual(inEffect(undefined, {}), {
-    ...TEAM, source: 'builtin', origin: 'team', keepsBuiltIn: true, plugins: [], paths: [],
-  });
-  // Even beneath a repository's, and beneath every AI_PROFILE entry.
-  const mine = plugin('mine');
-  const repo = temporary();
-  mkdirSync(join(repo, '.git'));
-  const file = profileFile(repo, { name: 'repo', description: 'Repo', plugins: [mine] });
-  const beneath = inEffect(undefined, {}, repo);
-  assert.deepEqual(beneath, {
-    name: 'repo', description: 'Repo', source: 'repository', origin: file, keepsBuiltIn: true,
-    plugins: [mine], env: PROFILE_ENV, settings: PROFILE_SETTINGS, paths: [],
-  });
-  assert.equal(beneath.over, undefined, 'the built-in one beneath is never named');
-});
-
-test('a built-in profile carries the environment and settings it was built with, held to the same rules', () => {
-  const distribution = {
-    ...info, default: 'team',
-    builtins: [{ name: 'team', description: 'Built in', env: PROFILE_ENV, settings: PROFILE_SETTINGS }],
-  };
-  const inEffect = (which: typeof distribution) =>
-    profile.resolveProfile(which, profile.select(undefined, temporary(), {}, which), { XDG_CACHE_HOME: temporary() });
-  const built = inEffect(distribution);
-  assert.deepEqual([built.name, built.keepsBuiltIn, built.env, built.settings],
-    ['team', true, PROFILE_ENV, PROFILE_SETTINGS]);
-  assert.ok(profile.isResolved(built));
-  for (const [builtin, message] of [
-    [{ name: 'wrong', description: '', env: { 'BAD NAME': 'x' }, settings: {} }, /built-in profile wrong: `env` `BAD NAME` is not an environment variable name/],
-    [{ name: 'wrong', description: '', env: {}, settings: { pi: {} } }, /built-in profile wrong: `settings` `pi` is not a harness/],
-  ] as const) {
-    const broken = { ...info, default: 'wrong', builtins: [builtin] };
-    assert.throws(() => inEffect(broken), message);
-  }
 });
 
 test('each profile of the stack is cached on its own, and a second launch evaluates nothing', () => {
@@ -361,7 +314,7 @@ test('each profile of the stack is cached on its own, and a second launch evalua
   profileFile(repo, { name: 'repo' });
   const cache = temporary();
   const env = { XDG_CACHE_HOME: cache, AI_PROFILE: elsewhere };
-  const stack = profile.select(undefined, repo, env, info);
+  const stack = profile.select(undefined, repo, env);
   const start = calls('eval');
   profile.resolveProfile(info, stack, env);
   assert.equal(calls('eval') - start, 2, 'one evaluation per file');
@@ -375,7 +328,7 @@ test('a profile of the stack that cannot be read is named as the user gave it', 
   mkdirSync(join(repo, '.git'));
   const file = profileFile(repo, { name: 'repo' });
   const inEffect = (cwd: string, env: NodeJS.ProcessEnv) =>
-    profile.resolveProfile(info, profile.select(undefined, cwd, env, info), { XDG_CACHE_HOME: temporary(), ...env });
+    profile.resolveProfile(info, profile.select(undefined, cwd, env), { XDG_CACHE_HOME: temporary(), ...env });
   assert.throws(() => inEffect(repo, { AI_PROFILE: 'github:no/team' }),
     /^Error: AI_PROFILE=github:no\/team \(entry 1 of 1\): cannot fetch github:no\/team:/);
   // In a stack, the entry that failed and its place are both named.
@@ -409,7 +362,7 @@ test('a built profile is read where it lies: its profile.json, its plugins and i
   assert.equal(calls('eval'), evaluations, 'nothing is evaluated');
   assert.deepEqual(resolved, {
     name: 'built', description: 'Built', source: 'positional', origin: directory,
-    keepsBuiltIn: false, plugins: [realpathSync(own)], env: { ONLY: 'here' }, settings: { omp: { modelRoles: { default: 'x' } } },
+    plugins: [realpathSync(own)], env: { ONLY: 'here' }, settings: { omp: { modelRoles: { default: 'x' } } },
     paths: [join(directory, 'bin')],
     // Its reader is not this launcher's, so the roots are read as any profile's are.
   });
@@ -442,7 +395,7 @@ test('a path reference, as the directory or the file; plugin paths stay where th
   for (const origin of [directory, file]) {
     const resolved = resolve({ source: 'positional', origin });
     assert.deepEqual(resolved, {
-      name: 'mine', description: 'Mine', source: 'positional', origin, keepsBuiltIn: false, plugins: [own],
+      name: 'mine', description: 'Mine', source: 'positional', origin, plugins: [own],
       env: {}, settings: {}, paths: [],
     });
     assert.ok(profile.isResolved(resolved));
@@ -483,7 +436,7 @@ test('flake references are fetched: the profile and its plugin references, every
     /AI_PROFILE=silent:x \(entry 1 of 1\): cannot fetch silent:x: nix exited with code 3 and printed no error; its last output: halfway$/);
 });
 
-test('the evaluation is cached per content and agent-distro build, and swept when unused', () => {
+test('the evaluation is cached per content and evaluator, and swept when unused', async () => {
   const directory = temporary();
   const file = profileFile(directory, { name: 'cached' });
   const cache = temporary();
@@ -516,15 +469,23 @@ test('the evaluation is cached per content and agent-distro build, and swept whe
   profile.resolveProfile(info, [selection], env);
   assert.ok(!readdirSync(profiles).includes(first), 'the stale entry is removed');
   assert.equal(readdirSync(profiles).length, 2);
-  // Another agent-distro build evaluates afresh.
+  // Another agent-distro build — the same evaluator tree, elsewhere — reuses
+  // the entry: nothing of a launch's own build shapes the value, so a commit
+  // touching src/ does not re-evaluate every profile.
   const copy = join(temporary(), 'src');
   cpSync(src, copy, { recursive: true });
   // Its dependencies, beside it as in the runtime tree.
   symlinkSync(join(src, '../node_modules'), join(copy, '../node_modules'));
-  return import(join(copy, 'profile/resolve.ts')).then((other) => {
-    other.resolveProfile(info, [selection], env);
-    assert.equal(evaluations() - start, 5);
-  });
+  const other = await import(join(copy, 'profile/resolve.ts'));
+  other.resolveProfile(info, [selection], env);
+  assert.equal(evaluations() - start, 4, 'the same evaluator is the same key');
+  // A changed evaluator is not the same key: the shape it produces may differ.
+  // The copy came from the store, so it is read-only until asked otherwise.
+  const evaluator = join(copy, 'profile/evaluate.nix');
+  chmodSync(evaluator, 0o644);
+  writeFileSync(evaluator, readFileSync(evaluator, 'utf8') + '\n# changed\n');
+  other.resolveProfile(info, [selection], env);
+  assert.equal(evaluations() - start, 5, 'a new evaluate.nix evaluates afresh');
 });
 
 test('a file that is not a profile names what is wrong', () => {
@@ -697,7 +658,7 @@ test('without network, a reference uses its last store path, and says so', () =>
   // --list --json too, its JSON intact on stdout.
   const infoFile = join(temporary(), 'info.json');
   writeFileSync(infoFile, JSON.stringify(info));
-  const listed = spawnSync(process.execPath, [join(src, 'profile/cli.ts'), 'list', infoFile, JSON.stringify({ profiles: [{ name: 'vanilla', description: '', harnesses: [] }] }), '--json'],
+  const listed = spawnSync(process.execPath, [join(src, 'profile/cli.ts'), 'list', infoFile, JSON.stringify({ harnesses: [{ name: 'claude', title: 'Claude Code', tagline: 't', version: '1' }] }), '--json'],
     { encoding: 'utf8', cwd: temporary(), env: { PATH: process.env.PATH, ...env, AI_PROFILE: 'git+file:///offline-profile' } });
   assert.equal(listed.status, 0, listed.stderr);
   assert.equal(JSON.parse(listed.stdout).profile.name, 'remembered');
@@ -709,7 +670,7 @@ test('without network, a reference uses its last store path, and says so', () =>
   assert.throws(() => resolve({ source: 'variable', origin: 'git+file:///never' }), /cannot fetch git\+file:\/\/\/never:\nerror: cannot fetch/);
 });
 
-test('a launch uses the profile in effect: its plugins over the built-in ones, with its env, settings and packages', () => {
+test('a launch uses the profile in effect: its plugins, env, settings and packages', () => {
   const own = plugin('own');
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
@@ -723,13 +684,8 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   const team = plugin('team');
   const elsewhere = temporary();
   profileFile(elsewhere, { name: 'elsewhere', plugins: [team], env: { TEAM_URL: 'https://team.test' }, settings: { omp: { task: { showResolvedModelBadge: true } } } });
-  const kept = plugin('kept');
-  const description = join(temporary(), 'description.json');
-  writeFileSync(description, JSON.stringify({ root: kept, version: '1.0.0', manifest: { $schema: SCHEMA, name: 'kept' }, skills: {}, mcpServers: {}, reports: [] }));
   const args = join(temporary(), 'args.json');
-  writeFileSync(args, JSON.stringify({
-    harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [{ description, dir: '/built-in/kept' }], info,
-  }));
+  writeFileSync(args, JSON.stringify({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', info }));
   let noticed = '';
   // What the launcher's shell hands the harness: its command line, the
   // secrets it prompts for, the settings of this harness, the environment
@@ -748,24 +704,24 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
     assert.equal(output.status, 0, output.stderr);
     return output.stdout.split('\n');
   };
-  // Outside the repository: the built-in profile, as the launcher was built,
-  // and nothing said about it.
-  assert.deepEqual(launch(temporary()), ['--plugin-dir /built-in/kept', '', '', '', '', 'unset', '']);
+  // Outside any repository, with nothing on AI_PROFILE: no profile, so the
+  // harness is started with nothing added, and nothing is said about it.
+  assert.deepEqual(launch(temporary()), ['', '', '', '', '', 'unset', '']);
   assert.equal(noticed, '');
-  // Inside it: the repository's plugin over the built-in one, its environment
-  // exported — the value here, the secret named with its hint for the launcher
-  // to prompt — and no settings, which the profile keeps for OMP. The one line
-  // a plain launch prints names the profile and the website.
+  // Inside it: the repository's plugin, its environment exported — the value
+  // here, the secret named with its hint for the launcher to prompt — and no
+  // settings, which the profile keeps for OMP. The one line a plain launch
+  // prints names the profile and the website.
   const [launched, secrets, settings, value, team_, handed] = launch(join(repo));
   assert.match(noticed, /^agent-distro profile: using repo \(from .*agent-distro\.nix\) · https:\/\/agent-distro\.nixos\.asia$/m);
-  assert.match(launched, /^--plugin-dir \/built-in\/kept --plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out$/);
+  assert.match(launched, /^--plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out$/);
   assert.equal(secrets, "LITELLM_API_KEY=it's here");
   assert.equal(settings, '', 'settings are the harness\'s own: this one has none');
   assert.equal(value, 'https://gateway.test');
   assert.equal(handed, 'unset', 'the hand-over never reaches the harness');
   // A harness that reads settings gets its own section, and only its own.
   const ompArgs = join(temporary(), 'args.json');
-  writeFileSync(ompArgs, JSON.stringify({ harness: 'omp', bash: '/bin/sh', env: '/usr/bin/env', profile: [], info }));
+  writeFileSync(ompArgs, JSON.stringify({ harness: 'omp', bash: '/bin/sh', env: '/usr/bin/env', info }));
   const run = spawnSync(process.execPath, [join(src, 'plugin/launch-cli.mjs'), ompArgs],
     { cwd: join(repo), encoding: 'utf8', env: { PATH: process.env.PATH, XDG_CACHE_HOME: temporary() } });
   assert.equal(run.status, 0, run.stderr);
@@ -774,13 +730,13 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   // `AGENT_DISTRO_SETTINGS=0`: plugins only — no export, no secret, no settings.
   const [optedLaunched, optedSecrets, optedSettings, optedValue] =
     launch(join(repo), { AGENT_DISTRO_SETTINGS: '0' });
-  assert.match(optedLaunched, /^--plugin-dir \/built-in\/kept --plugin-dir /);
+  assert.match(optedLaunched, /^--plugin-dir /);
   assert.deepEqual([optedSecrets, optedSettings, optedValue], ['', '', '']);
-  // Over AI_PROFILE: the built-in plugin, the team's, then the repository's,
-  // and the team's environment, which the repository does not replace.
+  // Over AI_PROFILE: the team's plugin, then the repository's, and the team's
+  // environment, which the repository does not replace.
   const [stacked, , , , stackedTeam] = launch(bare, { AI_PROFILE: elsewhere });
   assert.match(noticed, new RegExp(`^agent-distro profile: using elsewhere \\+ bare \\(from \\S+/agent-distro\\.nix over AI_PROFILE=${elsewhere}\\) · `, 'm'));
-  const translated = stacked.match(/^--plugin-dir \/built-in\/kept --plugin-dir (\S+\/sha256-\S+\/out) --plugin-dir (\S+\/sha256-\S+\/out)$/);
+  const translated = stacked.match(/^--plugin-dir (\S+\/sha256-\S+\/out) --plugin-dir (\S+\/sha256-\S+\/out)$/);
   assert.ok(translated, stacked);
   // Each translation records the plugin it came from.
   const rootOf = (out: string) => JSON.parse(readFileSync(join(out, '../description.json'), 'utf8')).root;
@@ -789,9 +745,10 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   // The picker's resolution wins over the repository's, and is used as handed.
   const evaluations = calls('eval');
   const handedOverJson = JSON.stringify({
-    ...VANILLA, source: 'positional', origin: 'vanilla', keepsBuiltIn: true, plugins: [], env: {}, settings: {}, paths: [],
+    name: 'handed', description: 'Handed over', source: 'positional', origin: '/handed',
+    plugins: [], env: {}, settings: {}, paths: [],
   });
-  assert.deepEqual(launch(repo, { AGENT_DISTRO_PROFILE: handedOverJson }).slice(0, 3), ['--plugin-dir /built-in/kept', '', '']);
+  assert.deepEqual(launch(repo, { AGENT_DISTRO_PROFILE: handedOverJson }).slice(0, 3), ['', '', '']);
   assert.equal(calls('eval'), evaluations);
 });
 
@@ -803,7 +760,7 @@ test('a built profile\'s description is used by the runtime that wrote it, and n
     root, version: '1.0.0', manifest: { $schema: SCHEMA, name: 'described' }, skills: {}, mcpServers: {}, reports: [],
   };
   const args = join(temporary(), 'args.json');
-  writeFileSync(args, JSON.stringify({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile: [], info }));
+  writeFileSync(args, JSON.stringify({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', info }));
   const launch = (reader: string) => {
     const built = builtProfile(temporary(), { name: 'pinned', reader, plugins: [{ root, description }] });
     const resolved = profile.resolveProfile(info, [{ source: 'positional', origin: built }], { XDG_CACHE_HOME: temporary() });

@@ -1,7 +1,7 @@
-"""The gateway profile of test/flake.nix, read at launch from AI_PROFILE, as a
-built-in one would behave: its skills and Kolu's in OMP, Codex and Claude Code,
-its MCP servers with mcp-nixos from the profile's packages on PATH, and OMP
-with the environment and model roles it declares.
+"""The gateway profile of test/flake.nix, read at launch from AI_PROFILE: its
+skills and Kolu's in OMP, Codex and Claude Code, its MCP servers with
+mcp-nixos from the profile's packages on PATH, and OMP with the environment
+and model roles it declares.
 
 Usage: python check-gateway-profile.py EXPECTED MARKETPLACE OMP_TESTS CODEX_TESTS CLAUDE_TESTS MCP_NIXOS_BIN PROFILE_ENV PROFILE_SETTINGS
 
@@ -52,8 +52,8 @@ assert profile_env[key]['hint'] in missing.stderr, missing.stderr
 
 # Codex: every skill under its plugin's name, and both plugins' servers.
 loaded = codex_support.loaded_skills()
-bundled = {name for name in loaded if ':' in name}
-assert bundled == {plugin + ':' + skill for plugin, names in expected.items() for skill in names}, bundled
+from_plugins = {name for name in loaded if ':' in name}
+assert from_plugins == {plugin + ':' + skill for plugin, names in expected.items() for skill in names}, from_plugins
 servers = {s['name']: s for s in json.loads(codex_support.run('mcp', 'list', '--json', check=True).stdout)}
 assert {'nixos', 'kolu'} <= servers.keys(), servers
 assert servers['nixos']['enabled'] and servers['kolu']['enabled'], servers
@@ -69,4 +69,4 @@ for plugin, names in expected.items():
 listing = claude_support.run('mcp', 'list')
 assert re.search(r'plugin:kolu:kolu: \S+ .*Connected', listing), listing
 assert 'plugin:juspay-skills:nixos:' in listing, listing
-print('✅ the gateway profile at launch matches a built-in one in OMP, Codex and Claude Code')
+print('✅ the gateway profile at launch reaches OMP, Codex and Claude Code')

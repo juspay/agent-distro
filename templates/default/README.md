@@ -3,33 +3,23 @@
 This repository is a profile: `agent-distro.nix` names its plugins, packages,
 the environment every launch exports and the settings its harnesses default,
 and the repository itself is an Agent Plugins directory (`plugin.json`,
-`skills/<name>/SKILL.md`, optionally `mcp.json`). Edit `agent-distro.nix` to
-name your distribution, add skills under `skills/`, and optionally point OMP
-and OpenCode at a model gateway.
+`skills/<name>/SKILL.md`, optionally `mcp.json`). There is no flake here and
+nothing to build or register: agent-distro reads these files when a harness
+starts. Edit `agent-distro.nix` to name your distribution, add skills under
+`skills/`, and optionally point OMP and OpenCode at a model gateway.
 
 ## Use it from any agent-distro
-
-agent-distro reads `agent-distro.nix` when a harness starts, so nothing is
-built or registered:
 
 ```sh
 nix run github:juspay/agent-distro -- github:<you>/my-distribution        # choose a harness
 nix run github:juspay/agent-distro -- github:<you>/my-distribution omp    # or start one
-AI_PROFILE=github:<you>/my-distribution agent-distro claude
+AI_PROFILE=github:<you>/my-distribution agent-distro claude               # a reference, or
+AI_PROFILE=~/src/my-distribution agent-distro omp                         # a path to a clone
+AGENT_DISTRO_SETTINGS=0 agent-distro omp                                  # load the plugins and nothing else
 ```
 
-A terminal opened in this repository starts its agents with this profile.
-Check that its `packages` are in the binary cache, for the machine you run it on:
-`nix run github:juspay/agent-distro#check-profile`.
-
-## Or build it into a distribution of its own
-
-```sh
-nix run           # choose a harness
-nix run .#omp    # or any directory name under agent-distro/harnesses/
-AI_HARNESS=omp nix run . -- --version
-AGENT_DISTRO_SETTINGS=0 nix run .#omp   # load the plugins and nothing else
-```
+A terminal opened in this repository starts its agents with this profile,
+composed over whatever `AI_PROFILE` already names.
 
 Every harness exports the profile's `env`, and asks for a `secret` variable
 that is not set. OMP and OpenCode also read its `settings`, which fill only
@@ -38,18 +28,32 @@ preserves existing user settings; select personal models in OMP or OpenCode if
 you previously used the profile's defaults. Claude Code and Codex use their own
 login.
 
-Commit `flake.lock` for reproducible builds. Run `nix flake update` to update
-the framework.
+Nothing here is pinned, so what you push is what the next launch reads. Check
+that the `packages` it names are in a binary cache, for every machine that runs
+it: `nix run github:juspay/agent-distro#check-profile`, once per platform in
+CI.
 
-To install every harness and update them daily, with Home
-Manager:
+## Or pin it into the store
+
+`agent-distro.lib.mkProfile` builds this repository into a store path — its
+plugins read and its `packages` resolved at build time — and that path is a
+profile reference like any other, offline at launch. In your own configuration
+flake, with this repository as an input
+(`inputs.my-distribution = { url = "github:<you>/my-distribution"; flake = false; };`):
+
+```nix
+agent-distro.lib.mkProfile { inherit system; profile = inputs.my-distribution; }
+```
+
+To install every harness and update them daily, with Home Manager — the module
+is agent-distro's own, and this profile is one entry of its `profiles`:
 
 ```nix
 {
-  imports = [ inputs.my-distribution.homeManagerModules.default ];
+  imports = [ inputs.agent-distro.homeManagerModules.default ];
   services.agent-distro = {
     enable = true;
-    flake = "github:<you>/my-distribution";
+    profiles = [ inputs.my-distribution ];
   };
 }
 ```

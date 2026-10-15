@@ -2,8 +2,8 @@ from pi_support import *
 
 original, old_mcp = inventory()
 discover()
-updated, new_mcp = inventory('pi-updated')
-discover('pi-updated')
+updated, new_mcp = inventory('pi-changed')
+discover('pi-changed')
 assert original['skills'] and updated['skills']
 assert set(original['skills']).isdisjoint(updated['skills']), (original, updated)
 for name, server in old_mcp['mcpServers'].items():
@@ -22,18 +22,23 @@ assert any(path.endswith('/skills/launch-fixture') for path in launched['skills'
 name = next(iter(expected))
 others = {skill for plugin, skills in expected.items() if plugin != name for skill in skills}
 discover(plugins=checkout(name, 'shadowed'), skills=others | {'shadowed'})
-# Unset, the next launch takes it all back: Pi's files are the profile's again.
+# Unset, the next launch takes the variable's plugins back: Pi's files are the
+# profile's again. The record is what takes them back, so it is the record's
+# content that says so — a profile's own plugins come back with the profile and
+# are recorded too, or the merge would double them.
 assert inventory() == (original, old_mcp)
-assert not (agent_dir / '.agent-distro-launch.json').exists()
+assert not any(path.endswith('/skills/launch-fixture') for path in inventory()[0]['skills']), inventory()[0]
 discover()
 
-# Without a home for Pi's files the plugins could not load: the launch fails
-# instead of starting without them.
+# Without a home for Pi's files the plugins cannot be merged in: the launch
+# says so and starts without them, rather than not starting at all (the same
+# rule the launcher's own no-home branch follows).
 homeless = subprocess.run(['env', '-u', 'HOME', '-u', 'PI_CODING_AGENT_DIR', f'XDG_CACHE_HOME={Path.home()}/.cache',
                            f'AGENT_DISTRO_PLUGINS={fixture}', 'pi', '--version'],
                           env=env, capture_output=True, text=True, timeout=120)
-assert homeless.returncode != 0, homeless
+assert homeless.returncode == 0, homeless
 assert 'HOME and PI_CODING_AGENT_DIR are unset' in homeless.stderr, homeless.stderr
+assert 'skipping plugin merges' in homeless.stderr, homeless.stderr
 
 
 # A plugin's stdio MCP server runs in the launch directory (doc/index.md).

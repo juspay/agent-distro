@@ -1,10 +1,7 @@
 /**
- * Translate one plugin description into a Claude Code plugin directory.
- *
- * Usage: node claude.ts OUT ARGS_JSON
- *
- * At launch, src/plugin/launch.ts uses `adapter` to write the same root for a
- * plugin on AGENT_DISTRO_PLUGINS into its cache.
+ * Translate one plugin description into a Claude Code plugin directory, at
+ * launch: src/plugin/launch.ts uses `adapter` to write that root into the
+ * cache of a plugin on AGENT_DISTRO_PLUGINS.
  *
  * Each part reads the validated description, never the plugin's own JSON, so a
  * Claude Code format change touches this file and a spec change none. Skills are
@@ -18,13 +15,12 @@
  * handed only that script. Remote servers cannot be wrapped and are mapped to
  * Claude Code's transport names.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { log } from '../log.ts';
-import type { Adapter, ProfileEntry, Report } from '../plugin/launch.ts';
+import type { Adapter, Report } from '../plugin/launch.ts';
 import { launcher, shellQuote } from '../plugin/launcher.ts';
 import type { Description } from '../plugin/read.ts';
-import { copySkills, fileName, launchable, readDescription } from '../plugin/resources.ts';
+import { copySkills, fileName, launchable } from '../plugin/resources.ts';
 
 const MANIFEST_FIELDS = ['name', 'version', 'description', 'author', 'homepage', 'repository', 'license', 'keywords'] as const;
 const TRANSPORTS = { 'streamable-http': 'http', sse: 'sse' } as const;
@@ -70,25 +66,14 @@ export function writePlugin(description: Description, out: string, { bash, env }
   }
 }
 
-type LaunchArgs = Inputs & { profile: (ProfileEntry & { dir: string })[] };
-
 /**
- * At launch: the `--plugin-dir` arguments for every plugin, as shell words,
- * replacing the launcher's own. A plugin on the variable is one more
- * session-only plugin directory.
+ * At launch: the `--plugin-dir` arguments for every plugin, as shell words. A
+ * plugin of a profile, or of the variable, is one more session-only plugin
+ * directory.
  */
-export const adapter: Adapter<LaunchArgs, LaunchArgs['profile'][number], Inputs> = {
+export const adapter: Adapter<Inputs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) => writePlugin(description, out, inputs, report),
-  launch: ({ kept, plugins }) => [
-    ...kept.map((plugin) => plugin.entry.dir),
-    ...plugins.map((plugin) => plugin.translation),
-  ].flatMap((dir) => ['--plugin-dir', shellQuote(dir)]).join(' '),
+  launch: ({ plugins }) => plugins.map((plugin) => plugin.translation)
+    .flatMap((dir) => ['--plugin-dir', shellQuote(dir)]).join(' '),
 };
-
-if (import.meta.main) {
-  const [out, argsPath] = process.argv.slice(2);
-  const args: Inputs & { description: string } = JSON.parse(readFileSync(argsPath, 'utf8'));
-  const description = readDescription(args.description);
-  writePlugin(description, out, args, (message) => log.claude.warn(`${description.root}: ${message}`));
-}

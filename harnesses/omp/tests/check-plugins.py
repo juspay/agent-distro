@@ -7,7 +7,7 @@ config.parent.mkdir(parents=True, exist_ok=True)
 config.write_text('# personal provider\nmodelRoles:\n  default: openai/my-model\nhideThinkingBlock: false\ntask:\n  showResolvedModelBadge: false\n')
 before = config.read_bytes(), config.stat().st_ino, config.stat().st_mtime_ns
 discover(env=env)
-discover('omp-updated', env=env)
+discover('omp-changed', env=env)
 assert (config.read_bytes(), config.stat().st_ino, config.stat().st_mtime_ns) == before
 
 # AGENT_DISTRO_PLUGINS: the store fixture joins as one more -e root, for that launch.

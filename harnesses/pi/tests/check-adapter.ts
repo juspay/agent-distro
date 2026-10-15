@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { writeConfig, mergeState } = await import(join(process.argv[2], 'harness/pi.ts'));
+const { adapter, mergeState, writeConfig } = await import(join(process.argv[2], 'harness/pi.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'pi-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -25,26 +25,13 @@ const snapshot = (path: string) => {
   }
 };
 
-function captureStderr(action: () => void): string {
-  let stderr = '';
-  const write = process.stderr.write;
-  process.stderr.write = ((chunk: string) => (stderr += chunk, true)) as typeof process.stderr.write;
-  try {
-    action();
-  } finally {
-    process.stderr.write = write;
-  }
-  return stderr;
-}
-
 test('translation and skipped transports', () => {
   const root = temporary();
   mkdirSync(join(root, 'skills/guide'), { recursive: true });
   writeFileSync(join(root, 'skills/guide/SKILL.md'), 'Guide');
   symlinkSync('SKILL.md', join(root, 'skills/guide/approved'));
   writeFileSync(join(root, 'skills/guide/unapproved'), 'Do not copy');
-  const description = join(root, 'description.json');
-  writeFileSync(description, JSON.stringify({
+  const description = {
     version: '1.0.0', root, manifest: { name: 'example' },
     skills: { guide: ['SKILL.md', 'approved'] },
     mcpServers: {
@@ -53,27 +40,44 @@ test('translation and skipped transports', () => {
       sse: { type: 'sse', url: 'https://example.test/sse', headers: {} },
       equals: { type: 'stdio', command: 'bad=command', args: [], env: {} },
     },
-  }));
-  const args = (name: string, ...descriptions: string[]) => {
-    const path = join(root, `${name}.json`);
-    writeFileSync(path, JSON.stringify({ bash: '/bin/sh', env: '/usr/bin/env', descriptions }));
-    return path;
   };
 
+  // What one launch translates is what this writes: `adapter.translate` is the
+  // whole translation, materialized under its own output path.
   const out = join(root, 'out-pi-config');
-  const diagnostics = captureStderr(() => writeConfig(out, args('single', description)));
-  const config = readJson(join(out, 'config.json'));
-  assert.deepEqual(new Set(Object.keys(config.mcpServers)), new Set(['local', 'http']));
-  assert.ok(diagnostics.includes('Pi does not support SSE'), diagnostics);
-  assert.ok(diagnostics.includes('command containing "="'), diagnostics);
-  const local = config.mcpServers.local;
+  const diagnostics: string[] = [];
+  adapter.translate(description, out, { bash: '/bin/sh', env: '/usr/bin/env' },
+    (message: string) => diagnostics.push(message));
+  const fragment = readJson(join(out, 'fragment.json'));
+  assert.deepEqual(new Set(Object.keys(fragment.mcpServers)), new Set(['local', 'http']));
+  assert.ok(diagnostics.some((line) => line.includes('Pi does not support SSE')), diagnostics);
+  assert.ok(diagnostics.some((line) => line.includes('command containing "="')), diagnostics);
+  const local = fragment.mcpServers.local;
   assert.deepEqual(Object.keys(local), ['command']);
   assert.ok(readFileSync(local.command, 'utf8').includes('PLUGIN_ROOT='));
-  const skills = join(config.skills[0], 'guide');
+  const skills = join(fragment.skills[0], 'guide');
   assert.ok(!lstatSync(join(skills, 'approved')).isSymbolicLink());
   assert.equal(readFileSync(join(skills, 'approved'), 'utf8'), 'Guide');
   assert.ok(!existsSync(join(skills, 'unapproved')));
-  assert.throws(() => writeConfig(join(root, 'collision'), args('double', description, description)), /declared by both/);
+});
+
+test('the launch refuses two plugins naming one server', async () => {
+  const root = temporary();
+  // The base config the launch merges into, as the launcher builds it.
+  await writeConfig(root);
+  const shared = { type: 'stdio', command: '/bin/true', args: [], env: {} };
+  const description = { version: '1.0.0', root, manifest: { name: 'example' }, skills: {}, mcpServers: { shared } };
+  const translated = () => {
+    const translation = temporary();
+    writeFileSync(join(translation, 'fragment.json'),
+      JSON.stringify({ skills: [], mcpServers: { local: { command: '/bin/true' } } }));
+    return { description, translation };
+  };
+  assert.throws(() => adapter.launch({
+    args: { config: root, name: 'pi' },
+    plugins: [translated(), translated()],
+    cache: temporary(),
+  }), /declared by both/);
 });
 
 test('empty contributions keep settings default', () => {
@@ -106,8 +110,10 @@ test('empty contributions keep settings default', () => {
 test('only contributing files are created', () => {
   const root = temporary();
   const fragment = join(root, 'fragment.json');
-  // The thinking-block default lives in settings.json, so that file
-  // exists whenever anything (or nothing else) is merged.
+  // The thinking-block default lives in settings.json, so that file exists
+  // whenever anything (or nothing else) is merged; the launch record is what
+  // the next merge undoes this one with, so it exists whenever this one
+  // contributed anything at all.
   for (const [name, contribution] of [
     ['settings', { skills: ['/managed/skills'], mcpServers: {} }],
     ['mcp', { skills: [], mcpServers: { managed: { command: '/server' } } }],
@@ -115,7 +121,9 @@ test('only contributing files are created', () => {
     writeFileSync(fragment, JSON.stringify(contribution));
     const agent = join(root, name);
     mergeState('--merge', agent, fragment);
-    const expected = name === 'settings' ? ['settings.json'] : ['mcp.json', 'settings.json'];
+    const expected = name === 'settings'
+      ? ['.agent-distro-launch.json', 'settings.json']
+      : ['.agent-distro-launch.json', 'mcp.json', 'settings.json'];
     assert.deepEqual(readdirSync(agent).sort(), expected);
   }
 });
@@ -171,7 +179,6 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
     launch: {
       skills: ['/cache/kolu/skills/kolu', '/cache/extra/skills/extra'],
       mcpServers: ['kolu', 'remote'],
-      replaces: { kolu: profileServer },
     },
   });
   writeFileSync(join(agent, 'mcp.json'), JSON.stringify({ mcpServers: { personal: { command: '/personal' } } }));
@@ -183,7 +190,7 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
   const steady = [servers(), skills()];
   mergeState('--check', agent, launched);
   assert.deepEqual([servers(), skills()], steady, '--check writes nothing');
-  assert.ok(!existsSync(join(agent, '.agent-distro-launch.json')));
+  assert.ok(existsSync(join(agent, '.agent-distro-launch.json')), 'the profile merge recorded what it wrote');
 
   mergeState('--merge', agent, launched);
   assert.deepEqual(servers(), { personal: { command: '/personal' }, kolu: launchServer, remote: { url: 'https://example.test/mcp', headers: {} } });
@@ -192,10 +199,15 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
   mergeState('--merge', agent, launched);
   assert.deepEqual(snapshot(join(agent, '.agent-distro-launch.json')), record, 'a steady launch rewrites nothing');
 
-  // Unset: the profile's own entries are back, and nothing of the launch remains.
+  // Unset: the profile's own entries are back, and nothing of the launch
+  // remains. The record is what took them back, and stays with the profile's
+  // own entries in it — the next merge has to undo those too, or the profile
+  // would be merged in twice.
   mergeState('--merge', agent, profile);
   assert.deepEqual([servers(), skills()], steady);
-  assert.ok(!existsSync(join(agent, '.agent-distro-launch.json')));
+  const recorded = readJson(join(agent, '.agent-distro-launch.json'));
+  assert.deepEqual(recorded.skills, ['/nix/store/x-pi-config/skills/kolu'], recorded);
+  assert.deepEqual(Object.keys(recorded.mcpServers), ['kolu'], recorded);
 
   // A launch entry the user has since edited is theirs to keep.
   mergeState('--merge', agent, launched);
@@ -210,18 +222,29 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
   assert.throws(() => mergeState('--merge', agent, profile), /not a launch record|JSON object/);
 });
 
-test('a launch with plugins needs a home; one without is the profile', async () => {
+test('a launch with plugins warns and skips them without a home; no plugins is the profile', async () => {
   const { adapter } = await import(join(process.argv[2], 'harness/pi.ts'));
   const config = temporary();
   writeFileSync(join(config, 'config.json'), JSON.stringify({ skills: [], mcpServers: {} }));
-  const launch = { args: { config, profile: [] }, kept: [], replaced: [], cache: null, report: () => {} };
+  const launch = { args: { config }, cache: null, report: () => {} };
   assert.equal(adapter.launch({ ...launch, plugins: [] }), join(config, 'config.json'));
   const saved = { HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR };
   delete process.env.HOME;
   delete process.env.PI_CODING_AGENT_DIR;
   try {
-    assert.throws(() => adapter.launch({ ...launch, cache: temporary(), plugins: [{ name: 'p' }] }),
-      /HOME and PI_CODING_AGENT_DIR are unset/);
+    // Nothing to merge into: warned, said so, and the harness still starts on
+    // the profile's own config (the launcher's no-home branch says the same).
+    const warnings: string[] = [];
+    const write = process.stderr.write;
+    process.stderr.write = ((chunk: string) => (warnings.push(String(chunk)), true)) as typeof process.stderr.write;
+    try {
+      assert.equal(adapter.launch({ ...launch, cache: temporary(), plugins: [{ name: 'p' }] }),
+        join(config, 'config.json'));
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.ok(warnings.some((line) => line.includes('HOME and PI_CODING_AGENT_DIR are unset; skipping plugin merges')),
+      warnings.join(''));
   } finally {
     for (const [name, value] of Object.entries(saved)) if (value !== undefined) process.env[name] = value;
   }

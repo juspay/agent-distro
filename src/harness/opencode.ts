@@ -14,12 +14,11 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { log } from '../log.ts';
-import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
+import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
-import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
+import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 
-type Args = { bash: string; env: string; plugin: string; descriptions: string[] };
+type Args = { plugin: string };
 type Server = { type: 'remote'; url: string; headers: Record<string, string> } | { type: 'local'; command: string[] };
 type Fragment = { skills: string | null; servers: Record<string, Server> };
 type Inputs = { bash: string; env: string };
@@ -60,62 +59,42 @@ function claim(owners: Record<string, string>, description: Description) {
 
 function main(out: string, argsPath: string) {
   const args: Args = JSON.parse(readFileSync(argsPath, 'utf8'));
-  const owners: Record<string, string> = {};
-  mkdirSync(join(out, 'bin'), { recursive: true });
-  const skillsPaths: string[] = [];
-  const servers: Record<string, Server> = {};
+  mkdirSync(out, { recursive: true });
+  // No profile contributes to the build any more: the session config carries
+  // the plugin every launch needs, and the plugins of the profiles in effect
+  // are merged into it at launch (`adapter.launch`), which is why `skills` and
+  // `mcp.servers` start empty here.
   const config: Record<string, unknown> = {
     $schema: 'https://opencode.ai/config.json',
     // The vendored opencode-plugin-litellm, in the base config of every
     // launch: it registers the `litellm` provider when a configuration names
     // it or LITELLM_BASE_URL is set, and health-probes otherwise.
     plugins: [args.plugin],
-    skills: skillsPaths,
-    mcp: { servers },
+    skills: [],
+    mcp: { servers: {} },
   };
-  for (const path of args.descriptions) {
-    const description = readDescription(path);
-    try {
-      claim(owners, description);
-    } catch (error) {
-      if (!(error instanceof LaunchError)) throw error;
-      log.opencode.error(error.message);
-      process.exit(1);
-    }
-    const fragment = pluginFragment(description, out, args,
-      (message) => log.opencode.warn(`${description.root}: ${message}`));
-    if (fragment.skills) skillsPaths.push(fragment.skills);
-    Object.assign(servers, fragment.servers);
-  }
   writeFileSync(join(out, 'opencode.json'), JSON.stringify(config, null, 2));
 }
 
-type LaunchArgs = Inputs & { name: string; config: string; profile: ProfileEntry[] };
+type LaunchArgs = Inputs & { name: string; config: string };
 /** The session config the launcher writes, and this adapter merges into. */
 type Session = { skills: string[]; mcp: { servers: Record<string, Server> } };
 
 /**
- * At launch: the launcher's session config, without the replaced profile
- * plugins and with the variable's, written to the cache by content. Prints its
- * path, for OPENCODE_CONFIG.
+ * At launch: the launcher's session config with every plugin merged into it,
+ * written to the cache by content. Prints its path, for OPENCODE_CONFIG.
  */
-export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
+export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
-  launch: ({ args, kept, replaced, plugins, cache }) => {
+  launch: ({ args, plugins, cache }) => {
     const base = join(args.config, 'opencode.json');
-    if (!plugins.length && !replaced.length) return base;
+    if (!plugins.length) return base;
     const config = JSON.parse(readFileSync(base, 'utf8')) as Session;
     const skills = config.skills;
     const servers = config.mcp.servers;
     const owners: Record<string, string> = {};
-    for (const plugin of kept) claim(owners, plugin.description);
-    for (const plugin of replaced) {
-      const index = skills.indexOf(join(args.config, 'skills', plugin.name));
-      if (index >= 0) skills.splice(index, 1);
-      for (const name of Object.keys(plugin.description.mcpServers)) delete servers[name];
-    }
     for (const plugin of plugins) {
       claim(owners, plugin.description);
       const fragment = readCached(join(plugin.translation, 'fragment.json'), isFragment);

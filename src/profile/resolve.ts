@@ -5,18 +5,20 @@
  * `agent-distro.lib.mkProfile`: a store path holding
  * `share/agent-distro/profile.json`, its plugins under
  * `share/agent-distro/plugins/<index>/`, and its `packages` in `bin/`. The one
- * in effect is the picker's leading positional selector, exactly; else a
- * stack, bottom to top, of the launcher's own built-in profile, every entry of
- * AI_PROFILE and the `agent-distro.nix` found from the working directory up to
- * the git root, each composed over the one beneath (`merge`).
+ * in effect is the picker's leading positional selector, exactly; else the
+ * stack, bottom to top, of the `agent-distro.nix` found from the working
+ * directory up to the git root over every AI_PROFILE entry, each composed over
+ * the one beneath (`merge`). A launch with none — `AI_PROFILE` unset or empty,
+ * and no repository — has no profile at all, and nothing is added to the
+ * harnesses.
  *
  * AI_PROFILE is a stack: whitespace-separated entries composed left to right,
- * later entries winning where they overlap. `AI_PROFILE=` or unset adds none.
- * An entry, like a positional selector, is a reference: a path (absolute, or
- * starting with ./, ../ or ~/) to the file, its directory, or a built profile,
- * or else, containing `/` or `:`, a flake reference such as
- * `github:owner/repo?dir=sub`, fetched with `nix flake prefetch`. An entry
- * that is neither is an error naming it and its position in the stack.
+ * later entries winning where they overlap. An entry, like a positional selector, is
+ * a reference: a path (absolute, or starting with ./, ../ or ~/) to the file,
+ * its directory, or a built profile, or else, containing `/` or `:`, a flake
+ * reference such as `github:owner/repo?dir=sub`, fetched with
+ * `nix flake prefetch`. An entry that is neither is an error naming it and its
+ * position in the stack.
  *
  * Each file is evaluated once per content and agent-distro build by
  * evaluate.nix, and cached under
@@ -53,7 +55,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, utimesSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
-import { cacheRoot, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
+import { cacheRootIfAny, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
 import { log, slow, SITE } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists, realpath } from '../util.ts';
@@ -79,14 +81,8 @@ export type SettingsSection = Record<string, unknown>;
 /** Harness configuration a profile defaults, by harness name. */
 export type Settings = Record<string, SettingsSection>;
 
-/** A profile built into the launcher, as lib/runtime.nix passes it. */
-export type Builtin = { name: string; description: string; env: ProfileEnv; settings: Settings };
-
 /** What a launcher knows at build time, from lib/runtime.nix. */
 export type Info = {
-  /** The launcher's own profile: the one in effect when nothing chooses another. */
-  default: string;
-  builtins: Builtin[];
   /**
    * The nixpkgs `packages` are evaluated against: a locked flake reference,
    * fetched only for a profile with `packages`, or a store path the launcher
@@ -117,8 +113,6 @@ export type Described = { root: string; description: string };
 
 /** The profile in effect, resolved for this launch. */
 export type Resolved = InEffect & {
-  /** The launcher's own built-in profile is part of it, so the launcher's own plugins stay. */
-  keepsBuiltIn: boolean;
   /** Plugin directories. */
   plugins: string[];
   env: ProfileEnv;
@@ -204,7 +198,7 @@ const isDescriptions = (value: unknown): value is Described[] =>
   && value.every((entry) => isObject(entry) && isString(entry.root) && isString(entry.description));
 
 export function isResolved(value: unknown): value is Resolved {
-  return isInEffect(value) && typeof value.keepsBuiltIn === 'boolean' && isStrings(value.plugins)
+  return isInEffect(value) && isStrings(value.plugins)
     && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.paths)
     && (value.descriptions === undefined || isDescriptions(value.descriptions));
 }
@@ -251,14 +245,13 @@ function entries(value: string): string[] {
 
 /**
  * The profiles this launch is to use, bottom to top, before anything is read:
- * the positional selector alone, else the built-in default, then every
- * AI_PROFILE entry in order, then the repository's, those that are there.
- * `AI_PROFILE=` or unset adds none, so the built-in profile and the
- * repository's are the whole stack.
+ * the positional selector alone, else every AI_PROFILE entry in order and then
+ * the repository's, those that are there. `AI_PROFILE=` or unset and no
+ * repository is no profile.
  */
-export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv, info: Info): Selection[] {
+export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv): Selection[] {
   if (positional) return [{ source: 'positional', origin: positional }];
-  const stack: Selection[] = [{ source: 'builtin', origin: info.default }];
+  const stack: Selection[] = [];
   const variable = entries(env[VARIABLE] ?? '');
   variable.forEach((origin, i) => stack.push({
     source: 'variable', origin, entry: { position: i + 1, count: variable.length },
@@ -268,25 +261,29 @@ export function select(positional: string | undefined, cwd: string | undefined, 
   return stack;
 }
 
-type Kind = { builtin: Builtin } | { path: string } | { flake: string };
+type Kind = { path: string } | { flake: string };
+
+/**
+ * A path reference as it resolves now. The evaluation runs under
+ * `restrict-eval` with `-I` entries, and nix resolves those, so a reference
+ * that is not its own real path — macOS `/tmp` and `/var/folders` are symlinks
+ * — has to be the real one or nix refuses to read the file. A path that is not
+ * there is left as given, for the resolver to name what is missing.
+ */
+const canonical = (path: string): string => (existsSync(path) ? realpath(path) : path);
 
 function classify(reference: string, env: NodeJS.ProcessEnv): Kind | null {
-  if (reference.startsWith('/')) return { path: reference };
+  if (reference.startsWith('/')) return { path: canonical(reference) };
   if (reference === '.' || reference === '..' || reference.startsWith('./') || reference.startsWith('../')) {
-    return { path: resolve(reference) };
+    return { path: canonical(resolve(reference)) };
   }
-  if (reference.startsWith('~/') && env.HOME) return { path: join(env.HOME, reference.slice(2)) };
+  if (reference.startsWith('~/') && env.HOME) return { path: canonical(join(env.HOME, reference.slice(2))) };
   if (/[/:]/.test(reference)) return { flake: reference };
   return null;
 }
 
 /** What a selection names, or null when it names nothing. */
-function kindOf(selection: Selection, info: Info, env: NodeJS.ProcessEnv): Kind | null {
-  // The launcher's own profile is data it was built with, not a reference.
-  if (selection.source === 'builtin') {
-    const builtin = info.builtins.find((builtin) => builtin.name === selection.origin);
-    return builtin === undefined ? null : { builtin };
-  }
+function kindOf(selection: Selection, env: NodeJS.ProcessEnv): Kind | null {
   if (selection.source === 'repository') return { path: selection.origin };
   return classify(selection.origin, env);
 }
@@ -390,7 +387,9 @@ function remembered(memory: string): string {
  * most likely fresh in nix's own cache, so only one that is not says it is
  * being fetched.
  */
-function fetched(reference: string, what: string, cache: string): string {
+function fetched(reference: string, what: string, cache: string | null): string {
+  // No cache: fetched once per launch, which is all a launch needs.
+  if (cache === null) return prefetch(reference, what);
   const memory = join(cache, 'references', sha256(reference));
   const last = remembered(memory);
   const stored = isAbsolute(last) && existsSync(last);
@@ -418,7 +417,7 @@ const EVALUATE = join(import.meta.dirname, 'evaluate.nix');
  * profile with packages evaluates them to null: only then is nixpkgs fetched
  * and the file evaluated again.
  */
-export function evaluate(file: string, info: Info, cache: string, what: string): Evaluated {
+export function evaluate(file: string, info: Info, cache: string | null, what: string): Evaluated {
   const run = (nixpkgs: string | null): unknown => JSON.parse(nix(['eval', '--json', '--impure',
     '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
     ...[dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])].flatMap((path) => ['-I', path]),
@@ -440,15 +439,21 @@ export function evaluate(file: string, info: Info, cache: string, what: string):
 /**
  * The cached evaluation of `file`, evaluating it first when absent or when
  * `again`. Keyed by the file's path (its relative paths are relative to it),
- * its contents, and this agent-distro build.
+ * its contents, the evaluator that shapes the value, and what the value
+ * depends on: the system, and the nixpkgs a profile with `packages` was
+ * evaluated against.
  */
-function evaluated(file: string, info: Info, cache: string, what: string, again: boolean): Evaluated {
-  const profiles = join(cache, 'profiles');
+function evaluated(file: string, info: Info, cache: string | null, what: string, again: boolean): Evaluated {
+  const profiles = cache === null ? null : join(cache, 'profiles');
+  // `runtime: import.meta.dirname` here would re-evaluate every profile in
+  // every repository on every commit that touches src/ — which a scheduled
+  // update makes a daily event, for a value only evaluate.nix shapes.
   const key = sha256(JSON.stringify({
-    file, content: sha256(readFileSync(file)), runtime: import.meta.dirname, nixpkgs: info.nixpkgs, system: info.system,
+    file, content: sha256(readFileSync(file)), evaluator: sha256(readFileSync(EVALUATE)),
+    nixpkgs: info.nixpkgs, system: info.system,
   }));
-  const path = join(profiles, key, 'profile.json');
-  if (!again && existsSync(path)) {
+  const path = profiles === null ? null : join(profiles, key, 'profile.json');
+  if (path !== null && !again && existsSync(path)) {
     try {
       const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
       if (isEvaluated(value)) {
@@ -461,10 +466,12 @@ function evaluated(file: string, info: Info, cache: string, what: string, again:
       if (!(error instanceof SyntaxError)) throw error;
     }
   }
-  log.profile.debug(`cache ${again ? 'bypassed' : 'miss'}: ${path}`);
+  log.profile.debug(path === null ? 'no cache: evaluating' : `cache ${again ? 'bypassed' : 'miss'}: ${path}`);
   const value = slow(log.profile, `evaluating ${file}`, () => evaluate(file, info, cache, what));
-  writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
-  sweep(profiles, (name) => name !== key);
+  if (path !== null && profiles !== null) {
+    writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
+    sweep(profiles, (name) => name !== key);
+  }
   return value;
 }
 
@@ -558,10 +565,9 @@ function builtProfile(directory: string): Built | null {
 
 /**
  * `upper` composed over `lower`: plugins and packages are both, lower's first;
- * `env` and `settings` are key-wise, upper's winning; the rest is upper's,
- * `over` naming lower unless it is the launcher's built-in default. Only the
- * repository's is ever over another named profile, so `lower` names none
- * beneath it.
+ * `env` and `settings` are key-wise, upper's winning; the rest is upper's, and
+ * `over` names lower. Every stack entry is over the one below it, and that
+ * chain is the whole composition.
  */
 function merge(lower: Resolved, upper: Resolved): Resolved {
   const { name, description, source, origin, over } = lower;
@@ -569,37 +575,28 @@ function merge(lower: Resolved, upper: Resolved): Resolved {
   return {
     name: upper.name, description: upper.description, source: upper.source, origin: upper.origin,
     // The whole chain beneath, so a stack of three names all three.
-    ...(source === 'builtin' ? {} : { over: { name, description, source, origin, ...(over ? { over } : {}) } }),
-    keepsBuiltIn: lower.keepsBuiltIn, plugins: [...lower.plugins, ...upper.plugins],
+    over: { name, description, source, origin, ...(over ? { over } : {}) },
+    plugins: [...lower.plugins, ...upper.plugins],
     env: { ...lower.env, ...upper.env }, settings: { ...lower.settings, ...upper.settings },
     paths: [...lower.paths, ...upper.paths],
     ...(descriptions.length ? { descriptions } : {}),
   };
 }
 
-/** The profile in effect: each of `stack` (from `select`) resolved, and composed bottom to top. */
-export function resolveProfile(info: Info, stack: Selection[], env: NodeJS.ProcessEnv): Resolved {
-  return stack.map((selection) => resolveOne(info, selection, env)).reduce(merge);
+/** The profile in effect: each of `stack` (from `select`) resolved, and composed bottom to top; null when there is none. */
+export function resolveProfile(info: Info, stack: Selection[], env: NodeJS.ProcessEnv): Resolved | null {
+  const resolved = stack.map((selection) => resolveOne(info, selection, env));
+  return resolved.length ? resolved.reduce(merge) : null;
 }
 
 function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): Resolved {
   const what = printable(label(selection));
-  const kind = kindOf(selection, info, env);
+  const kind = kindOf(selection, env);
   if (kind === null) {
     throw new LaunchError(`${what}: not a reference: a path starting with /, ./ or ../, or a flake `
       + 'reference such as github:owner/repo');
   }
   const { source, origin } = selection;
-  if ('builtin' in kind) {
-    // The launcher's own profile is data it was built with, not a file to
-    // evaluate: same rules, named for what it is.
-    const { name, description, env: builtinEnv, settings } = kind.builtin;
-    validate(`built-in profile ${name}`, kind.builtin);
-    return {
-      name, description, env: builtinEnv, settings, source, origin,
-      keepsBuiltIn: name === info.default, plugins: [], paths: [],
-    };
-  }
   // A built profile is read where it lies; a repository's is evaluated.
   const built = 'path' in kind ? builtProfile(kind.path) : null;
   if (built) {
@@ -608,13 +605,16 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
     // launch-time profile's do.
     const bin = join(built.dir, 'bin');
     return {
-      name: built.name, description: built.description, source, origin, keepsBuiltIn: false,
+      name: built.name, description: built.description, source, origin,
       plugins: built.plugins.map((plugin) => plugin.root), env: built.env, settings: built.settings,
       paths: isDirectory(bin) ? [bin] : [],
       ...(matching ? { descriptions: built.plugins } : {}),
     };
   }
-  const cache = cacheRoot(env, what);
+  const cache = cacheRootIfAny(env, what);
+  if (cache === null) {
+    log.profile.warn(`${what}: XDG_CACHE_HOME and HOME are unset; profiles are evaluated without a cache`);
+  }
   const file = fileAt('path' in kind ? kind.path : fetched(kind.flake, what, cache), what);
   let profile = evaluated(file, info, cache, what, false);
   // A package's derivation can be collected with its output; evaluate afresh to get it back.
@@ -630,6 +630,6 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
   const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, what, cache)));
   return {
     name: profile.name, description: profile.description, source, origin,
-    keepsBuiltIn: false, plugins, env: profile.env, settings: profile.settings, paths,
+    plugins, env: profile.env, settings: profile.settings, paths,
   };
 }

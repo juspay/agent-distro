@@ -1,6 +1,6 @@
 """A stub of the content-addressed index: one port answers with the entry a test
 wrote, the other refuses with 404, so a test can drive a published revision, an
-unpublished one, and an entry that names the signed bundle alone (which is what
+unpublished one, and an entry that names the signed package alone (which is what
 a darwin system gets).
 
 Serves TLS: the updater fetches only an https base, so the stub has to be one
@@ -12,10 +12,17 @@ import sys
 
 status, port, certificate, key = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
 entry = sys.argv[5]
+# Where the server appends every path it was asked for, so a test can check
+# which entry the updater fetched (`default.json`, or the attribute a config
+# names instead).
+requests = sys.argv[6] if len(sys.argv) > 6 else None
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if requests is not None:
+            with open(requests, 'a') as log:
+                log.write(self.path + '\n')
         body = open(entry, 'rb').read() if status == 200 else b''
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')

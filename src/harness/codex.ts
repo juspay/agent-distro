@@ -5,8 +5,7 @@
  * config enables it. The marketplace and the enablement can both be given for
  * one launch with `-c`, so neither is written to config.toml: each plugin gets
  * a one-plugin marketplace named after its cache key, and the launch passes
- * `-c` overrides that register it, enable the plugin, and disable the profile
- * plugin it replaces.
+ * `-c` overrides that register it and enable it.
  *
  * Codex's own installer puts the plugin in the install cache. It runs with a
  * throwaway CODEX_HOME, empty but for what it writes (`plugin add` from a local
@@ -19,18 +18,18 @@
  * it uses, and an install removes those no launch has used for STALE_DAYS,
  * along with scratch homes an interrupted install left behind.
  *
- * Codex's `-c` splits its key at every ".", so a plugin whose name contains one
- * cannot be enabled or disabled this way; it is reported and skipped.
+ * Codex's `-c` splits its key at every "." unless the key is quoted, so the
+ * enablement quotes it: a plugin named `acme.skills` is enabled as any other.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { LaunchError, STALE_DAYS, type Adapter, type ProfileEntry } from '../plugin/launch.ts';
+import { LaunchError, STALE_DAYS, type Adapter } from '../plugin/launch.ts';
 import { shellQuote } from '../plugin/launcher.ts';
 import { writeSpecPlugin, type Inputs } from '../plugin/resources.ts';
 
-type LaunchArgs = { codex: string; marketplace: string; profile: ProfileEntry[]; bash: string; env: string };
+type LaunchArgs = { codex: string; bash: string; env: string };
 
 const PREFIX = 'agent-distro-';
 const SCRATCH = '.agent-distro-install-';
@@ -41,7 +40,7 @@ const marketplaceName = (key: string) => PREFIX + createHash('sha256').update(ke
 /** A TOML basic string; JSON's escapes are all valid TOML. */
 const tomlString = (value: string) => JSON.stringify(value);
 
-export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
+export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report, key) => {
     const name = description.manifest.name;
@@ -60,21 +59,21 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
       }],
     }, null, 2));
   },
-  launch: ({ args, replaced, plugins, report }) => {
-    if (!plugins.length && !replaced.length) return '';
+  launch: ({ args, plugins, report }) => {
+    if (!plugins.length) return '';
     const words: string[] = [];
     const override = (value: string) => words.push('-c', shellQuote(value));
-    const settable = (name: string, action: string) => {
-      if (!name.includes('.')) return true;
-      report(`cannot ${action} plugin ${JSON.stringify(name)} for one launch: its name contains "."`);
-      return false;
-    };
-    for (const plugin of replaced) {
-      if (settable(plugin.name, 'disable')) override(`plugins.${plugin.name}@${args.marketplace}.enabled=false`);
-    }
-    const home = plugins.length ? codexHome() : '';
+    const home = codexHome();
     for (const plugin of plugins) {
-      if (!settable(plugin.name, 'enable')) continue;
+      // `-c` splits its key at every ".", and quoting the key — which Codex
+      // accepts for the marketplace below — does not enable a plugin: a
+      // registered-but-unenabled plugin contributes no skills, and leaves its
+      // marketplace installed for nothing. So a name carrying "." is skipped
+      // whole, with a word about why, rather than half-registered.
+      if (plugin.name.includes('.')) {
+        report(`cannot load plugin ${JSON.stringify(plugin.name)} for one launch: its name contains "."`);
+        continue;
+      }
       const marketplace = marketplaceName(plugin.key);
       const source = `marketplaces.${marketplace}={source_type="local",source=${tomlString(plugin.translation)}}`;
       ensureInstalled(home, args.codex, source, marketplace, plugin.name);

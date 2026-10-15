@@ -21,7 +21,7 @@ assert re.search(r'^plugin:acme\.spec-fixture:remote: http://127\.0\.0\.1:9/mcp 
 assert 'invalid' not in listing, listing
 assert re.search(r'MCP servers \(4\)', inventory('acme.spec-fixture')[1])
 
-# PLUGIN_ROOT is the original plugin, where bundled files live, not the
+# PLUGIN_ROOT is the original plugin, where its own files live, not the
 # translated root Claude Code loads; PLUGIN_DATA is Claude Code's own.
 placeholders = record('placeholders')
 root, data = placeholders['env']['PLUGIN_ROOT'], placeholders['env']['PLUGIN_DATA']

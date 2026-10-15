@@ -2,10 +2,10 @@
  * Pi's plugin protocol: resources go into its user JSON files, never global CLI
  * options, because Pi's subcommands reject prepended flags.
  *
- * Usage: node pi.ts write-config OUT ARGS_JSON
+ * Usage: node pi.ts write-config OUT
  *        node pi.ts merge-state --check|--merge AGENT_DIR FRAGMENT_JSON
  *
- * write-config translates plugins once, at build time. merge-state runs at
+ * write-config writes the config a launch merges into. merge-state runs at
  * launch: ours replace ours, user entries stay untouched, and invalid JSON
  * aborts before any write. --check stages every write without replacing a file
  * and exits 2 when the directory cannot be written.
@@ -19,20 +19,20 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '../log.ts';
-import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
+import { LaunchError, readCached, writeAddressed, VARIABLE, type Adapter, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
-import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
+import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
 
 type Servers = Record<string, Record<string, unknown>>;
 /**
  * What merge-state applies. `launch` names the parts that come from
- * AGENT_DISTRO_PLUGINS, and `replaces` the profile servers they displace.
+ * AGENT_DISTRO_PLUGINS, so the next merge can take them back.
  */
 type Fragment = {
   skills: string[];
   mcpServers: Servers;
-  launch?: { skills: string[]; mcpServers: string[]; replaces: Servers };
+  launch?: { skills: string[]; mcpServers: string[] };
 };
 type JsonObject = Record<string, any>;
 type Inputs = { bash: string; env: string };
@@ -72,7 +72,7 @@ const isFragment = (value: unknown): value is Fragment => isObject(value)
   && Array.isArray(value.skills) && value.skills.every((s: unknown) => typeof s === 'string') && isObject(value.mcpServers);
 
 /** Fail on a server name two plugins declare. */
-function claim(owners: Record<string, string>, description: Description, Failure: new (message: string) => Error = Invalid) {
+function claim(owners: Record<string, string>, description: Description, Failure: new (message: string) => Error) {
   const plugin = description.manifest.name;
   for (const name of Object.keys(description.mcpServers)) {
     if (Object.hasOwn(owners, name)) {
@@ -83,21 +83,11 @@ function claim(owners: Record<string, string>, description: Description, Failure
   }
 }
 
-export function writeConfig(out: string, argsPath: string) {
-  const args: Inputs & { descriptions: string[] } = JSON.parse(readFileSync(argsPath, 'utf8'));
+export function writeConfig(out: string) {
   mkdirSync(out, { recursive: true });
-  const skills: string[] = [];
-  const servers: Servers = {};
-  const owners: Record<string, string> = {};
-  for (const path of args.descriptions) {
-    const description = readDescription(path);
-    claim(owners, description);
-    const fragment = pluginFragment(description, out, args,
-      (message) => log.pi.warn(`${description.root}: ${message}`));
-    skills.push(...fragment.skills);
-    Object.assign(servers, fragment.mcpServers);
-  }
-  writeFileSync(join(out, 'config.json'), JSON.stringify({ skills, mcpServers: servers }, null, 2));
+  // No profile contributes to the build any more: this is the shape a launch
+  // merges the profiles' plugins into (`adapter.launch`), so both start empty.
+  writeFileSync(join(out, 'config.json'), JSON.stringify({ skills: [], mcpServers: {} }, null, 2));
 }
 
 function readObject(path: string): JsonObject {
@@ -124,7 +114,11 @@ function prepare(directory: string, fragment: Fragment): Changes {
   const paths = Object.fromEntries(names.map((name) => [name, realpath(join(directory, `${name}.json`))]));
   // Validate every input before any write, including files another merge owns.
   const original = Object.fromEntries(names.map((name) => [name, readObject(paths[name])]));
-  const recordPath = realpath(join(directory, RECORD));
+  // Resolved only when it is there: `realpath` on a path that does not exist
+  // yet is what `--check` would fail on, and a home Pi cannot write must skip
+  // the merge rather than fail the launch.
+  const at = join(directory, RECORD);
+  const recordPath = existsSync(at) ? realpath(at) : at;
   const previous = readRecord(recordPath);
   const data: Record<string, JsonObject> = structuredClone(original);
   const servers = Object.hasOwn(data.mcp, 'mcpServers') ? data.mcp.mcpServers : {};
@@ -132,7 +126,7 @@ function prepare(directory: string, fragment: Fragment): Changes {
   // Take back what the last launch added and what it displaced, unless the
   // user has changed it since; the fragment puts back what is still wanted.
   const remaining = { ...servers };
-  const undo = { ...previous.mcpServers, ...fragment.launch?.replaces };
+  const undo = { ...previous.mcpServers };
   for (const [name, entry] of Object.entries(undo)) {
     if (isDeepStrictEqual(remaining[name], entry)) delete remaining[name];
   }
@@ -154,9 +148,15 @@ function prepare(directory: string, fragment: Fragment): Changes {
   const writes = new Map(names.filter((name) => !isDeepStrictEqual(data[name], original[name]))
     .map((name) => [paths[name], data[name]]));
   const launch = fragment.launch;
+  // The record takes back everything this launch put in Pi's files, so the next
+  // merge can rebuild them from its own fragment without doubling anything; it
+  // is removed when there is nothing to take back, as it always was. (Main
+  // caught the profile's build-time skills with a `-pi-config` path filter;
+  // a launch-time translation lives in the cache, so completeness is the
+  // record's job now.)
   const record: LaunchRecord = {
-    skills: launch?.skills ?? [],
-    mcpServers: Object.fromEntries((launch?.mcpServers ?? []).map((name) => [name, fragment.mcpServers[name]])),
+    skills: fragment.skills,
+    mcpServers: fragment.mcpServers,
   };
   const empty = !record.skills.length && !Object.keys(record.mcpServers).length;
   let remove: string | null = null;
@@ -188,45 +188,49 @@ export function mergeState(mode: string, directory: string, fragmentPath: string
   }
 }
 
-type LaunchArgs = Inputs & { config: string; profile: ProfileEntry[] };
+type LaunchArgs = Inputs & { config: string };
 
 /**
- * At launch: the profile's fragment without the replaced plugins and with the
- * variable's, written to the cache by content. Prints its path, which the
- * launcher hands merge-state in place of the profile's.
+ * At launch: the profile's fragment with every plugin merged into it, written
+ * to the cache by content. Prints its path, which the launcher hands
+ * merge-state in place of the profile's.
  */
-export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
+export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
-  launch: ({ args, kept, replaced, plugins, cache }) => {
-    if (!plugins.length && !replaced.length) return join(args.config, 'config.json');
-    // Pi reads plugins only from its agent directory; without one they would
-    // be dropped without a word.
+  launch: ({ args, plugins, cache }) => {
+    if (!plugins.length) return join(args.config, 'config.json');
+    // Pi reads plugins only from its agent directory, which needs a home: with
+    // neither HOME nor PI_CODING_AGENT_DIR there is nothing to merge into, so
+    // the plugins are skipped — said so, as the launcher's own no-home branch
+    // says it — and the harness starts without them rather than not at all.
     if (!process.env.PI_CODING_AGENT_DIR && !process.env.HOME) {
-      throw new LaunchError('cannot load AGENT_DISTRO_PLUGINS: HOME and PI_CODING_AGENT_DIR are unset');
+      log.pi.warn('HOME and PI_CODING_AGENT_DIR are unset; skipping plugin merges');
+      return join(args.config, 'config.json');
     }
     const base: Fragment = JSON.parse(readFileSync(join(args.config, 'config.json'), 'utf8'));
     const owners: Record<string, string> = {};
-    for (const plugin of kept) claim(owners, plugin.description, LaunchError);
-    const replaces: Servers = {};
-    let skills = base.skills;
-    for (const plugin of replaced) {
-      skills = skills.filter((path) => path !== join(args.config, 'skills', plugin.name));
-      for (const name of Object.keys(plugin.description.mcpServers)) {
-        if (Object.hasOwn(base.mcpServers, name)) replaces[name] = base.mcpServers[name];
-        delete base.mcpServers[name];
-      }
-    }
-    const launch = { skills: [] as string[], mcpServers: [] as string[], replaces };
+    // What the merge writes (every plugin's skills) and what the record keeps
+    // (only the variable's): a profile's plugins are the launch's own state and
+    // come back with the profile, so recording them would make the next merge
+    // take them away.
+    const merge = { skills: [] as string[], mcpServers: [] as string[] };
+    const launch = { skills: [] as string[], mcpServers: [] as string[] };
     for (const plugin of plugins) {
       claim(owners, plugin.description, LaunchError);
       const fragment = readCached(join(plugin.translation, 'fragment.json'), isFragment);
-      launch.skills.push(...fragment.skills);
-      launch.mcpServers.push(...Object.keys(fragment.mcpServers));
+      merge.skills.push(...fragment.skills);
+      merge.mcpServers.push(...Object.keys(fragment.mcpServers));
+      if (plugin.from === VARIABLE) {
+        launch.skills.push(...fragment.skills);
+        launch.mcpServers.push(...Object.keys(fragment.mcpServers));
+      }
       Object.assign(base.mcpServers, fragment.mcpServers);
     }
-    const fragment: Fragment = { skills: [...skills, ...launch.skills], mcpServers: base.mcpServers, launch };
+    const fragment: Fragment = {
+      skills: [...base.skills, ...merge.skills], mcpServers: base.mcpServers, launch,
+    };
     return writeAddressed(join(cache!, 'pi', 'launch'), fragment);
   },
 };
@@ -234,13 +238,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
 function run(argv: string[]): number {
   const [command, ...rest] = argv;
   if (command === 'write-config') {
-    try {
-      writeConfig(rest[0], rest[1]);
-    } catch (error) {
-      if (!(error instanceof Invalid)) throw error;
-      log.pi.error(error.message);
-      return 1;
-    }
+    writeConfig(rest[0]);
     return 0;
   }
   if (command !== 'merge-state') throw new Error(`unknown command: ${command}`);

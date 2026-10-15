@@ -7,7 +7,7 @@
   checks = [
     { name = "claudeKolu"; script = import ../../test/guest-script.nix ./tests/check-kolu.py; requires = [ "kolu" ]; packages = [ "koluFixture" ]; }
     { name = "claudeKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; }
-    { name = "claudePlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" ]; }
+    { name = "claudePlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "changed" ]; }
     { name = "claudeSpec"; script = import ../../test/guest-script.nix ./tests/check-spec.py; requires = [ "spec" ]; packages = [ "recordFixture" ]; }
     { name = "claude"; script = import ../../test/guest-script.nix ./tests/check.py; requires = [ ]; packages = [ ]; }
   ];

@@ -1,4 +1,4 @@
-"""Drive the picker over a PTY: the profile in effect, filter, shortcuts, fallback and `--list`."""
+"""Drive the picker over a PTY: the profiles in effect, filter, shortcuts, fallback and `--list`."""
 import base64
 import fcntl
 import json
@@ -17,14 +17,10 @@ import termios
 import time
 
 LISTING = json.loads(sys.argv[1])
-# The launcher's one built-in profile, in effect when nothing chooses another.
-[BUILTIN] = LISTING['profiles']
-DEFAULT = BUILTIN['name']
-ROWS = BUILTIN['harnesses']
+ROWS = LISTING['harnesses']
 NAMES = [row['name'] for row in ROWS]
 # A profile to name positionally or in AI_PROFILE: a directory holding an
-# `agent-distro.nix`, which is all a profile is. The built-in name is not one —
-# `resolve.ts` no longer accepts it — so nothing here gives it.
+# `agent-distro.nix`, which is all a profile is.
 PROFILES = tempfile.mkdtemp(prefix='picker-profiles-')
 OTHER = os.path.join(PROFILES, 'other')
 os.makedirs(OTHER)
@@ -171,38 +167,33 @@ def count(n):
 
 
 # `--list --json` is the menu the picker draws, with the profile in effect;
-# `--list` the same rows under a line naming that profile.
+# `--list` the same rows under a line naming that profile. Nothing is in effect
+# here — no AI_PROFILE, no repository above the working directory — so the
+# listing is the harnesses alone.
 listed = json.loads(subprocess.check_output(['agent-distro', '--list', '--json']))
-assert list(listed) == ['profiles', 'profile'], listed
-assert listed['profiles'] == LISTING['profiles'], listed
-assert listed['profile'] == {'name': DEFAULT, 'description': BUILTIN['description'], 'source': 'builtin', 'origin': DEFAULT}, listed
-for profile in listed['profiles']:
-    assert list(profile) == ['description', 'harnesses', 'name'], profile
-    assert [row['name'] for row in profile['harnesses']] == NAMES, profile
-    for row in profile['harnesses']:
-        assert list(row) == ['name', 'tagline', 'title', 'version'], row
-        assert '+' not in row['version'], row
-        assert not row['tagline'].startswith(row['title']), row
+assert list(listed) == ['harnesses'], listed
+assert listed['harnesses'] == LISTING['harnesses'], listed
+for row in listed['harnesses']:
+    assert list(row) == ['name', 'tagline', 'title', 'version'], row
+    assert '+' not in row['version'], row
+    assert not row['tagline'].startswith(row['title']), row
 listing = subprocess.check_output(['agent-distro', '--list']).decode().splitlines()
-assert listing == [f"{DEFAULT} · {BUILTIN['description']} · built in"] + [
-    f"{row['name']} {row['title']} {row['version']}" for row in ROWS], listing
+assert listing == [f"{row['name']} {row['title']} {row['version']}" for row in ROWS], listing
 
 # The first screen: the profile in effect and the count in the header, every
 # harness row with its version, and the highlighted harness in the panel beside it.
 first = run(flow(b'\r'), version(NAMES[0]), size=(24, 120))
 drawn = first.drawn
 assert first.choice == NAMES[0], first.choice
-assert f'agent-distro · {DEFAULT}'.encode() in drawn, drawn
+assert b'agent-distro' in drawn, drawn
 assert f'{len(ROWS)} harnesses'.encode() in drawn, drawn
-assert b'built in' in drawn, drawn
 assert b'\xe2\x86\x90\xe2\x86\x92 profile' not in drawn, drawn
 for row in ROWS:
     for field in ('title', 'version'):
         assert row[field].encode() in drawn, (row, drawn)
-# The panel shows the highlighted harness in full: its tagline, its status and
-# the profile line under it.
+# The panel shows the highlighted harness in full: its tagline and its status.
+# With no profile in effect there is no profile row above the columns.
 assert ROWS[0]['tagline'].encode() in drawn, drawn
-assert LISTING['profiles'][0]['description'][:15].encode() in drawn, drawn
 assert '╭─ agent-distro'.encode() in drawn and b'/ filter' in drawn, drawn
 assert colours(first.raw), first.raw
 first.restored()
@@ -366,7 +357,7 @@ for overrides, size, prefix in [({}, (len(ROWS) + 5, 120), ()), ({}, (24, 20), (
     assert '╭'.encode() not in small.drawn, small.drawn
     assert f'1. {ROWS[0]["title"]}  {ROWS[0]["tagline"]}  not signed in  {ROWS[0]["version"]}'.encode() in small.drawn, small.drawn
     assert small.choice == NAMES[0], small.choice
-    assert f'agent-distro · {DEFAULT}\r\n{BUILTIN["description"]} · built in\r\n'.encode() in small.drawn, small.drawn
+    assert b'agent-distro\r\n\r\n' in small.drawn, small.drawn
     assert b'h profiles' not in small.drawn, small.drawn
 # Growing redraws. Shrinking below the minimum shows a notice and keeps the
 # session, filter and cursor included, until the terminal grows again.

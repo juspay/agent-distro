@@ -43,4 +43,8 @@ no_home = env.copy()
 no_home.pop('HOME', None)
 no_home.pop('PI_CODING_AGENT_DIR', None)
 subprocess.run(['pi', '--version'], env=no_home, check=True, timeout=60)
-run('--version', overrides={'HOME': '/homeless-shelter', 'PI_CODING_AGENT_DIR': ''})
+# A home Pi cannot write: the merge is skipped, not the launch. The cache is
+# not what this is about, so it gets a real one (an unusable cache is its own
+# error, wherever the path came from).
+run('--version', overrides={'HOME': '/homeless-shelter', 'PI_CODING_AGENT_DIR': '',
+                            'XDG_CACHE_HOME': str(Path.home() / '.cache')})

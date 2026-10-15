@@ -135,18 +135,12 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
 
 ```json
 {
-  "profiles": [
+  "harnesses": [
     {
-      "description": "Upstream harnesses with your own provider",
-      "harnesses": [
-        {
-          "name": "claude",
-          "tagline": "Anthropic login · plugin dirs per session",
-          "title": "Claude Code",
-          "version": "2.1.291"
-        }
-      ],
-      "name": "vanilla"
+      "name": "claude",
+      "tagline": "Anthropic login · plugin dirs per session",
+      "title": "Claude Code",
+      "version": "2.1.291"
     }
   ],
   "profile": {
@@ -166,16 +160,15 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
 
 | Field | Rule |
 | --- | --- |
-| `profiles` | The launcher's built-in profile, and its harnesses |
-| `harnesses` | In menu order |
+| `harnesses` | The harnesses this package ships, in menu order |
 | `name` | Free of whitespace and `/`; what `AI_HARNESS` (or a positional selector) takes |
 | `version` | The display version, as `--list` prints it[^plus-suffix] |
-| `profile` | The profile in effect for a launch from the same directory and environment |
-| `profile.source` | `positional`, `repository`, `variable` (`AI_PROFILE`) or `builtin` |
-| `profile.origin` | The reference as given, the path to the `agent-distro.nix` found, or the built-in name |
-| `profile.over` | The profile composed beneath it, in the same shape: a repository's over your `AI_PROFILE`, each entry over the one before. The launcher's own, at the bottom, is never named |
+| `profile` | The profile in effect for a launch from the same directory and environment; absent when there is none |
+| `profile.source` | `positional`, `repository` or `variable` (`AI_PROFILE`) |
+| `profile.origin` | The reference as given, or the path to the `agent-distro.nix` found |
+| `profile.over` | The profile composed beneath it, in the same shape: a repository's over your `AI_PROFILE`, each entry over the one before |
 
-Keys within `profiles` are sorted; `profile`'s are in the order above. `--list` takes no other arguments.[^three-agree] A profile that cannot be read fails `--list` as it would fail a launch.
+Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list` takes no other arguments.[^three-agree] A profile that cannot be read fails `--list` as it would fail a launch.
 
 [^plus-suffix]: Without the package's `+` revision suffix.
 [^three-agree]: The plain `--list` and the chooser read the same value, so the three cannot disagree.
@@ -228,7 +221,7 @@ The Home Manager module puts every harness on your `PATH` and keeps them on the 
 }
 ```
 
-Home Manager creates the state directory and schedules the updates for you.[^hm-prune] One package is installed — the harnesses — and `profiles` is what every command it installs exports as `AI_PROFILE`, whitespace-separated: a [reference](#profiles), read when a harness starts, or anything else — a path, or a flake input — which is built by `agent-distro.lib.mkProfile` and read from the store, pinned and offline.[^hm-reference]
+Home Manager creates the state directory and schedules the updates for you.[^hm-prune] One package is installed — the picker and every harness command ([Package layout](#package-layout)) — and `profiles` is what every command it installs exports as `AI_PROFILE`, whitespace-separated: a [reference](#profiles), read when a harness starts, or anything else — a path, or a flake input — which is built by `agent-distro.lib.mkProfile` and read from the store, pinned and offline.[^hm-reference]
 
 ```nix
 inputs.skills = { url = "github:juspay/skills"; flake = false; };
@@ -236,7 +229,7 @@ inputs.skills = { url = "github:juspay/skills"; flake = false; };
 services.agent-distro.profiles = [ inputs.skills "github:ekala-project/ekala-ai-skills" ];
 ```
 
-[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` is composed over either. Every entry is a profile reference or something built from one; a string that is neither stops the launch, naming it. `profile`, the one-profile spelling of this option, is deprecated for one release: a reference becomes `profiles = [ it ]`, and a built-in name installs the package with no `AI_PROFILE`.
+[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` is composed over either. Every entry is a profile reference or something built from one; a string that is neither stops the launch, naming it. `profile`, the one-profile spelling of this option, is deprecated for one release: a reference becomes `profiles = [ it ]`.
 
 [^hm-prune]: At activation its prune stage deletes sibling state directories left from an earlier flake/profile choice.
 
@@ -245,18 +238,18 @@ services.agent-distro.profiles = [ inputs.skills "github:ekala-project/ekala-ai-
 Update by hand:
 
 ```sh
-nix profile install github:juspay/agent-distro#vanilla
-nix profile upgrade vanilla
+nix profile install github:juspay/agent-distro#default
+nix profile upgrade default
 ```
 
 Or keep the cache-only updates, but drive them yourself:
 
 - **`agent-distro.lib.mkUpdater`** (see [Library](#library)) gives the `command` and a runnable `program`.[^updater-no-compile]
-- **`agent-distro.lib.mkShims`** keeps installed commands pointing at the updated bundle.
+- **`agent-distro.lib.mkShims`** keeps installed commands pointing at the updated package.
 - **Scheduling is yours.** The updater schedules nothing itself, so run it on your own cadence.[^scheduled-flag]
 - **Setup is yours.** Create the `stateDirectory` yourself, and run `--cache-warnings` once to surface an unusable cache.[^no-outlink]
 
-[^updater-no-compile]: Never compiling: it hands nix `substituters`, and where this user's nix will not honour them, the revision's published content-addressed bundle instead.
+[^updater-no-compile]: Never compiling: it hands nix `substituters`, and where this user's nix will not honour them, the revision's published content-addressed path instead.
 [^scheduled-flag]: It checks the UTC boundary only when you pass `--scheduled`, as the module's launchd does.
 [^no-outlink]: The updater replaces `<state>/current` directly, so there is no out-link pruning for the consumer to do.
 
@@ -264,7 +257,7 @@ Or keep the cache-only updates, but drive them yourself:
 
 Append `--progress` to `command` to drive the same update from a program that wants to show the download. Stdout is then one JSON object per line,[^progress-json] and every human message moves to stderr. Exit codes and the history log are the same as without it.
 
-[^progress-json]: `{"progress":{"done":<bytes>,"total":<bytes>}}` while nix fetches, then `{"result":"updated","bundle":"/nix/store/…"}` (or `unchanged`, or `skipped`/`failed` with a `reason`; a `failed` result also carries `detail`, nix's last `error:` line, when there is one).
+[^progress-json]: `{"progress":{"done":<bytes>,"total":<bytes>}}` while nix fetches, then one result object: `{"result":"updated"|"unchanged","package":"<store path>"}`, or `skipped`/`failed` with a `reason` (a `failed` result also carries `detail`, nix's last `error:` line, when there is one).
 
 ### The binary cache {#binary-cache}
 
@@ -277,36 +270,39 @@ nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
 nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
 ```
 
-**Content-addressed bundles, without touching `nix.conf`.** A *content-addressed* store path is trusted by itself: nix copies one from any cache, for any user, without a signature (`require-sigs`, `nix store make-content-addressed`). CI therefore rewrites every profile's bundle that way for each revision it builds, through the publisher this distribution shares with kolu ([`.github/actions/publish-closure`](https://github.com/juspay/kolu/tree/main/.github/actions/publish-closure), [juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)), and publishes an index of what it wrote:
+**Content-addressed paths, without touching `nix.conf`.** A *content-addressed* store path is trusted by itself: nix copies one from any cache, for any user, without a signature (`require-sigs`, `nix store make-content-addressed`). CI therefore rewrites the package it built that way for each revision, through the publisher this distribution shares with kolu ([`.github/actions/publish-closure`](https://github.com/juspay/kolu/tree/main/.github/actions/publish-closure), [juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)), and publishes an index of what it wrote:
 
 ```
-https://raw.githubusercontent.com/juspay/agent-distro/ca-index/<rev>/<system>/<profile>.json
-# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}   ← Linux
-# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla"}                                            ← macOS
-https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/<profile>.json
-# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro-vanilla", "ca": "/nix/store/…-agent-distro-vanilla"}
+https://raw.githubusercontent.com/juspay/agent-distro/ca-index/<rev>/<system>/default.json
+# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro", "ca": "/nix/store/…-agent-distro"}   ← Linux
+# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro"}                                      ← macOS
+https://raw.githubusercontent.com/juspay/agent-distro/ca-index/latest/<system>/default.json
+# {"rev": "0f3c…", "ia": "/nix/store/…-agent-distro", "ca": "/nix/store/…-agent-distro"}
 ```
 
-`<rev>` is the revision CI built, which is what an updater looks its own entry up by; `latest/` names the newest bundle a system published, with the revision that wrote it so a consumer can tell whether what it has is what this names. Only a push to `main` writes `latest/`, so a pull request's build never moves it, and each system moves only its own file.
+The publisher names each entry after the flake attribute it built, so the one package — `packages.<system>.default` — is `default.json`.[^old-key]
 
-This index is agent-distro's. A distribution that publishes its own bundles names it with `caIndex` (`services.agent-distro.caIndex`, or `mkFlake`'s `caIndex`) — an `https://` base URL with no credentials, query or fragment, the only kind the updater will fetch from; anything else is ignored with a warning, and the update skips. Its revisions are not in this index, and an entry that is not there leaves the update skipped too.[^ca-index]
+`<rev>` is the revision CI built, which is what an updater looks its own entry up by; `latest/` names the newest build a system published, with the revision that wrote it so a consumer can tell whether what it has is what this names. Only a push to `main` writes `latest/`, so a pull request's build never moves it, and each system moves only its own file.
 
-`ia` is the bundle as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Before the index names a bundle, CI pushes the rewritten paths and reads one back from the cache into a throwaway store, verifying its contents — a rewrite that a consumer's nix cannot verify never reaches the index. Which nix does the rewriting matters for that: 2.35 hashes a self-referential NAR differently than 2.17–2.34 do, so CI rewrites with the release the fleet runs (kolu's `publish-closure` action installs 2.34.8 itself, so it is the job's only Nix), not the newest. **These bundles target Nix 2.34.x, and nothing else.** Measured both ways on a bundle whose closure has such a path (libunistring's `.la` files): a 2.34 rewrite fails to import on 2.35 and a 2.35 rewrite fails on 2.34, each with `ca hash mismatch` naming the same two digests — the lines do not accept each other's form. A host on 2.35 or later therefore cannot take these bundles and takes the ordinary skip; the signed bundle and the cache key above are its route, and so is a single-user install of either line. Anyone can do the same by hand, with the `ca` path the index names:
+This index is agent-distro's. A consumer that publishes its own builds names its own index with `caIndex` (`services.agent-distro.caIndex`, or `mkUpdater`'s `caIndex`) — an `https://` base URL with no credentials, query or fragment, the only kind the updater will fetch from; anything else is ignored with a warning, and the update skips. Its revisions are not in this index, and an entry that is not there leaves the update skipped too.[^ca-index]
+
+`ia` is the package as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Before the index names a path, CI pushes the rewritten closure and reads one back from the cache into a throwaway store, verifying its contents — a rewrite that a consumer's nix cannot verify never reaches the index. Which nix does the rewriting matters for that: 2.35 hashes a self-referential NAR differently than 2.17–2.34 do, so CI rewrites with the release the fleet runs (kolu's `publish-closure` action installs 2.34.8 itself, so it is the job's only Nix), not the newest. **These paths target Nix 2.34.x, and nothing else.** Measured both ways on a closure that has such a path (libunistring's `.la` files): a 2.34 rewrite fails to import on 2.35 and a 2.35 rewrite fails on 2.34, each with `ca hash mismatch` naming the same two digests — the lines do not accept each other's form. A host on 2.35 or later therefore cannot take these paths and takes the ordinary skip; the signed path and the cache key above are its route, and so is a single-user install of either line. Anyone can do the same by hand, with the `ca` path the index names:
 
 ```sh
-nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
+nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro
 ```
 
-> A revision CI has not built yet, a `path:` flake (which names no revision to key a bundle by), and a cache that does not hold the bundle all end the same way: the update is skipped and your current version keeps working.
+> A revision CI has not built yet, a `path:` flake (which names no revision to key an entry by), and a cache that does not hold the path all end the same way: the update is skipped and your current version keeps working.
 
-**Content-addressed bundles are Linux-only; macOS keeps signed ones.** The rewrite edits every file in the closure that embeds a store path, and a Mach-O is one of them: the edit invalidates the binary's ad-hoc signature, and arm64 macOS then kills it on exec. Nothing can repair that afterwards — re-signing would change the bytes again — so a `*-darwin` entry names the signed bundle alone — and the updater on such a system fetches no content-addressed bundle even where an older entry still names one — and a Mac needs the cache key (above) or a trusted user, exactly as before this index existed. A Mac whose cache is unusable skips, saying so, and keeps the version it has.
+**Content-addressed paths are Linux-only; macOS keeps signed ones.** The rewrite edits every file in the closure that embeds a store path, and a Mach-O is one of them: the edit invalidates the binary's ad-hoc signature, and arm64 macOS then kills it on exec. Nothing can repair that afterwards — re-signing would change the bytes again — so a `*-darwin` entry names the signed path alone — and the updater on such a system fetches nothing content-addressed even where an older entry still names one — and a Mac needs the cache key (above) or a trusted user, exactly as before this index existed. A Mac whose cache is unusable skips, saying so, and keeps the version it has.
 
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
 [^cache-setting]: `cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`.
 [^ca-index]: Where the index lives is stated once, in [lib/ca-index.nix](https://github.com/juspay/agent-distro/blob/main/lib/ca-index.nix): `mkUpdater` reads it, [`binary-cache.json`](https://github.com/juspay/agent-distro/blob/main/binary-cache.json) — the declaration `cache.yml` hands the publisher — carries it and the cache, and `.github/scripts/check-cache-config.py` keeps that file and this page equal to both.
 [^untrusted]: Nothing more is needed when you are a trusted Nix user or run a single-user install. Otherwise the daemon ignores the updater's request unless your system config already lists the cache.
-[^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable and no content-addressed bundle is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
+[^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable and no content-addressed path is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
+[^old-key]: Transition only: CI also writes `<rev>/<system>/vanilla.json` and `latest/<system>/vanilla.json`, the same content under a `vanilla` attribute that aliases the one package, so updaters still reading the old profile-keyed name keep working. Both, and `packages.<system>.vanilla`, go away on **2026-11-14**, thirty days after the one-package release: the PR that removes them also drops the alias from `cache.yml` and from `flake.nix`.
 
 ### Troubleshooting
 
@@ -317,7 +313,7 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro-vanilla
 | Full run output, Linux | `journalctl --user -u agent-distro-update` |
 | Full run output, macOS | `~/.local/state/agent-distro/<source>/update.log` |
 
-[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 vanilla updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. It is trimmed back to its last 1000 lines once it has grown past them, and a scheduled run on macOS cuts `update.log` to its last 1 MB.
+[^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. It is trimmed back to its last 1000 lines once it has grown past them, and a scheduled run on macOS cuts `update.log` to its last 1 MB.
 
 ### Diagnostics
 
@@ -330,7 +326,7 @@ agent-distro profile: using repo (from /home/me/repo/agent-distro.nix) · https:
 agent-distro profile: using juspay + repo (from /home/me/repo/agent-distro.nix over AI_PROFILE=github:juspay/skills) · https://agent-distro.nixos.asia
 ```
 
-and when something will take a while, such as evaluating a profile for the first time or fetching its packages. The built-in profile, or one you named, prints nothing.
+and when something will take a while, such as evaluating a profile for the first time or fetching its packages. A launch with no profile, or with one you named yourself, prints nothing.
 
 To see the nix commands run, the cache hits and misses, each plugin and where it came from, the PATH additions, the environment and settings, and the arguments handed to the harness:
 
@@ -340,129 +336,81 @@ AGENT_DISTRO_LOG=debug claude
 
 `AGENT_DISTRO_LOG` sets the level of agent-distro's own messages, so `AGENT_DISTRO_LOG=silent` leaves only the harness's output and the few warnings the launcher scripts themselves print (a missing secret variable, a replaced harness configuration file, a `PATH` collision), which are always shown. Colors follow `NO_COLOR` and `FORCE_COLOR`. Updater output is in the journal or `update.log`; see [Troubleshooting](#troubleshooting), and `journalctl --user -u agent-distro-update -p warning` for its warnings and errors alone.
 
-## Build your own distribution
+## Package layout
 
-A [profile](#profiles) needs no distribution of its own: any agent-distro reads it at launch. Build one when your team wants its own pinned flake, bundle and Home Manager module.
-
-```sh
-mkdir my-distribution && cd my-distribution
-nix flake init -t github:juspay/agent-distro
-```
-
-The template is a repository that is both an Agent Plugins directory and a profile: edit `agent-distro.nix`, add skills under `skills/`, and the same file works read at launch (`agent-distro github:<you>/my-distribution`) and built by its `flake.nix`.
-
-| Field | Meaning |
-| --- | --- |
-| `name` | Distribution identifier; Codex marketplace is `<name>-ai` |
-| `description` | Shown with the profile in the picker |
-| `plugins` | List of [Agent Plugins](https://agent-plugins.org/specification/) directories[^plugin-dir] |
-| `env` | Optional: variables every launch exports, and `{ secret = true; hint ? };` ones it prompts for when unset |
-| `settings` | Optional: what `omp` and `opencode` default, in their own configuration's shape |
-| `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness[^bare-command] |
-
-[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A built distribution takes paths only; a flake reference string is read at launch, so name that plugin with a flake input instead.
-[^bare-command]: An MCP server that a plugin declares by bare command, such as `"command": "mcp-nixos"`, is found on `PATH`. List its package here and it is built, or fetched from a binary cache, together with the launcher, so the server starts at once instead of being downloaded when the agent first asks for it, and every user runs the version the build pinned.
-
-- **Start from.** The template includes an `env` and `settings` example; `agent-distro.profiles.vanilla` is the reference profile shape.
-- **Pin.** Commit `flake.lock` to pin your build.
-- **Run.** Your team runs `nix run github:<you>/my-distribution`.
-- **Update.** `nix flake update agent-distro`.
-
-```nix
-agent-distro.lib.mkFlake { profile; systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]; cache ? …; caIndex ? …; }
-# profile: an agent-distro.nix, or the attribute set it holds
-# → packages.<system>: every harness, default picker, and <profile.name> bundle
-#   (a bundle's bin/ carries its harness commands and `agent-distro`, its own picker)
-#   apps.<system>: every harness and default picker; homeManagerModules.default;
-#   lib: the same nine-name library attrset this flake exposes
-
-agent-distro.lib.mkLaunchers { pkgs; profile; }
-# → every harness launcher, plus picker and bundle (the bundle's bin/ also holds
-#   that picker as `agent-distro`, with this profile built in). A `pkgs` from
-#   agent-distro's own nixpkgs is named by a locked reference, fetched only for a
-#   launch-time profile with `packages`; any other `pkgs` puts its source in the
-#   closure
-```
-
-- **Outputs.** `mkFlake` returns `packages`,[^mkflake-packages] `apps`, `homeManagerModules.default`, and the same `lib` attrset `flake.nix` exposes; add other outputs with `//`.
-- **Built in.** The profile is its launchers' built-in one, in effect when nothing else is chosen. `AI_PROFILE` and a repository's `agent-distro.nix` are composed over it, keeping its plugins, and its `env` and `settings` except where they name the same variable or harness; only a positional reference replaces it for a launch.
-- **Cache.** `mkFlake` takes an optional `cache = { url; publicKey; }`, defaulting to agent-distro's cache, and `caIndex`, the base URL of the index of the content-addressed bundles you publish ([The binary cache](#binary-cache)), defaulting to agent-distro's. Push your own builds to a cache and pass it, and name your own index if you publish one, or your users' updates are skipped.[^cache-only]
-
-[^mkflake-packages]: Every harness, the default picker, and the `<profile.name>` bundle, which carries its own picker as `bin/agent-distro`.
-[^cache-only]: The Home Manager updater only installs what that cache holds, or the content-addressed bundle your index names, and never compiles.
-
-For NixOS, with your distribution bound as `distro`:
-
-```nix
-environment.systemPackages = [ distro.packages.${system}.my-profile ];
-```
-
-> `AGENT_DISTRO_SETTINGS=0 nix run .#omp` keeps the plugins and skips the profile's `env` and `settings`.[^gateway-off]
-
-[^gateway-off]: It preserves existing user settings: choose personal models in OMP or OpenCode if you previously used a profile's defaults. Pi, Claude Code and Codex use their own login.
-
-### Bundle layout
-
-A profile's bundle (`nix build .#<profile.name>`) is self-describing: a consumer reads two files rather than running a command for information.
+`agent-distro.packages.<system>.default` (`nix build .#default`) is the whole distribution, and self-describing: a consumer reads a file rather than running a command for information.
 
 ```text
 bin/<harness>…                      # one launcher per harness
-bin/agent-distro                    # the picker, with this profile built in
-share/agent-distro/profile.json     # {"description": "…", "name": "<profile.name>"}
+bin/agent-distro                    # the picker, the package's main program
 share/agent-distro/versions         # <harness>\t<title>\t<version>, one line per harness, in menu order
 ```
 
-`profile.json` comes from the same profile attributes as the picker's `--list --json`, so the two cannot drift.[^profile-file]
+`versions` lists the harness packages this build pinned, the same values `--list` prints, so the two cannot drift. A [profile](#profiles) needs no package of its own: any agent-distro reads one at launch.
 
-[^profile-file]: [src/listing.ts](https://github.com/juspay/agent-distro/blob/main/src/listing.ts) types both files (`ProfileFile`, `parseProfileFile`).
+## Library
 
-### Library
-
-Beyond the launchers, `agent-distro.lib` exposes the pieces Home Manager uses under the hood. Any Nix consumer, not only Home Manager, can keep a profile installed, updated, and chosen.[^plain-import]
+Beyond the launchers, `agent-distro.lib` exposes the pieces Home Manager uses under the hood. Any Nix consumer, not only Home Manager, can keep the package installed, updated, and launched with a profile.[^plain-import]
 
 [^plain-import]: Every function evaluates from a plain `import` of its `lib/*.nix` file with an arbitrary nixpkgs `pkgs`; a required argument left out is an eval error naming it.
 
 ```nix
+agent-distro.lib.mkLaunchers { pkgs; sources ? …; nixpkgs ? null; }
+# → every harness launcher, plus `picker` and `package`, the package of
+#   [Package layout](#package-layout). `nixpkgs`, the flake input `pkgs` came
+#   from, names that nixpkgs by a locked reference, fetched only for a profile
+#   with `packages`; any other `pkgs` puts its source in the closure. `sources
+#   = name: pkgs: …` substitutes a harness's own package, for fixtures.
+
+agent-distro.lib.mkPicker { pkgs; launchers; nixpkgs ? null; }
+# → lib/picker.nix's derivation: the interactive harness chooser over
+#   `launchers`, a `mkLaunchers` result.
+
+agent-distro.lib.mkProfile { system; profile; }
+# → one profile, built: an `agent-distro.nix` — a path to the file, to the
+#   directory holding one, a flake input (whose `outPath` is a store path), or
+#   the attribute set it holds — with its plugins read and its `packages`
+#   realised. Its store path is an `AI_PROFILE` value ([Profiles](#profiles)),
+#   used as it is; its plugins must be paths, since a flake reference is read
+#   at launch and has no place in a build.
+
 agent-distro.lib.stateDirectory { xdgStateHome; flake; profile; }
-# → the string "<xdgStateHome>/agent-distro/<sha256 of {flake, profile}>", the
-#   same hash Home Manager computes today. One function, so a consumer and the
-#   updater can never disagree on where `current` lives.
+# → the string "<xdgStateHome>/agent-distro/<sha256 of {flake, profile}>", with
+#   `profile` what the updater builds (the module passes the package's
+#   attribute, `default`), not an AI_PROFILE: a profile's own store path
+#   changes whenever its input does, and hashing it would churn what holds
+#   `current` on every `nix flake update`. An install that predates the
+#   one-package release hashed the old `vanilla` name, so its first activation
+#   after the upgrade starts a new state directory and the prune hook removes
+#   the old one. One function, so a consumer and the updater can never
+#   disagree on where `current` lives.
 
-agent-distro.lib.mkShims { pkgs; bundle; stateDirectory; profile ? null; }
-# → a derivation whose bin/ holds one shim per bundle.commands, each
+agent-distro.lib.mkShims { pkgs; package; stateDirectory; profile ? null; }
+# → a derivation whose bin/ holds one shim per package.commands, each
 #   `exec "<stateDirectory>/current/bin/<name>"` when executable, else
-#   `exec <bundle>/bin/<name>`; identical text to the Home Manager module's shims.
-#   `bundle` must be a bundle from `mkLaunchers` of this agent-distro (it carries
-#   `commands`); anything else is an eval error naming the problem. A `profile`
-#   reference is exported as AI_PROFILE unless the environment sets one.
+#   `exec <package>/bin/<name>`; identical text to the Home Manager module's
+#   shims. `package` must be a `mkLaunchers` package of this agent-distro (it
+#   carries `commands`); anything else is an eval error naming the problem. A
+#   `profile` is exported as AI_PROFILE unless the environment sets one.
 
-agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; history; nix; substituters; caIndex ? …; }
+agent-distro.lib.mkUpdater { pkgs; package; flake; attribute ? "default"; stateDirectory; history; nix; substituters; caIndex ? …; }
 # → { config = <the generated JSON file>; command = [ node update.ts config ];
 #   program = <a writeShellApplication running `command "$@"`>; }. The Home
 #   Manager module's systemd ExecStart, launchd ProgramArguments (`++ ["--scheduled"]`)
 #   and activation `--cache-warnings` all come from this; `command ++ [ "--progress" ]`
-#   is the same update with JSON progress on stdout. `bundle` must be a
-#   `mkLaunchers` bundle with a `runtime` (post-#59 ones do); the period/offset
-#   come from `lib.schedule` and are not overridable here; the updater never
-#   compiles: it hands nix `substituters`, and for a user whose nix will not
-#   honour them it copies the revision's published content-addressed bundle
-#   from one of them instead ([The binary cache](#binary-cache)).
-
-agent-distro.lib.mkProfile { system; profile; }
-# → one profile built into a derivation: share/agent-distro/profile.json (its
-#   name, description, env, settings and the runtime tree that read its
-#   plugins), share/agent-distro/plugins/<index>/{description.json,root}, and
-#   bin/ from its `packages`. `profile` is a path to an agent-distro.nix or to
-#   the directory holding one — or the flake input itself — or the attribute
-#   set the file holds; its plugins must be paths, since a flake reference is
-#   read at launch. The store path is an AI_PROFILE entry like any other.
-
-agent-distro.lib.mkPicker { pkgs; profile; launchers; nixpkgs ? null; }
-# → lib/picker.nix's derivation: the interactive harness chooser over
-#   `launchers`, the `mkLaunchers` result for `profile`, its built-in profile.
-#   `nixpkgs`, the flake input `pkgs` came from, names it by reference as
-#   `mkLaunchers` does.
+#   is the same update with JSON progress on stdout. Each run builds
+#   `<flake>#<attribute>` and reads that attribute's index entry; `package`
+#   must be a `mkLaunchers` package with a `runtime` (post-#59 ones have one).
+#   The period/offset come from `lib.schedule` and are not overridable here;
+#   the updater never compiles: it hands nix `substituters`, and for a user
+#   whose nix will not honour them it copies the revision's published
+#   content-addressed path from one of them instead
+#   ([The binary cache](#binary-cache)).
 ```
+
+`agent-distro.lib.cache` is the project's binary cache (`{ url; publicKey; }`) and `agent-distro.lib.caIndex` where its content-addressed paths are indexed; a consumer that pushes its own builds passes its own to `mkUpdater`, or its users' updates are skipped.[^cache-only]
+
+[^cache-only]: The Home Manager updater only installs what that cache holds, or the content-addressed path your index names, and never compiles.
 
 The updater's schedule is one `lib/schedule.nix`, exposed as `agent-distro.lib.schedule`: `updateHoursUTC`, `defaultFrequency`, `updatePeriodSeconds` and `updateOffsetSeconds`. The module, `mkUpdater` and any consumer read the same numbers.
 
@@ -494,6 +442,18 @@ A profile is an `agent-distro.nix` in a git repository:
 }
 ```
 
+| Field | Meaning |
+| --- | --- |
+| `name` | Profile identifier; the chooser and `--list` name the stack with it |
+| `description` | Shown with the profile in the picker |
+| `plugins` | List of [Agent Plugins](https://agent-plugins.org/specification/) directories[^plugin-dir] |
+| `env` | Optional: variables every launch exports, and `{ secret = true; hint ? };` ones it prompts for when unset |
+| `settings` | Optional: what `omp` and `opencode` default, in their own configuration's shape |
+| `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness[^bare-command] |
+
+[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A path is taken relative to the `agent-distro.nix`; a flake reference string is read at launch, so a profile built with `mkProfile` takes paths only.
+[^bare-command]: An MCP server that a plugin declares by bare command, such as `"command": "mcp-nixos"`, is found on `PATH`. List its package here and it is built, or fetched from a binary cache, so the server starts at once instead of being downloaded when the agent first asks for it, and every user runs the version the profile pinned.
+
 ### Run with a profile
 
 ```sh
@@ -504,8 +464,8 @@ AI_PROFILE=github:juspay/skills agent-distro omp            # the same, by varia
 
 A repository's own `agent-distro.nix` is composed on top of that whenever a harness starts inside
 one: with no profile named on the command line, the launcher composes the `agent-distro.nix` found
-from the working directory up to the git root over every `AI_PROFILE` entry, over the launcher's
-own. Discovery needs a git repository: an `agent-distro.nix` in a plain directory is read only when
+from the working directory up to the git root over every `AI_PROFILE` entry.
+Discovery needs a git repository: an `agent-distro.nix` in a plain directory is read only when
 named, as `./dir` or in `AI_PROFILE`. A terminal opened in a repository, in Kolu or anywhere,
 starts its agents with that repository's profile on top of yours.
 
@@ -530,7 +490,7 @@ names the stack: `juspay + ekala + kolu`.
 | `name`, `description` | The topmost; the chooser and `--list` name the whole stack, as `juspay + ekala + kolu` |
 
 A profile named on the command line is that profile alone: nothing is composed beneath it, not even
-the launcher's own.
+a repository's own.
 
 ### Pin a profile (optional)
 
@@ -578,7 +538,7 @@ AI_PROFILE= agent-distro omp                 # nothing but the repository's own 
   variable, which the launcher asks for and never writes to a file. Only open terminals in repositories you trust, as you already do with
   their `.envrc`.
 
-[^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, one entry per file, so a repository's profile over two `AI_PROFILE` entries is three, each evaluated again only when its own file changes; removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. Its last store path is kept under `agent-distro/references/` for launches without network. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache; launchers name that nixpkgs by a locked reference and fetch its source only for a profile with `packages`. A built profile is read rather than evaluated: its `profile.json`, its plugins and their descriptions are all in the store.
+[^profile-cache]: Under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/`, one entry per file, so a repository's profile over two `AI_PROFILE` entries is three, each evaluated again only when its own file changes; removed once unused for 14 days. A flake reference, the profile's or a plugin's, is fetched with `nix flake prefetch` on every launch, so an unpinned one follows its branch; Nix's tarball TTL bounds what that costs. Its last store path is kept under `agent-distro/references/` for launches without network. `packages` are evaluated against the nixpkgs agent-distro itself was built with, so they hit the same binary cache; launchers name that nixpkgs by a locked reference and fetch its source only for a profile with `packages`. A built profile is read rather than evaluated: its metadata, its plugins and their descriptions are all in the store.
 [^never-compiles]: Under the same policy as the updater: what a build would compile rather than fetch stops the launch.
 
 | Profile | What it is |
@@ -656,7 +616,7 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 
 ## How it works
 
-- **Profile.** Harness-independent data: an `agent-distro.nix`, read at launch, or the one a launcher was built with.
+- **Profile.** Harness-independent data: an `agent-distro.nix`, read at launch, or one built with `agent-distro.lib.mkProfile`.
 - **Harness.** The agent application.
 - **Plugin.** A portable Agent Plugins directory.
 - **Environment and settings.** Optional data a profile carries: variables every launch exports, a `secret` one prompted for when it is unset, and what `omp` and `opencode` default. OpenCode's own copy of those models comes from [`opencode-plugin-litellm`](https://github.com/yuseferi/opencode-litellm), vendored in `harnesses/opencode/npins` and loaded by every launch: it discovers a LiteLLM server's `/v1/models` and `/v1/model/info`, prices and limits included, and probes a local one when nothing names it.
@@ -684,7 +644,7 @@ Every plugin is read once, harness-independently, against Agent Plugins 1.0.0, b
 
 > One known gap: Claude Code expands `${VAR}` in a remote server's `url` and `headers`, which the spec forbids.[^var-gap]
 
-[^read-when]: A built-in profile's at build time; a profile read at launch, and one from `AGENT_DISTRO_PLUGINS`, at launch, into the cache described in [Plugins at launch](#plugins-at-launch).
+[^read-when]: A profile read at launch, and the directories on `AGENT_DISTRO_PLUGINS`, are read at launch, into the cache described in [Plugins at launch](#plugins-at-launch); a profile built with `mkProfile` is read at build time.
 [^failure-boundaries]: As the spec's failure boundaries require.
 [^var-gap]: Those values cannot go through a launcher, so a remote server whose URL or headers contain `${` reaches Claude Code as is.
 
@@ -692,13 +652,12 @@ Every plugin is read once, harness-independently, against Agent Plugins 1.0.0, b
 
 Profiles share each harness's own home directory, so what OMP persists outlives the profile that wrote it.[^persisted] Claude Code's plugins last only for the session, and a profile read at launch reaches Codex and Pi as `AGENT_DISTRO_PLUGINS` does.
 
-[^persisted]: The model roles a profile filled into OMP's config stay when you launch with no profile, and a built-in profile's Codex marketplace stays registered.
+[^persisted]: The model roles a profile filled into OMP's config stay when you launch with no profile. A launch's Codex marketplaces — `agent-distro-<hash>`, one per plugin — are its own: they live in Codex's install cache, and nothing of them reaches `config.toml`.
 
 ## Development
 
 ```sh
-nix build .#default    # the picker, and through it every launcher
-nix build .#vanilla    # the bundle: its harnesses plus its own bin/agent-distro
+nix build .#default    # the package: the picker, every launcher and share/agent-distro/versions
 nix flake check
 just test              # offline NixOS VM tests; Linux with KVM
 just test-template
@@ -709,16 +668,16 @@ python3 .github/scripts/test-update-flake.py
 The TypeScript's own checks need no VM or KVM, and `nix flake check` at the root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,profile-resolve,mk-profile,vanilla-closure,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,profile-resolve,mk-profile,nixpkgs-reference,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 | Check | Covers |
 | --- | --- |
 | `reader` | the plugin reader |
-| `launch-plugins` | `AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence, a profile replacing the built-in plugins, and the launches it fails |
+| `launch-plugins` | `AGENT_DISTRO_PLUGINS`: cache keys, re-translation, precedence, a profile's plugins replaced by name, and the launches it fails |
 | `profile-resolve` | the profile in effect, with a fake nix: discovery, the stack and how it composes, a built profile by its store path (and the reader that decides whether its descriptions are used), references and their offline fallback, the evaluation's isolation, its cache, nixpkgs fetched only for packages, and the no-compile policy |
-| `mk-profile` | `agent-distro.lib.mkProfile`'s output: `profile.json`, its plugins' descriptions and roots, and `bin/` |
-| `vanilla-closure` | the `vanilla` bundle names nixpkgs by reference and does not hold its source |
+| `mk-profile` | `agent-distro.lib.mkProfile`'s output: its metadata, its plugins' descriptions and roots, and `bin/` |
+| `nixpkgs-reference` | the package names nixpkgs by reference and does not hold its source |
 | `opencode-standalone` | an interactive OpenCode launch reaches the harness with `--standalone`, so one launch's config is not served to the next |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
@@ -733,7 +692,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 - **Required checks.** `just protect --dry-run` prints the contexts main's ruleset requires; `just protect` sets them, from what the pipeline and `cache.yml` say they are.[^protect]
 - **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
 - **Report.** The update report reads resolved versions and each harness's release-note metadata.
-- **Cache.** `cache.yml` pushes realised paths to the OSS cache,[^attic-token] and publishes each profile bundle's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository, through the `publish-closure` action it shares with kolu ([juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)) ([The binary cache](#binary-cache)).
+- **Cache.** `cache.yml` pushes realised paths to the OSS cache,[^attic-token] and publishes the package's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository, through the `publish-closure` action it shares with kolu ([juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)) ([The binary cache](#binary-cache)).
 - **Merge gate.** The daily update PR enables auto-merge, so it lands once every context the ruleset requires is green.[^auto-merge]
 - **Consumers.** They run `nix flake update agent-distro`.
 
@@ -747,12 +706,10 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 
 ### Test library
 
-Consumers can import `test/lib.nix { pkgs; launchers; profile; features; koluPlugin ? null; }`. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
+Consumers can import `test/lib.nix { pkgs; nixpkgs ? null; profiles ? [ ]; updated ? profiles; features ? [ ]; koluPlugin ? null; }`, where `nixpkgs` is the flake input `pkgs` came from, so the guest launchers name it by a locked reference rather than hold its source. `profiles` are `mkProfile` derivations, whose store paths are the `AI_PROFILE` the checks launch with; `updated` defaults to `profiles`, and a caller passes the same profiles with their plugins rebuilt to new store paths, for the `changed` fixture. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
 
-- **Also `mkLaunchers`.** Rebuild checks also accept `mkLaunchers`. A profile selected by the `gateway` feature must point at the fixture's
-  URL itself (`http://127.0.0.1:8080`): `test/lib.nix` serves it, and no longer rewrites the profile's `env`.
 - **Plugin rebuilds.** Select plugin rebuild checks only for nonempty skill plugins.
-- **Coverage.** The test flake covers vanilla (with kolu's plugin loaded at launch), the Juspay profile built in, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a copy of the Juspay profile's `agent-distro.nix` matching the built-in one in OMP, Codex and Claude Code; and `ca-update`: the update that takes the published content-addressed bundle as an untrusted user, and the skip where the index publishes none.
+- **Coverage.** The test flake covers the package with no profile (with kolu's plugin loaded at launch), the Juspay profile built with `mkProfile`, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a repository's `agent-distro.nix` reaching OMP, Codex and Claude Code as the same profile built by `mkProfile` does; and `ca-update`: the update that takes the published content-addressed path as an untrusted user, and the skip where the index publishes none.
 
 [^features]: The features are `plugins`, `gateway` (the checks that run against the fixture-backed LiteLLM profile), `kolu`, `spec`, and `koluLaunch`, which loads `koluPlugin` through `AGENT_DISTRO_PLUGINS`.
 
@@ -769,13 +726,12 @@ Create `harnesses/<name>/` with four files:
 | File | Holds |
 | --- | --- |
 | `meta.nix` | title, order, `auth`,[^auth-values] `releaseNotes = version: URL`, and checks |
-| `default.nix` | the adapter, accepting `{ pkgs, plugins, info, package }`[^profile-name] and starting with `runtime.launchPlugins`[^launch-json] |
+| `default.nix` | the adapter, accepting `{ pkgs, name, package, launchPlugins }` — `name` is its own harness name, `launchPlugins` is `runtime.launchPlugins` seeded with it — and starting with `launchPlugins { … }`[^launch-json] |
 | `source.nix` | `{ pkgs }` to package |
 | `README.md` | design notes |
 
 [^auth-values]: `auth = "anthropic" | "openai"`, for a harness with a login of its own; without one the picker reads the profile's `secret` variables and the harness's own store.
-[^profile-name]: `info` is what the resolver knows of the build; its `default`, the built-in profile's name, supports profile-specific registration, such as Codex’s marketplace name.
-[^launch-json]: `plugins` are the built-in profile's; the adapter passes their descriptions and `info` to `launchPlugins`, whose shell sets `launched`, `profile_env_*` and `profile_settings` for the profile in effect, which may be one read at launch.
+[^launch-json]: The adapter hands `launchPlugins` what it needs for a launch; its shell sets `launched`, `profile_env_*` and `profile_settings` for the profile in effect, read when the harness starts.
 
 - **Alongside.** Pins in `npins/`, scripts in `tests/`, and an optional custom updater in `update.py`.
 - **No registration.** Nothing outside this directory needs registration.[^discovery]
@@ -785,7 +741,7 @@ Create `harnesses/<name>/` with four files:
 - **Gateway checks.** They receive the shared fake service and launchers configured against it.
 - **Fixtures.** `mkLaunchers` also accepts a `sources = name: pkgs: …` hook for package fixtures.
 
-[^discovery]: The picker, bundles, outputs, reserved names, checks, and daily report all discover it.
+[^discovery]: The picker, the package, outputs, reserved names, checks, and daily report all discover it.
 [^beyond-shell]: For an adapter that needs more than shell: translating plugin descriptions into the harness's config, merging user state at launch.
 [^check-packages]: Packages can name `updated`, `upstream`, `koluFixture`, or `recordFixture`.
 [^guest-script]: Use `import ../../test/guest-script.nix ./tests/check.py` to run a guest script as the unprivileged VM user.

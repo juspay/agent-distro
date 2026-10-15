@@ -46,7 +46,7 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
 chmodSync(join(bin, 'nix'), 0o755);
 
 const info = join(work, 'info.json');
-writeFileSync(info, JSON.stringify({ default: 'vanilla', builtins: [], nixpkgs: '/nixpkgs', system: 'x86_64-linux' }));
+writeFileSync(info, JSON.stringify({ nixpkgs: '/nixpkgs', system: 'x86_64-linux' }));
 const caches = join(work, 'caches.json');
 writeFileSync(caches, JSON.stringify({ substituters: ['https://cache.example/oss'], trustedPublicKeys: ['oss:key'] }));
 const file = join(work, 'agent-distro.nix');

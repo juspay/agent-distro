@@ -1,4 +1,4 @@
-# The cache warm and the content-addressed bundles: the half of CI that needs
+# The cache warm and the content-addressed package: the half of CI that needs
 # repository writes. odu (github.com/juspay/odu) runs the checks themselves —
 # the justfile recipe tagged [metadata("ci")] and its dependency graph — and
 # posts one commit status per (recipe × platform). This workflow is what pushes
@@ -93,13 +93,15 @@ jobs:
         run: |
           nix build --print-build-logs .#default
 
-  # The content-addressed bundles and the index that names them, through the
+  # The content-addressed package and the index that names it, through the
   # publisher `@kolu/surface` and this distribution now share
   # (juspay/kolu#2294). The action installs the Nix it rewrites with, rewrites
-  # each bundle, runs a program out of the rewrite, pushes the closures, reads
-  # them back from the cache into a fresh store, and writes
-  # `<rev>/<system>/<profile>.json` — plus `latest/` on a push to main — to the
-  # index `binary-cache.json` names (kept equal to lib/ca-index.nix).
+  # the package, runs a program out of the rewrite, pushes the closure, reads
+  # it back from the cache into a fresh store, and writes
+  # `<rev>/<system>/<attribute>.json` — plus `latest/` on a push to main — to
+  # the index `binary-cache.json` names (kept equal to lib/ca-index.nix). The
+  # attribute is the one package's: `default` (src/update/ca-index.ts
+  # `ATTRIBUTE`).
   #
   # Its own job, after the warm: the action's Nix has to be this job's only
   # Nix, and the signed closures `build` just pushed are what this job's builds
@@ -110,7 +112,7 @@ jobs:
       fail-fast: false
       matrix:
         # Both systems publish: Linux a content-addressed rewrite, macOS the
-        # signed bundle alone (a rewritten Mach-O is killed on arm64 macOS).
+        # signed package alone (a rewritten Mach-O is killed on arm64 macOS).
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # This job pushes the content-addressed index, a branch of this repository.
@@ -129,29 +131,25 @@ jobs:
           locked=$(python3 -c 'import json; print(json.load(open("flake.lock"))["nodes"]["nixpkgs"]["locked"]["rev"])')
           echo "nixpkgs=github:NixOS/nixpkgs/$locked" >> "$GITHUB_OUTPUT"
 
-      - name: Read the profiles this publishes
-        id: profiles
-        # A profile is a directory under profiles/, as flake.nix reads them, and
-        # each one is a bundle the index names. Both inputs come from that one
-        # list: a profile added there is published, and the action refuses an
-        # installable with no smoke line — so neither a new profile nor a
-        # renamed one escapes having been run out of its rewrite.
+      - name: Read the package this publishes
+        id: package
+        # The one package per system, and — until 2026-11-14, thirty days after
+        # the one-package release — the same package under the attribute the
+        # profile-keyed index published it as: an installed updater polls
+        # `<rev>/<system>/vanilla.json` until it is replaced by one that reads
+        # `<rev>/<system>/default.json`, and that PR removes this alias and the
+        # second installable and smoke line here.
         run: |
           set -eu
-          installables=""
-          smoke=""
-          for directory in profiles/*/; do
-            profile=$(basename "$directory")
-            installables="$installables .#$profile"
-            smoke="$smoke$profile=bin/claude --version"$'\n'
-          done
-          printf 'installables=%s\n' "${installables# }" >> "$GITHUB_OUTPUT"
-          { echo "smoke<<PROFILES"; printf '%s' "$smoke"; echo "PROFILES"; } >> "$GITHUB_OUTPUT"
+          echo "installables=.#default .#vanilla" >> "$GITHUB_OUTPUT"
+          { echo "smoke<<PACKAGES"
+            printf 'default=bin/claude --version\nvanilla=bin/claude --version\n'
+            echo "PACKAGES"; } >> "$GITHUB_OUTPUT"
 
       - uses: juspay/kolu/.github/actions/publish-closure@5b14790a4eb9c383dfd7fa247bbff1af60f9eb92 # juspay/kolu#2294, on master
         with:
-          installables: ${{ steps.profiles.outputs.installables }}
-          # Where the bundles go and where their index is written: the
+          installables: ${{ steps.package.outputs.installables }}
+          # Where the package goes and where its index is written: the
           # declaration this repository checks in, because no Nix exists in
           # this job until the action installs the one it rewrites with.
           # check-cache-config.py keeps that file equal to lib/cache.nix and
@@ -161,6 +159,6 @@ jobs:
           # on a pull request its head, never the merge commit GitHub makes for
           # the run — which its own action.yml states once.
           latest: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          smoke: ${{ steps.profiles.outputs.smoke }}
+          smoke: ${{ steps.package.outputs.smoke }}
           attic-nixpkgs: ${{ steps.attic.outputs.nixpkgs }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}

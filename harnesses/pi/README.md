@@ -11,16 +11,15 @@ its own files are where its providers live.
 Each stdio MCP server runs through a generated launcher, in the directory the
 harness was launched in (doc/index.md, "Working directory"). A plugin on
 `AGENT_DISTRO_PLUGINS` is merged the same way, but for one launch:
-the merge records what it added (and the profile servers it displaced) in
-`.agent-distro-launch.json` in the agent directory, and the next merge removes
+the merge records what it added in `.agent-distro-launch.json` in the agent
+directory, and the next merge removes
 whatever is still as recorded before applying its own, so the entries stay
 until the next `pi` launch, however much later that is. Without a home for
 those files (`HOME` and `PI_CODING_AGENT_DIR` unset, or a directory it cannot
 write), the launch fails rather than start without the plugins. Launches that run at
 the same moment with different values can see each other's entries, since Pi
 reads them from the same files. A profile read at launch (an
-`agent-distro.nix`) is merged as these are, its plugins replacing every
-built-in one.
+`agent-distro.nix`) is merged as these are.
 
 The npins branch pin tracks `sadjow/pi-nix`. Its standalone binary packaging
 recipe is called with the distribution's shared nixpkgs rather than the

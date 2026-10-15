@@ -6,10 +6,10 @@
  * every harness launcher before it starts its harness.
  *
  * ARGS_JSON is written by a harness launcher at build time: `harness` names the
- * adapter (`src/harness/<harness>.ts`, which exports `adapter`), `profile` lists
- * the built-in profile's plugins as `{ description, ... }` entries, `info`
- * describes that profile (src/profile/resolve.ts), and the rest is
- * the adapter's own. Stdout is shell for the launcher to `eval`: `launched` is
+ * adapter (`src/harness/<harness>.ts`, which exports `adapter`), `nixpkgs` and
+ * `system` are what it knows of the build — the `Info` a profile's `packages`
+ * are evaluated against (src/profile/resolve.ts) — and the rest is the
+ * adapter's own. Stdout is shell for the launcher to `eval`: `launched` is
  * what the adapter prints (extra arguments as shell words, or a path),
  * `profile_env_secrets` names each `secret` variable of the profile's `env`
  * with its hint, as `NAME=hint`, for the launcher to prompt for, every other
@@ -17,12 +17,13 @@
  * harness as JSON (empty for none), and the profile's packages go first on
  * PATH. `AGENT_DISTRO_SETTINGS=0` leaves all three empty: plugins only.
  *
- * A profile composed over the built-in one keeps the built-in's plugins and
- * adds its own; one that does not include it (chosen positionally, or another
- * built-in name) replaces them. Either way its plugin directories are
- * translated exactly as the variable's, ahead of them, and its env, settings
- * and packages are the ones in effect. Each directory is read exactly as a
- * built-in plugin is, then translated once per content into
+ * Every entry of AI_PROFILE composes over the one before it, left to right; the
+ * launcher's own profile is the base of that stack — the one beneath the first
+ * entry and named by no entry — and a positional selector is a stack of one.
+ * Plugins and paths accumulate bottom first; `env` and `settings` merge
+ * key-wise, the topmost entry winning (src/profile/resolve.ts `merge`). Each
+ * directory is read exactly as the launcher's own is, then translated once per
+ * content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
  * already content-addressed; otherwise it hashes the directory's NAR
@@ -35,14 +36,15 @@
  * what is in use rather than every version ever seen.
  *
  * Plugins are matched by manifest name, never by version: a plugin on the
- * variable, or of a composed profile, replaces the built-in plugin of the same
- * name, and among those the last of a name wins.
+ * variable, or of a profile above, replaces the plugin of the same name from a
+ * profile below it, and among those the last of a name wins.
  *
  * A launch names the profile in effect on stderr when a repository's
- * `agent-distro.nix` or AI_PROFILE chose it, worded as `--list` words it and
- * followed by the website (`SITE`), since that line is the only one a plain
- * launch prints and the change to plugins, PATH, env and settings is silent
- * otherwise. At debug it also logs each plugin directory and where it came
+ * `agent-distro.nix` or AI_PROFILE chose it — the whole stack, from the bottom
+ * up, worded as `--list` words it and followed by the website (`SITE`) — since
+ * that line is the only one a plain launch prints and the change to plugins,
+ * PATH, env and settings is silent otherwise. At debug it also logs each plugin
+ * directory and where it came
  * from, the PATH additions, the environment and settings, and the arguments it
  * hands the harness.
  */
@@ -53,7 +55,6 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
-import { readDescription } from './resources.ts';
 import { log, SITE, VARIABLE as LOG_VARIABLE } from '../log.ts';
 import { nameText, sourceText } from '../listing.ts';
 import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
@@ -64,16 +65,7 @@ import {
 
 export type Report = (message: string) => void;
 
-/** A profile plugin, as the launcher's ARGS_JSON lists it. */
-export type ProfileEntry = { description: string; [key: string]: unknown };
-
-export type ProfilePlugin<E extends ProfileEntry = ProfileEntry> = {
-  name: string;
-  description: Description;
-  entry: E;
-};
-
-/** A plugin from the variable, translated for one harness. */
+/** A plugin, translated for one harness. */
 export type LaunchPlugin = {
   name: string;
   key: string;
@@ -84,20 +76,16 @@ export type LaunchPlugin = {
   translation: string;
 };
 
-export type Launch<A, E extends ProfileEntry> = {
+export type Launch<A> = {
   args: A;
-  /** The profile's plugins that stay, in profile order. */
-  kept: ProfilePlugin<E>[];
-  /** The profile's plugins a plugin on the variable replaces. */
-  replaced: ProfilePlugin<E>[];
-  /** The variable's plugins, deduplicated, in order; empty when it names none. */
+  /** The profiles' plugins and the variable's, deduplicated, in order; empty when there are none. */
   plugins: LaunchPlugin[];
-  /** `${XDG_CACHE_HOME:-~/.cache}/agent-distro`; null when `plugins` and `replaced` are empty. */
+  /** `${XDG_CACHE_HOME:-~/.cache}/agent-distro`; null when `plugins` is empty. */
   cache: string | null;
   report: Report;
 };
 
-export interface Adapter<A = any, E extends ProfileEntry = ProfileEntry, I = unknown> {
+export interface Adapter<A = unknown, I = unknown> {
   /** Everything besides the plugin that shapes `translate`'s output. */
   translationInputs(args: A): I;
   /**
@@ -109,13 +97,23 @@ export interface Adapter<A = any, E extends ProfileEntry = ProfileEntry, I = unk
    * What the launcher reads from stdout. With no plugins, the launch is the
    * profile's own and needs no cache.
    */
-  launch(launch: Launch<A, E>): string;
+  launch(launch: Launch<A>): string;
 }
 
 /** A launch the variable cannot serve; the message names what is wrong. */
 export class LaunchError extends Error {}
 
 export const VARIABLE = 'AGENT_DISTRO_PLUGINS';
+
+/**
+ * The cache root, or null when there is nowhere to keep one: XDG_CACHE_HOME and
+ * HOME are both unset, so a launch without a home still starts — what needs
+ * caching is skipped, and each caller says so — instead of not starting at all.
+ * A cache that is *given* and unusable is still an error (`cacheRoot`).
+ */
+export function cacheRootIfAny(env: NodeJS.ProcessEnv = process.env, label = VARIABLE): string | null {
+  return env.XDG_CACHE_HOME || env.HOME ? cacheRoot(env, label) : null;
+}
 
 /** Unused this long, a translation or a launch file may be removed. */
 export const STALE_DAYS = 14;
@@ -461,18 +459,17 @@ export function sweep(directory: string, which: (name: string) => boolean = () =
 }
 
 /**
- * Resolve the variable against the profile: who stays, who is replaced, who
- * is added. `own`, the plugin directories of the profile in effect, come
- * before the variable's; with `replace`, for a profile that does not include
- * the built-in one, they replace every built-in plugin. `described` are the
- * descriptions a built profile of the stack already holds, by root
+ * Resolve the variable against the profiles in effect: which plugins load, and
+ * where each came from. `own`, the plugin directories of the profile in
+ * effect, come before the variable's, and the last of a name wins. `described`
+ * are the descriptions a built profile of the stack already holds, by root
  * (src/profile/resolve.ts `Described`): a plugin whose root they cover is not
  * read again.
  */
-export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
-  harness: string, adapter: Adapter<A, E>, args: A, value: string | undefined, env: NodeJS.ProcessEnv, report: Report,
-  own: string[] = [], replace = false, described: Described[] = [],
-): Launch<A, E> {
+export function resolve<A>(
+  harness: string, adapter: Adapter<A>, args: A, value: string | undefined, env: NodeJS.ProcessEnv, report: Report,
+  own: string[] = [], described: Described[] = [],
+): Launch<A> {
   const known = new Map<string, Description>();
   for (const { root, description: path } of described) {
     try {
@@ -485,10 +482,17 @@ export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
       log.plugin.debug(`cannot read ${path}: ${(error as Error).message}`);
     }
   }
-  const names = [...own, ...entries(value)];
-  // Nothing to load or take away needs no cache, so it cannot fail for want of one.
-  const changes = names.length > 0 || (replace && args.profile.length > 0);
-  const cache = changes ? cacheRoot(env, replace || own.length > 0 ? 'profile' : VARIABLE) : null;
+  let names = [...own, ...entries(value)];
+  // Nothing to load needs no cache, so it cannot fail for want of one.
+  const label = own.length > 0 ? 'profile' : VARIABLE;
+  let cache = names.length > 0 ? cacheRootIfAny(env, label) : null;
+  if (names.length > 0 && cache === null) {
+    // No cache to translate into: the launch starts without the plugins rather
+    // than not starting at all, and says so (as a launch without a home does).
+    log.plugin.warn(`${label}: XDG_CACHE_HOME and HOME are unset; skipping plugins that need translating`);
+    names = [];
+    cache = null;
+  }
   const byName = new Map<string, LaunchPlugin>();
   for (const [i, entry] of names.entries()) {
     const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? 'profile' : VARIABLE,
@@ -497,17 +501,7 @@ export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
     byName.delete(plugin.name);
     byName.set(plugin.name, plugin);
   }
-  const profile = args.profile.map((entry) => {
-    const description = readDescription(entry.description);
-    return { name: description.manifest.name, description, entry };
-  });
-  const replaces = (plugin: ProfilePlugin<E>) => replace || byName.has(plugin.name);
-  return {
-    args, cache, report,
-    kept: profile.filter((plugin) => !replaces(plugin)),
-    replaced: profile.filter(replaces),
-    plugins: [...byName.values()],
-  };
+  return { args, cache, report, plugins: [...byName.values()] };
 }
 
 /** One POSIX shell word, always quoted. */
@@ -515,9 +509,10 @@ const quote = (value: string) => "'" + value.replace(/'/g, `'"'"'`) + "'";
 
 /**
  * The profile in effect: the one the picker resolved, handed over in
- * AGENT_DISTRO_PROFILE, else this launch's own resolution.
+ * AGENT_DISTRO_PROFILE, else this launch's own resolution; null when there is
+ * none at all.
  */
-function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved {
+function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved | null {
   const handed = env.AGENT_DISTRO_PROFILE;
   if (handed) {
     let value: unknown;
@@ -529,7 +524,7 @@ function profileInEffect(info: Info, env: NodeJS.ProcessEnv): Resolved {
     if (!isResolved(value)) throw new LaunchError('AGENT_DISTRO_PROFILE is not a resolved profile; unset it');
     return value;
   }
-  return resolveProfile(info, select(undefined, workingDirectory(), env, info), env);
+  return resolveProfile(info, select(undefined, workingDirectory(), env), env);
 }
 
 /**
@@ -570,25 +565,24 @@ export function shell(
  * What a launch says about itself: the profile at info when one was chosen
  * here, the rest at debug. `settings` is this harness's section of the
  * profile's, absent for a harness it says nothing about, and `opted` whether
- * `AGENT_DISTRO_SETTINGS=0` left everything the profile sets out.
+ * `AGENT_DISTRO_SETTINGS=0` left everything the profile sets out. With no
+ * profile in effect, nothing was added to the harness.
  */
-function describe<A extends { profile: E[] }, E extends ProfileEntry>(
-  harness: string, profile: Resolved, launch: Launch<A, E>, launched: string,
+function describe<A>(
+  harness: string, profile: Resolved | null, launch: Launch<A>, launched: string,
   settings: SettingsSection | undefined, opted: boolean,
 ) {
-  if (profile.source === 'repository' || profile.source === 'variable') {
+  if (profile?.source === 'repository' || profile?.source === 'variable') {
     log.profile.info(`using ${nameText(profile)} (${sourceText(profile)}) · ${SITE}`);
   }
-  log.profile.debug(`profile ${nameText(profile)}, ${sourceText(profile)}`);
-  for (const plugin of launch.kept) log.plugin.debug(`${plugin.description.root}: built in, as ${plugin.name}`);
-  for (const plugin of launch.replaced) log.plugin.debug(`${plugin.description.root}: built in, replaced`);
+  log.profile.debug(profile ? `profile ${nameText(profile)}, ${sourceText(profile)}` : 'no profile in effect');
   for (const plugin of launch.plugins) {
-    const from = plugin.from === 'profile' ? `profile ${profile.name}` : plugin.from;
+    const from = plugin.from === 'profile' ? `profile ${profile?.name ?? ''}` : plugin.from;
     log.plugin.debug(`${plugin.description.root}: from ${from}, as ${plugin.name}, translated at ${plugin.translation}`);
   }
-  for (const path of profile.paths) log.profile.debug(`PATH gains ${path}`);
+  for (const path of profile?.paths ?? []) log.profile.debug(`PATH gains ${path}`);
   if (opted) log.profile.debug('AGENT_DISTRO_SETTINGS=0: no environment or settings from the profile');
-  else {
+  else if (profile) {
     for (const [name, value] of Object.entries(profile.env)) {
       log.profile.debug(typeof value === 'string' ? `exports ${name}=${value}`
         : `prompts for ${name}${value.hint ? ` (${value.hint})` : ''}`);
@@ -606,22 +600,20 @@ export async function main(argsPath: string): Promise<number> {
   // reports the same profile failure, not by whichever harness was launched.
   let logger = log.profile;
   try {
-    const profile = profileInEffect(args.info, process.env);
+    const profile = profileInEffect(args, process.env);
     logger = log.plugin;
     const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
-    // The built-in profile, the one this launcher was built with, keeps its
-    // plugins under any composed over it.
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
-      profile.plugins, !profile.keepsBuiltIn, profile.descriptions ?? []);
+      profile?.plugins ?? [], profile?.descriptions ?? []);
     logger = log.harness(args.harness);
     const launched = adapter.launch(launch);
     // `AGENT_DISTRO_SETTINGS=0` is plugins only: the profile sets nothing, and
     // a secret variable is not this launch's to export either — the launcher
     // prompts for it after this shell, so its value is never a file or an argv.
     const opted = process.env.AGENT_DISTRO_SETTINGS === '0';
-    const settings = opted ? undefined : profile.settings[args.harness];
+    const settings = opted ? undefined : profile?.settings[args.harness];
     describe(args.harness, profile, launch, launched, settings, opted);
-    process.stdout.write(shell(launched, opted ? {} : profile.env, settings, profile.paths,
+    process.stdout.write(shell(launched, opted || !profile ? {} : profile.env, settings, profile?.paths ?? [],
       log.unknown ? log.level : null));
   } catch (error) {
     if (!(error instanceof LaunchError) && !isSystemError(error)) throw error;

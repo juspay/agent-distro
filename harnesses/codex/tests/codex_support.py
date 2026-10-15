@@ -7,10 +7,22 @@ import sys
 import tomllib
 
 expected = json.loads(sys.argv[1])
-marketplace = sys.argv[2]
+# A plugin whose name contains "." cannot be enabled with Codex's `-c` — its
+# key splits at every dot, and a quoted key does not take — so the adapter
+# registers its marketplace and leaves the plugin disabled, saying so. Every
+# check over this support is about the plugins a launch does enable.
+expected = {name: names for name, names in expected.items() if '.' not in name}
+# A plugin gets a marketplace of its own, named after its cache key
+# (src/harness/codex.ts), so all argv[2] can carry is the prefix they share;
+# a check that needs a marketplace derives it from `codex plugin list --json`.
+marketplace_prefix = sys.argv[2]
 home = Path.home()
 codex_home = home / 'relocated-codex'
 codex_home.mkdir()
+# Where Codex keeps its installs, and where the adapter keeps the translations
+# it registers as marketplaces (src/plugin/launch.ts); neither is a store path.
+install_cache = codex_home / 'plugins' / 'cache'
+translations = Path(os.environ.get('XDG_CACHE_HOME') or home / '.cache') / 'agent-distro' / 'plugins'
 env = dict(os.environ, CODEX_HOME=str(codex_home), AGENT_DISTRO_SETTINGS='0')
 config = codex_home / 'config.toml'
 config.write_text('# personal settings\nmodel = "my-model"\n[mcp_servers.personal]\ncommand = "true"\n')
@@ -30,8 +42,15 @@ def with_plugins(plugins):
 
 
 def run(*args, launcher='codex', plugins=None, **kwargs):
-    return subprocess.run([launcher, *args], env=with_plugins(plugins), text=True,
-                          capture_output=True, timeout=60, **kwargs)
+    """One Codex run. A caller's `check=True` still raises, but with the
+    command's own words: `subprocess`'s own error throws the stderr away, and
+    that is the evidence a failing check needs."""
+    check = kwargs.pop('check', False)
+    result = subprocess.run([launcher, *args], env=with_plugins(plugins), text=True,
+                            capture_output=True, timeout=60, **kwargs)
+    if check:
+        assert result.returncode == 0, (result.stdout, result.stderr)
+    return result
 
 
 def assert_kolu_server(servers):
@@ -57,18 +76,55 @@ def assert_kolu_server(servers):
 
 
 def upstream(*args):
+    # A launcher with no profile: what Codex sees from config.toml alone.
     return subprocess.run(['codex-upstream', *args], env=env, text=True,
                           capture_output=True, timeout=60, check=True)
 
 
-def marketplace_root():
-    marketplaces = json.loads(upstream('plugin', 'marketplace', 'list', '--json').stdout)
-    return next(m['root'] for m in marketplaces['marketplaces'] if m['name'] == marketplace)
+def installed_plugins(launcher='codex', plugins=None):
+    """Codex's installed plugins during a launch, keyed by pluginId.
+
+    A launch registers its marketplaces with `-c` and writes none of them, so
+    only a launcher's own invocation lists them; codex-upstream lists nothing.
+    """
+    listing = run('plugin', 'list', '--json', launcher=launcher, plugins=plugins, check=True)
+    return {plugin['pluginId']: plugin for plugin in json.loads(listing.stdout)['installed']}
 
 
-def installed_plugins():
-    installed = json.loads(upstream('plugin', 'list', '--json').stdout)['installed']
-    return {p['pluginId']: p for p in installed}
+def launched_plugins(launcher='codex', plugins=None):
+    """The same, keyed by name: a launch registers each plugin once, under its
+    own `agent-distro-` marketplace."""
+    by_name = {}
+    for plugin in installed_plugins(launcher, plugins).values():
+        assert plugin['marketplaceName'].startswith(marketplace_prefix), plugin
+        assert plugin['name'] not in by_name, (plugin, by_name)
+        by_name[plugin['name']] = plugin
+    return by_name
+
+
+def marketplace_of(name, launcher='codex', plugins=None):
+    """The marketplace a launch installs `name` under. It is named after the
+    plugin's content, so it is the same for every launch of that content and
+    another one once the plugin is rebuilt."""
+    return launched_plugins(launcher, plugins)[name]['marketplaceName']
+
+
+def plugin_id(name, launcher='codex', plugins=None):
+    """`<name>@<marketplace>`, as Codex keys a plugin's own settings."""
+    return launched_plugins(launcher, plugins)[name]['pluginId']
+
+
+def marketplace_root(name, launcher='codex', plugins=None):
+    """What Codex installed `name` from: the adapter's cached translation,
+    holding the plugin under its own name."""
+    root = launched_plugins(launcher, plugins)[name]['marketplaceSource']['source']
+    assert root.startswith(str(translations) + '/'), (root, str(translations))
+    return root
+
+
+def installs():
+    """The marketplace directories Codex has installed into."""
+    return {entry.name for entry in install_cache.iterdir()} if install_cache.exists() else set()
 
 
 def loaded_skills(launcher='codex', plugins=None):
@@ -111,8 +167,8 @@ def loaded_skills(launcher='codex', plugins=None):
 def assert_skills(launcher='codex'):
     skills = loaded_skills(launcher)
     expected_names = {plugin + ':' + skill for plugin, names in expected.items() for skill in names}
-    bundled = {name for name in skills if ':' in name}
-    assert bundled == expected_names, (bundled, expected_names)
+    from_plugins = {name for name in skills if ':' in name}
+    assert from_plugins == expected_names, (from_plugins, expected_names)
     assert 'personal' in skills
     return skills
 

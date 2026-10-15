@@ -1,7 +1,10 @@
 /**
  * AGENT_DISTRO_PLUGINS without a VM or a harness: cache keys, re-translation,
- * name-based precedence, a profile's plugins replacing the built-in ones, the
- * cache's upkeep, the shell a launcher evaluates, and the launches it must fail.
+ * name-based precedence between the profile in effect's plugins and the
+ * variable's, the cache's upkeep, the shell a launcher evaluates, the launches
+ * it must fail, and one launch through `launch-cli.mjs` with AI_PROFILE set —
+ * the argument object only the launcher writes. How the stack composes into
+ * that one profile is check-profile.ts's.
  *
  * Usage: node check-launch-plugins.ts SRC STORE_PLUGIN STORE_SUBDIRECTORY_PLUGIN NIX_HASH PROMPT_SECRETS_NIX
  *
@@ -22,7 +25,6 @@ import { test } from 'node:test';
 
 const [src, storePlugin, storeSubdirectoryPlugin, nixHash, promptSecrets] = process.argv.slice(2);
 const launch = await import(join(src, 'plugin/launch.ts'));
-const launchModule = launch;
 const { adapter: claude } = await import(join(src, 'harness/claude.ts'));
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
 const CLI = join(src, 'plugin/launch-cli.mjs');
@@ -41,45 +43,40 @@ function plugin(name: string, skill = 'hello', body = 'Hello'): string {
   return root;
 }
 
-/** A profile entry as a launcher's ARGS_JSON lists it. */
-function profileEntry(root: string, dir: string) {
+/** A description a built profile of the stack holds for a plugin root (`Described`). */
+function describedPlugin(root: string) {
   const description = join(temporary(), 'description.json');
   writeFileSync(description, JSON.stringify({
     root, version: '1.0.0', manifest: { $schema: SCHEMA, name: JSON.parse(readFileSync(join(root, 'plugin.json'), 'utf8')).name },
     skills: {}, mcpServers: {}, reports: [],
   }));
-  return { description, dir };
+  return { root, description };
 }
 
-const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', env: {}, settings: {} }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
-const claudeArgs = (profile: unknown[] = []) => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile, info });
+const info = { nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
+const claudeArgs = () => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', ...info });
 
-function resolve(value: string, cache: string, profile: unknown[] = [], reports: string[] = [], adapter = claude) {
-  return launch.resolve('claude', adapter, claudeArgs(profile), value, { XDG_CACHE_HOME: cache },
-    (message: string) => reports.push(message));
-}
-
-/** `resolve` for a profile that does not include the built-in one, whose plugin is `own`. */
-function launch_(own: string, value: string, cache: string, profile: unknown[] = []) {
-  return launch.resolve('claude', claude, claudeArgs(profile), value, { XDG_CACHE_HOME: cache }, () => {}, [own], true);
+function resolve(value: string, cache: string, own: string[] = [], reports: string[] = [], adapter = claude) {
+  return launch.resolve('claude', adapter, claudeArgs(), value, { XDG_CACHE_HOME: cache },
+    (message: string) => reports.push(message), own);
 }
 
 /** The cache root `resolve` uses for an XDG_CACHE_HOME. */
 const cacheDir = (cache: string) => join(cache, 'agent-distro');
 
-function argsFile(profile: unknown[] = []) {
+function argsFile() {
   const args = join(temporary(), 'args.json');
-  writeFileSync(args, JSON.stringify(claudeArgs(profile)));
+  writeFileSync(args, JSON.stringify(claudeArgs()));
   return args;
 }
 
 /** The launch CLI, as a launcher runs it. */
-function run(value: string, env: Record<string, string | undefined> = {}, profile: unknown[] = []) {
+function run(value: string, env: Record<string, string | undefined> = {}) {
   const environment: Record<string, string> = {};
   for (const [name, item] of Object.entries({ PATH: process.env.PATH, XDG_CACHE_HOME: temporary(), AGENT_DISTRO_PLUGINS: value, ...env })) {
     if (item !== undefined) environment[name] = item;
   }
-  return spawnSync(process.execPath, [CLI, argsFile(profile)], { encoding: 'utf8', env: environment, timeout: 30_000 });
+  return spawnSync(process.execPath, [CLI, argsFile()], { encoding: 'utf8', env: environment, timeout: 30_000 });
 }
 
 /** What the launcher runs its harness with: `launched` from the shell the CLI prints. */
@@ -199,60 +196,57 @@ test('relative, trailing-slash and symlinked entries resolve to their directory'
 
 test('a translation is replaced only by name, and the variable wins', () => {
   const cache = temporary();
-  const profile = [profileEntry(plugin('kolu'), '/profile/kolu'), profileEntry(plugin('skills'), '/profile/skills')];
+  // The profile in effect's own plugin directories, which lead the variable's.
+  const own = [plugin('kolu'), plugin('skills')];
   const early = plugin('kolu', 'early');
   const late = plugin('kolu', 'late');
   const extra = plugin('extra');
-  const result = resolve([early, extra, late].join(':'), cache, profile);
-  assert.deepEqual(result.kept.map((p: any) => p.entry.dir), ['/profile/skills']);
-  assert.deepEqual(result.replaced.map((p: any) => p.name), ['kolu']);
-  assert.deepEqual(result.plugins.map((p: any) => [p.name, p.description.root]), [['extra', extra], ['kolu', late]]);
+  const result = resolve([early, extra, late].join(':'), cache, own);
+  assert.deepEqual(result.plugins.map((p: any) => [p.name, p.description.root]),
+    [['skills', own[1]], ['extra', extra], ['kolu', late]]);
   const words = claude.launch(result);
-  assert.equal(words, ['--plugin-dir /profile/skills', ...result.plugins.map((p: any) => `--plugin-dir ${p.translation}`)].join(' '));
-  assert.ok(!words.includes('/profile/kolu'), 'the replaced profile plugin is gone');
+  // Every directory the harness is handed is a translation, the profile's too.
+  assert.equal(words, result.plugins.map((p: any) => `--plugin-dir ${p.translation}`).join(' '));
+  assert.ok(!words.includes(own[0]), 'the replaced profile plugin is gone');
+  // A name matches whatever the versions are.
   const versioned = plugin('skills');
   writeFileSync(join(versioned, 'plugin.json'), JSON.stringify({ $schema: SCHEMA, name: 'skills', version: '0.0.1' }));
-  assert.deepEqual(resolve(versioned, cache, profile).replaced.map((p: any) => p.name), ['skills']);
+  assert.deepEqual(resolve(versioned, cache, own).plugins.map((p: any) => p.description.root), [own[0], versioned]);
 });
 
 test('no entries load nothing and need no cache', () => {
   assert.deepEqual(launch.entries(''), []);
   assert.deepEqual(launch.entries('::a::b:'), ['a', 'b']);
-  const profile = [profileEntry(plugin('kept'), '/profile/kept')];
-  const result = run(':', { XDG_CACHE_HOME: undefined, HOME: undefined }, profile);
+  const result = run(':', { XDG_CACHE_HOME: undefined, HOME: undefined });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(launched(result.stdout), '--plugin-dir /profile/kept');
+  assert.equal(launched(result.stdout), '');
 });
 
-test('a profile chosen positionally replaces every built-in plugin, ahead of the variable', () => {
+test("a profile's plugins lead the variable's, which still wins by name", () => {
   const cache = temporary();
-  const kept = profileEntry(plugin('kept'), '/profile/kept');
   const own = plugin('own');
   const extra = plugin('extra');
-  const launch = launch_(own, extra, cache, [kept]);
-  assert.deepEqual(launch.kept, []);
-  assert.deepEqual(launch.replaced.map((p: any) => p.name), ['kept']);
-  assert.deepEqual(launch.plugins.map((p: any) => p.name), ['own', 'extra']);
-  // The variable still wins over the profile by name.
+  assert.deepEqual(resolve(extra, cache, [own]).plugins.map((p: any) => p.name), ['own', 'extra']);
   const same = plugin('own', 'other');
-  assert.equal(launch_(own, same, cache, [kept]).plugins[0].description.root, same);
-  // Taking the built-in plugins away needs no cache when nothing is added,
-  // but a launch that does must name the profile when there is none.
-  const homeless = (value: string, replacement: string[]) => () => launchModule.resolve('claude', claude, claudeArgs([kept]),
-    value, {}, () => {}, replacement, true);
-  assert.throws(homeless('', [own]), /profile: cannot cache translations/);
-  assert.throws(homeless(extra, []), /profile: cannot cache/);
+  assert.equal(resolve(same, cache, [own]).plugins[0].description.root, same);
+  // A launch with anything to translate and nowhere to cache starts without
+  // them, saying so on stderr, rather than not starting at all.
+  const homeless = (value: string, roots: string[]) =>
+    launch.resolve('claude', claude, claudeArgs(), value, {}, () => {}, roots);
+  assert.deepEqual(homeless('', [own]).plugins, []);
+  assert.deepEqual(homeless(extra, []).plugins, []);
 });
 
-test('a profile composed over the built-in one keeps its plugins, replacing only those of the same name', () => {
-  const cache = temporary();
-  const kept = profileEntry(plugin('kept'), '/profile/kept');
-  const shadowed = profileEntry(plugin('own'), '/profile/own');
-  const own = plugin('own', 'repo');
-  const launch = launchModule.resolve('claude', claude, claudeArgs([kept, shadowed]), '', { XDG_CACHE_HOME: cache }, () => {}, [own]);
-  assert.deepEqual(launch.kept.map((p: any) => p.name), ['kept']);
-  assert.deepEqual(launch.replaced.map((p: any) => p.name), ['own']);
-  assert.deepEqual(launch.plugins.map((p: any) => p.description.root), [own]);
+test('a description a built profile holds is used instead of reading the root', () => {
+  const root = plugin('held');
+  const held = describedPlugin(root);
+  // Only the description names it this, so a re-read of the root cannot.
+  const description = JSON.parse(readFileSync(held.description, 'utf8'));
+  description.manifest.name = 'from-the-description';
+  writeFileSync(held.description, JSON.stringify(description));
+  const result = launch.resolve('claude', claude, claudeArgs(), '', { XDG_CACHE_HOME: temporary() },
+    () => {}, [root], [held]);
+  assert.deepEqual(result.plugins.map((p: any) => p.name), ['from-the-description']);
 });
 
 test('the shell a launcher evaluates', () => {
@@ -262,7 +256,7 @@ test('the shell a launcher evaluates', () => {
     LITELLM_API_KEY: { secret: true, hint: "it's here" },
     SECOND_KEY: { secret: true },
   };
-  const text = launchModule.shell("-e '/a b'", env, { modelRoles: { default: 'litellm/large' } },
+  const text = launch.shell("-e '/a b'", env, { modelRoles: { default: 'litellm/large' } },
     ['/nix/store/x/bin', '/nix/store/y/bin']);
   const output = spawnSync(BASH, ['-euc',
     `PATH=/usr/bin; ${text} printf '%s\\n' "$launched" "\${#profile_env_secrets[@]}" "\${profile_env_secrets[1]}"`
@@ -276,7 +270,7 @@ test('the shell a launcher evaluates', () => {
     'https://gateway.example', '1', '/nix/store/x/bin:/nix/store/y/bin:/usr/bin',
   ]);
   const none = spawnSync(BASH, ['-euc',
-    `${launchModule.shell('', {}, undefined, [])} printf '%s|%s|%s' "\${profile_env_secrets[*]}" "$profile_settings" "\${AGENT_DISTRO_PROFILE-unset}"`],
+    `${launch.shell('', {}, undefined, [])} printf '%s|%s|%s' "\${profile_env_secrets[*]}" "$profile_settings" "\${AGENT_DISTRO_PROFILE-unset}"`],
   { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}', PATH: process.env.PATH } });
   assert.equal(none.stdout, '||unset', none.stderr);
 });
@@ -287,8 +281,8 @@ test('a launcher asks for a secret the environment does not set, and refuses wit
   const source = readFileSync(promptSecrets, 'utf8');
   const fragment = source.slice(source.indexOf("''\n") + 3, source.lastIndexOf("''"))
     .replaceAll("''${", '${').replace('${gum}/bin/gum', 'gum');
-  const shell = (env: Parameters<typeof launchModule.shell>[1], tail: string, extra: NodeJS.ProcessEnv = {}) =>
-    spawnSync(BASH, ['-euc', `${launchModule.shell('', env, undefined, [])}${fragment}${tail}`],
+  const shell = (env: Parameters<typeof launch.shell>[1], tail: string, extra: NodeJS.ProcessEnv = {}) =>
+    spawnSync(BASH, ['-euc', `${launch.shell('', env, undefined, [])}${fragment}${tail}`],
       { encoding: 'utf8', env: { PATH: process.env.PATH, ...extra } });
   const secret = { LITELLM_API_KEY: { secret: true, hint: 'ask the team' } };
   // Not set, no terminal: the variable and its hint are named, and the launch stops.
@@ -385,8 +379,10 @@ test('the cache directory must be absolute and writable', () => {
   assert.equal(unwritable.status, 1, unwritable.stderr);
   assert.match(unwritable.stderr, /^agent-distro plugin: error: .*ENOTDIR/);
   const homeless = run(plugin('homeless'), { XDG_CACHE_HOME: undefined, HOME: undefined });
-  assert.equal(homeless.status, 1, homeless.stderr);
-  assert.match(homeless.stderr, /XDG_CACHE_HOME and HOME are unset/);
+  // Nowhere to cache is not an error: the plugins that need translating are
+  // skipped, said so, and the launch carries on.
+  assert.equal(homeless.status, 0, homeless.stderr);
+  assert.match(homeless.stderr, /XDG_CACHE_HOME and HOME are unset; skipping plugins that need translating/);
   const cwd = temporary();
   const relativeCache = spawnSync(process.execPath, [CLI, argsFile()], {
     encoding: 'utf8', cwd, env: { PATH: process.env.PATH, XDG_CACHE_HOME: 'rel', AGENT_DISTRO_PLUGINS: plugin('relative') },
@@ -498,4 +494,34 @@ test('launch files are reused, and old ones removed when a new one is written', 
   utimesSync(first, old, old);
   const second = launch.writeAddressed(directory, { b: 2 });
   assert.deepEqual(readdirSync(directory), [relative(directory, second)]);
+});
+
+test('the CLI resolves AI_PROFILE itself, as a direct launch does', () => {
+  // A launch runs `launch-cli.mjs`, not the library inside this process: the
+  // launcher passes one flat argument object, and nothing here type-checks it
+  // (`claudeArgs` above is that object for the in-process cases). A profile
+  // directory, resolved through the CLI, is what Home Manager's commands and
+  // a direct `AI_PROFILE=… omp` both do.
+  const root = temporary();
+  const profileDir = join(root, 'smoke');
+  mkdirSync(profileDir, { recursive: true });
+  writeFileSync(join(profileDir, 'agent-distro.nix'), '{ name = "smoke"; description = "read at launch"; }');
+  // The one `nix eval` the resolver makes, answered by a stub: no store, no
+  // network, no real nixpkgs. What it prints is `evaluate.nix`'s own shape,
+  // which src/profile/resolve.ts checks (`isEvaluated`).
+  const entry = join(root, 'evaluated.json');
+  writeFileSync(entry, JSON.stringify({
+    name: 'smoke', description: 'read at launch', plugins: [],
+    env: { SMOKE_MARK: 'here' }, settings: {}, deprecated: [], packages: [],
+  }));
+  const bin = join(root, 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'nix'), `#!/bin/sh\ncat ${entry}\n`, { mode: 0o755 });
+
+  const result = run('', { AI_PROFILE: profileDir, PATH: `${bin}:${process.env.PATH}` });
+  assert.equal(result.status, 0, result.stderr);
+  // The profile reached the shell the launcher evaluates: its `env` is
+  // exported there, and the launch names it on stderr.
+  assert.match(result.stdout, /^export SMOKE_MARK='here'$/m, result.stdout);
+  assert.match(result.stderr, /using smoke \(from AI_PROFILE=/, result.stderr);
 });

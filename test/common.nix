@@ -1,19 +1,5 @@
 # Shared VM setup only. Agent discovery protocols belong in their own tests.
 {
-  # Simulate a rebuild with new plugin store paths but the same profile contents.
-  updatedLaunchers = mkLaunchers: pkgs: profile: mkLaunchers {
-    inherit pkgs;
-    profile = profile // {
-      plugins = map
-        (plugin: pkgs.runCommand "updated-plugin" { } ''
-          cp -r ${plugin} "$out"
-          chmod u+w "$out"
-          touch "$out/rebuild-marker"
-        '')
-        profile.plugins;
-    };
-  };
-
   baseNode = {
     environment.variables.PI_SKIP_VERSION_CHECK = "1";
     users.users.testuser = { isNormalUser = true; uid = 1000; };

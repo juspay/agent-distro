@@ -12,17 +12,17 @@ nix run github:juspay/agent-distro
 Installs keep themselves up to date from the project's binary cache and never
 compile. A Linux machine whose Nix will not trust that cache — a shared host
 where you are not a trusted user — updates too, from the content-addressed
-bundles published for every revision (built with Nix 2.34.x: Nix 2.35 changed
-how a self-referential path is addressed, and a host on it cannot take them);
-a Mac needs the cache key or a trusted user, because a rewritten Mach-O does
-not run on arm64 macOS.
+store paths published for every revision (built with Nix 2.34.x: Nix 2.35
+changed how a self-referential path is addressed, and a host on it cannot take
+them); a Mac needs the cache key or a trusted user, because a rewritten Mach-O
+does not run on arm64 macOS.
 
 Everything else is on the website, **<https://agent-distro.nixos.asia>**:
 
 - [Quick start](https://agent-distro.nixos.asia/#quick-start)
 - [Install and keep updated](https://agent-distro.nixos.asia/#install)
 - [The binary cache](https://agent-distro.nixos.asia/#binary-cache)
-- [Build your own distribution](https://agent-distro.nixos.asia/#build-your-own-distribution)
+- [Package layout](https://agent-distro.nixos.asia/#package-layout)
 - [Profiles](https://agent-distro.nixos.asia/#profiles)
 - [Harnesses](https://agent-distro.nixos.asia/#harnesses)
 - [How it works](https://agent-distro.nixos.asia/#how-it-works)

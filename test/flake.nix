@@ -1,5 +1,5 @@
 {
-  description = "Launcher integration tests for the built-in profile, test profiles and profiles at launch";
+  description = "Launcher integration tests for the one package, and for profiles read at launch";
   inputs = {
     agent-distro.url = "path:..";
     home-manager.url = "github:nix-community/home-manager";
@@ -15,7 +15,6 @@
       inherit (nixpkgs) lib;
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-      inherit (agent-distro.lib) mkLaunchers;
       # Kolu's plugin as kolu ships it: a directory inside a store path.
       koluPlugin = "${kolu}/agent-plugin";
       # A team's profile as a repository would carry one: its skills, and the
@@ -47,29 +46,41 @@
           };
         };
       };
-      # Profiles are tested through the public builder, the same way a
-      # third-party distribution reaches them.
-      suite = features: profile: import ./lib.nix {
-        inherit pkgs profile mkLaunchers features koluPlugin;
-        launchers = mkLaunchers { inherit pkgs profile; };
+      # The same profile with its plugins rebuilt to new store paths: what a
+      # launch sees when a profile's own content changed.
+      rebuilt = profile: profile // {
+        plugins = map
+          (plugin: pkgs.runCommand "updated-plugin" { } ''
+            cp -r ${plugin} "$out"
+            chmod u+w "$out"
+            touch "$out/rebuild-marker"
+          '')
+          profile.plugins;
       };
-      # No plugins of its own, so kolu arrives only through AGENT_DISTRO_PLUGINS.
-      vanilla = suite [ "koluLaunch" ] agent-distro.profiles.vanilla;
-      gateway = suite [ "plugins" "gateway" "kolu" ] gatewayProfile;
+      # Profiles are tested through the public builder and read from the store,
+      # the way a caller pinning one reaches them.
+      built = list: map (profile: agent-distro.lib.mkProfile { inherit system profile; }) list;
+      suite = features: profiles: import ./lib.nix {
+        inherit pkgs nixpkgs features koluPlugin;
+        profiles = built profiles;
+        updated = built (map rebuilt profiles);
+      };
+      # No profile at all, so kolu arrives only through AGENT_DISTRO_PLUGINS.
+      plain = suite [ "koluLaunch" ] [ ];
+      gateway = suite [ "plugins" "gateway" "kolu" ] [ gatewayProfile ];
       # Test-only: the plugin shapes the Agent Plugins spec allows beyond what
       # the real profiles happen to use.
-      fixtures = suite [ "plugins" "spec" ] {
+      fixtures = suite [ "plugins" "spec" ] [ {
         name = "fixtures";
         description = "Agent Plugins test fixtures";
         plugins = [ ./fixtures/spec-plugin ./fixtures/mcp-only ./fixtures/my-skills ];
-      };
+      } ];
       runtime = import "${agent-distro}/lib/runtime.nix" pkgs;
-      reserved = [ "default" ] ++ (import "${agent-distro}/lib/discover-harnesses.nix").ordered;
       named = profile: lib.mapAttrs' (check: lib.nameValuePair "${profile}-${check}");
     in
     {
       checks.${system} =
-        named "vanilla" vanilla
+        named "plain" plain
         // named "gateway" gateway
         // named "fixtures" fixtures
         // lib.listToAttrs (lib.concatMap
@@ -114,9 +125,8 @@
               # the real one; every harness is built against this stub's argv
               # printer, and only OpenCode's launcher is realized.
               argv = pkgs.writeShellScriptBin "opencode" ''printf '%s\n' "$*"'' // { version = "0"; };
-              launcher = (mkLaunchers {
+              launcher = (agent-distro.lib.mkLaunchers {
                 inherit pkgs;
-                profile = agent-distro.profiles.vanilla;
                 sources = _: _: argv;
               }).opencode;
             in
@@ -141,25 +151,22 @@
               touch "$out"
             '';
           # `--list --json` alone, without a VM: its type, the picker's menu
-          # with the profile in effect, `--list`, versions stripped of `+`
-          # suffixes, and the bundle's profile.json.
-          list-json =
-            let inherit (import "${agent-distro}/profiles/registry.nix") default;
-            in
-            pkgs.runCommand "list-json-check" { } ''
-              ${runtime.node} ${./check-list-json.ts} ${runtime.tree}/src \
-                ${lib.getExe agent-distro.packages.${system}.default} \
-                ${default}=${agent-distro.packages.${system}.${default}}
-              touch "$out"
-            '';
+          # with the profile in effect, `--list`, and versions stripped of `+`
+          # suffixes.
+          list-json = pkgs.runCommand "list-json-check" { } ''
+            ${runtime.node} ${./check-list-json.ts} ${runtime.tree}/src \
+              ${lib.getExe agent-distro.packages.${system}.default} \
+              ${agent-distro.packages.${system}.default}
+            touch "$out"
+          '';
           # Launchers name nixpkgs by a locked reference, fetched only for a
-          # profile with packages (lib/nixpkgs-reference.nix): no bundle holds
-          # its source.
-          vanilla-closure = pkgs.runCommand "vanilla-closure-check"
-            { closure = pkgs.closureInfo { rootPaths = [ agent-distro.packages.${system}.vanilla ]; }; } ''
+          # profile with packages (lib/nixpkgs-reference.nix): the package does
+          # not hold its source.
+          nixpkgs-reference = pkgs.runCommand "nixpkgs-reference-check"
+            { closure = pkgs.closureInfo { rootPaths = [ agent-distro.packages.${system}.default ]; }; } ''
             source=${lib.escapeShellArg (builtins.unsafeDiscardStringContext nixpkgs.outPath)}
             if grep -qxF "$source" "$closure/store-paths"; then
-              echo "the vanilla bundle's closure holds the nixpkgs source $source" >&2
+              echo "the package's closure holds the nixpkgs source $source" >&2
               exit 1
             fi
             # The reference instead.
@@ -183,8 +190,9 @@
           '';
           # Profiles read at launch, in a VM: paths and git+file: references,
           # discovery from a nested directory, precedence, the refusal of a
-          # package the binary cache lacks, and a copy of the Juspay profile's
-          # agent-distro.nix behaving as the built-in Juspay profile did.
+          # package the binary cache lacks, and a fixture copy of the Juspay
+          # profile's `agent-distro.nix` read at launch, the way a profile
+          # repository carries one.
           profiles = pkgs.testers.runNixOSTest (import ./test-profiles.nix {
             inherit pkgs agent-distro nixpkgs juspay-skills koluPlugin;
           });
@@ -226,34 +234,15 @@
           auto-update = pkgs.testers.runNixOSTest (import ./test-auto-update.nix {
             inherit pkgs agent-distro home-manager;
           });
-          # The update that takes the published content-addressed bundle
+          # The update that takes the published content-addressed package
           # instead of skipping, in a VM as an untrusted user.
           ca-update = pkgs.testers.runNixOSTest (import ./test-ca-update.nix {
             inherit pkgs agent-distro;
           });
           discovery = import ./test-discovery.nix { inherit pkgs agent-distro nixpkgs; };
-          reserved-profile = assert builtins.all
-            (name:
-              !(builtins.tryEval (agent-distro.lib.mkFlake {
-                profile = agent-distro.profiles.vanilla // { inherit name; };
-              })).success)
-            reserved;
-            pkgs.runCommand "reserved-profile" { nativeBuildInputs = [ pkgs.nix ]; } ''
-              export NIX_STATE_DIR="$TMPDIR/nix-state"
-              ${lib.concatMapStringsSep "\n" (name: ''
-                if nix-instantiate --eval --expr ${lib.escapeShellArg ''
-                  (import ${agent-distro}/lib/validate-profile.nix) { name = ${builtins.toJSON name}; }
-                ''} 2>error; then
-                  echo "Reserved profile was accepted: ${name}" >&2
-                  exit 1
-                fi
-                grep -F ${lib.escapeShellArg ''Profile "${name}" uses a reserved name; reserved names: ${lib.concatStringsSep ", " reserved}.''} error
-              '') reserved}
-              touch "$out"
-            '';
           packages = import ./test-packages.nix {
             inherit pkgs;
-            inherit mkLaunchers;
+            mkLaunchers = agent-distro.lib.mkLaunchers;
           };
           # `mkProfile`'s output, without a VM or a launch.
           mk-profile = import ./test-mk-profile.nix {

@@ -23,32 +23,12 @@ let
   '';
   # The command line that runs one module, e.g. `script "plugin/read.ts"`.
   script = module: "${node} ${tree}/src/${module}";
-  # The built-in profile every launcher accepts by name.
-  vanilla = import ../profiles/vanilla/agent-distro.nix;
-  # What the resolver knows at build time (src/profile/resolve.ts): the
-  # launcher's own profile, which is `vanilla`'s too when it is not vanilla,
-  # and the nixpkgs a profile's `packages` are evaluated against
-  # (lib/nixpkgs-reference.nix, from the flake input `nixpkgs`, and its store
-  # path, used when present), for this
-  # system. lib/mk-launchers.nix builds it once, for every adapter and the picker.
-  info = profile: nixpkgs: {
-    default = profile.name;
-    builtins = map
-      (p:
-        let
-          # A profile built in is never evaluated, so the resolver cannot
-          # report what it no longer reads: the build does.
-          warned = pkgs.lib.warnIf (p ? gateway)
-            "agent-distro: profile ${p.name}: `gateway` is no longer read; see https://agent-distro.nixos.asia/#profiles" p;
-        in
-        {
-          inherit (warned) name description;
-          # A distribution's own profile: what it exports and the harness
-          # settings it defaults, as an `agent-distro.nix` read at launch would.
-          env = warned.env or { };
-          settings = warned.settings or { };
-        })
-      ([ profile ] ++ pkgs.lib.optional (profile.name != vanilla.name) vanilla);
+  # What the resolver knows at build time (src/profile/resolve.ts `Info`): the
+  # nixpkgs a profile's `packages` are evaluated against (lib/nixpkgs-reference.nix,
+  # from the flake input `nixpkgs`, and its store path, used when present), for
+  # this system. A built profile's `reader` is the tree above, whose name a
+  # launch compares its own against (src/profile/resolve.ts).
+  info = nixpkgs: {
     nixpkgs = import ./nixpkgs-reference.nix pkgs nixpkgs;
     # Without its context, so the launchers do not hold it.
     nixpkgsPath = builtins.unsafeDiscardStringContext (toString pkgs.path);
@@ -69,18 +49,17 @@ rec {
   launcherInputs = { bash = pkgs.runtimeShell; env = "${pkgs.coreutils}/bin/env"; };
   # One plugin materialized as an Agent Plugins directory whose stdio servers
   # run through generated launchers: the build-time half of what the OMP and
-  # Codex adapters translate at launch, so a plugin built into a distribution
-  # starts its servers in the launch directory too.
+  # Codex adapters translate at launch (lib/mk-profile.nix uses it too).
   specPlugin = plugin: pkgs.runCommand "agent-plugin-spec" { } ''
     ${script "plugin/write-spec-plugin.ts"} "$out" ${pkgs.writeText "agent-plugin-spec-args.json" (builtins.toJSON (launcherInputs // { description = "${readPlugin plugin}"; }))}
   '';
-  # The shell every launcher runs before its harness: the profile in effect
-  # and its packages, its environment and its settings for this harness, and
-  # the plugins of that profile and of AGENT_DISTRO_PLUGINS, as `launched`,
-  # `profile_env_*` and `profile_settings`. `args` names the adapter
-  # (`harness`), the built-in profile's plugins (`profile`, each with its
-  # `description`) and the adapter's `info`; the launcher inputs ride along, so
-  # no adapter spells them. See src/plugin/launch.ts.
+  # The shell every launcher runs before its harness: the profiles in effect
+  # and their packages, the environment and settings they carry for this
+  # harness, and the plugins of those profiles and of AGENT_DISTRO_PLUGINS, as
+  # `launched`, `profile_env_*` and `profile_settings`. `args` is what the
+  # adapter needs beyond that; `harness` and the build's own `Info`
+  # (`runtime.info nixpkgs`) are seeded by lib/mk-launchers.nix, so no adapter
+  # spells them. See src/plugin/launch.ts.
   # Captured before eval, so a failed launch stops the launcher; the variables
   # are declared first, for shellcheck to see what the eval assigns.
   launchPlugins = args: ''

@@ -9,7 +9,7 @@ for plugin, names in expected.items():
 for plugin in plugins:
     run('plugin', 'validate', plugin['installPath'])
 
-# A user's extra plugin composes with the bundled roots, including a spaced path.
+# A user's extra plugin composes with the profile's roots, including a spaced path.
 personal = home / 'personal plugin'
 (personal / '.claude-plugin').mkdir(parents=True)
 (personal / '.claude-plugin/plugin.json').write_text('{"name":"personal"}')

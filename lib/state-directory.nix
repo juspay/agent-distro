@@ -5,7 +5,7 @@
 # AI_PROFILE, whose profiles do not change what is installed.
 { xdgStateHome, flake, profile }:
 let
-  # `current`, `last-success` and the updated bundles live under this subdir.
+  # `current`, `last-success` and the updated package live under this subdir.
   source = builtins.hashString "sha256" (builtins.toJSON { inherit flake profile; });
 in
 "${xdgStateHome}/agent-distro/${source}"

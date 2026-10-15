@@ -22,7 +22,7 @@ import { emitKeypressEvents, createInterface, type Key } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { WriteStream } from 'node:tty';
 import { parseArgs } from 'node:util';
-import { nameText, parseListing, sourceText, type InEffect, type Listing, type Profile } from '../listing.ts';
+import { nameText, parseListing, sourceText, type Harness, type InEffect, type Listing } from '../listing.ts';
 import { log } from '../log.ts';
 import { isResolved } from '../profile/resolve.ts';
 import { probe, spec, type Io, type Scheme, type Status } from './auth.ts';
@@ -126,9 +126,13 @@ const PLAIN: Style = { bold: '', dim: '', accent: '', version: '' };
 
 /** What is chosen, and how keys change it; nothing about drawing. */
 export class Menu {
-  /** The profile in effect, with the launcher's harnesses. */
-  readonly active: Profile;
-  /** Where that profile came from, in a few words. */
+  /** The harnesses the package carries, in menu order. */
+  readonly harnesses: Harness[];
+  /** The profile in effect's name, empty when none is in effect. */
+  readonly name: string;
+  /** What that profile says it is; empty when none is in effect. */
+  readonly description: string;
+  /** Where that profile came from, in a few words; empty when none is. */
   readonly source: string;
   /** The harness last chosen, which keeps its dot. */
   readonly remembered: string;
@@ -138,18 +142,19 @@ export class Menu {
   filtering = false;
 
   constructor(listing: Listing, remembered = '', profile?: InEffect) {
-    const builtIn = listing.profiles[0];
-    // Named with the profiles it is composed over: `repo + juspay`.
-    this.active = profile ? { ...builtIn, name: nameText(profile), description: profile.description } : builtIn;
-    this.source = sourceText(profile ?? { source: 'builtin', origin: builtIn.name });
+    this.harnesses = listing.harnesses;
+    // Named with the profiles it is composed over: `juspay + repo`.
+    this.name = profile ? nameText(profile) : '';
+    this.description = profile?.description ?? '';
+    this.source = profile ? sourceText(profile) : '';
     // Releases that chose a profile too remembered `profile/harness`.
     this.remembered = remembered.split('/').at(-1) ?? '';
-    this.index = Math.max(0, this.active.harnesses.findIndex((h) => h.name === this.remembered));
+    this.index = Math.max(0, this.harnesses.findIndex((h) => h.name === this.remembered));
   }
 
   rows(): Row[] {
     const query = this.query.toLowerCase();
-    return this.active.harnesses.filter((r) => (r.title + ' ' + r.tagline).toLowerCase().includes(query));
+    return this.harnesses.filter((r) => (r.title + ' ' + r.tagline).toLowerCase().includes(query));
   }
 
   /** The highlighted row, unless the filter leaves none. */
@@ -162,11 +167,11 @@ export class Menu {
     const current = this.current();
     this.query = '';
     this.filtering = false;
-    this.index = Math.max(0, current ? this.active.harnesses.indexOf(current) : 0);
+    this.index = Math.max(0, current ? this.harnesses.indexOf(current) : 0);
   }
 
   counts(): string {
-    return `${this.active.harnesses.length} harnesses`;
+    return `${this.harnesses.length} harnesses`;
   }
 
   /** The keys that do something now, as [key, what it does]. */
@@ -222,7 +227,7 @@ export type Layout = { x: number; y: number; inner: number; list: number; panel:
  * and wraps the panel beyond that, so nothing inside is ever cut.
  */
 export function layout(menu: Menu, columns: number, rows: number): Layout | undefined {
-  const all: Row[] = menu.active.harnesses;
+  const all: Row[] = menu.harnesses;
   const longest = (texts: string[]) => Math.max(0, ...texts.map(width));
   const title = longest(all.map((h) => h.title));
   const version = longest(all.map((h) => h.version));
@@ -243,10 +248,11 @@ export function layout(menu: Menu, columns: number, rows: number): Layout | unde
   return { x, y, inner, list, panel, title, version, profile, body, terminal: columns };
 }
 
-/** The profile row's text: the name, its description, and where it came from. */
-const profileLine = (menu: Menu) => [menu.active.name, menu.active.description, menu.source].filter(Boolean).join(' · ');
+/** The profile row's text: the name, its description, and where it came from; empty with no profile. */
+const profileLine = (menu: Menu) => [menu.name, menu.description, menu.source].filter(Boolean).join(' · ');
 
-const brand = (menu: Menu) => 'agent-distro · ' + menu.active.name;
+/** The header: the program, and the profile in effect when one is. */
+const brand = (menu: Menu) => ['agent-distro', menu.name].filter(Boolean).join(' · ');
 
 /** One list row, `l.list` cells wide: pointer, remembered mark, status mark, title, version chip. */
 function listRow(row: Row, selected: boolean, remembered: boolean, l: Layout, style: Style): string {
@@ -290,13 +296,13 @@ export function render(menu: Menu, l: Layout, style: Style): string {
   lines.push(edge('╭─ ') + paint(bold, 'agent-distro') + paint(dim, name.slice('agent-distro'.length)) + edge(' ' + '─'.repeat(fill) + ' ') + counts + edge(' ─╮'));
 
   // The profile row, under the header and above the columns: the name in
-  // accent, then the description and where the profile came from.
-  const profile = menu.active;
+  // accent, then the description and where the profile came from. Absent, with
+  // no profile in effect, and then `l.profile` is zero.
   const profileLines = wrap(profileLine(menu), l.inner, Infinity);
   for (let i = 0; i < l.profile; i++) {
     const text = profileLines[i];
     const cell = text === undefined ? blank(l.inner) : pad(text, l.inner);
-    row(cell.startsWith(profile.name) ? paint(accent, profile.name) + cell.slice(profile.name.length) : cell);
+    row(cell.startsWith(menu.name) ? paint(accent, menu.name) + cell.slice(menu.name.length) : cell);
   }
   lines.push(edge('├' + '─'.repeat(l.list + 2) + '┬' + '─'.repeat(l.panel + 2) + '┤'));
 
@@ -460,7 +466,7 @@ async function plain(menu: Menu): Promise<string> {
     const count = rows.length;
     const at = menu.index;
     say(brand(menu));
-    say([menu.active.description, menu.source].filter(Boolean).join(' · '));
+    if (profileLine(menu)) say(profileLine(menu));
     say();
     rows.forEach((row, i) => say(`${i + 1}. ` + [row.title, row.tagline, row.auth?.text, row.version].filter(Boolean).join('  ')));
     process.stderr.write(`Launch [${at + 1}], q quit: `);
@@ -552,7 +558,7 @@ async function main() {
   const { listing, auth, profile, remembered } = parseArguments(process.argv.slice(2));
   // Auth is a launch-time fact: probe every row once, before drawing.
   // `Row` is the listing's harness plus the picker-only `auth`, which the listing never carries.
-  const rows: Row[] = listing.profiles[0].harnesses;
+  const rows: Row[] = listing.harnesses;
   for (const row of rows) {
     const scheme = auth[row.name];
     if (scheme) row.auth = probe(spec(scheme, row.name, profile?.env ?? {}), process.env, io);
