@@ -19,7 +19,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '../log.ts';
-import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
+import { LaunchError, readCached, writeAddressed, VARIABLE, type Adapter, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -144,9 +144,15 @@ function prepare(directory: string, fragment: Fragment): Changes {
   const writes = new Map(names.filter((name) => !isDeepStrictEqual(data[name], original[name]))
     .map((name) => [paths[name], data[name]]));
   const launch = fragment.launch;
+  // The record takes back everything this launch put in Pi's files, so the next
+  // merge can rebuild them from its own fragment without doubling anything; it
+  // is removed when there is nothing to take back, as it always was. (Main
+  // caught the profile's build-time skills with a `-pi-config` path filter;
+  // a launch-time translation lives in the cache, so completeness is the
+  // record's job now.)
   const record: LaunchRecord = {
-    skills: launch?.skills ?? [],
-    mcpServers: Object.fromEntries((launch?.mcpServers ?? []).map((name) => [name, fragment.mcpServers[name]])),
+    skills: fragment.skills,
+    mcpServers: fragment.mcpServers,
   };
   const empty = !record.skills.length && !Object.keys(record.mcpServers).length;
   let remove: string | null = null;
@@ -201,15 +207,26 @@ export const adapter: Adapter<LaunchArgs, Inputs> = {
     }
     const base: Fragment = JSON.parse(readFileSync(join(args.config, 'config.json'), 'utf8'));
     const owners: Record<string, string> = {};
+    // What the merge writes (every plugin's skills) and what the record keeps
+    // (only the variable's): a profile's plugins are the launch's own state and
+    // come back with the profile, so recording them would make the next merge
+    // take them away.
+    const merge = { skills: [] as string[], mcpServers: [] as string[] };
     const launch = { skills: [] as string[], mcpServers: [] as string[] };
     for (const plugin of plugins) {
       claim(owners, plugin.description, LaunchError);
       const fragment = readCached(join(plugin.translation, 'fragment.json'), isFragment);
-      launch.skills.push(...fragment.skills);
-      launch.mcpServers.push(...Object.keys(fragment.mcpServers));
+      merge.skills.push(...fragment.skills);
+      merge.mcpServers.push(...Object.keys(fragment.mcpServers));
+      if (plugin.from === VARIABLE) {
+        launch.skills.push(...fragment.skills);
+        launch.mcpServers.push(...Object.keys(fragment.mcpServers));
+      }
       Object.assign(base.mcpServers, fragment.mcpServers);
     }
-    const fragment: Fragment = { skills: [...base.skills, ...launch.skills], mcpServers: base.mcpServers, launch };
+    const fragment: Fragment = {
+      skills: [...base.skills, ...merge.skills], mcpServers: base.mcpServers, launch,
+    };
     return writeAddressed(join(cache!, 'pi', 'launch'), fragment);
   },
 };

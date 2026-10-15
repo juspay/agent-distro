@@ -110,8 +110,10 @@ test('empty contributions keep settings default', () => {
 test('only contributing files are created', () => {
   const root = temporary();
   const fragment = join(root, 'fragment.json');
-  // The thinking-block default lives in settings.json, so that file
-  // exists whenever anything (or nothing else) is merged.
+  // The thinking-block default lives in settings.json, so that file exists
+  // whenever anything (or nothing else) is merged; the launch record is what
+  // the next merge undoes this one with, so it exists whenever this one
+  // contributed anything at all.
   for (const [name, contribution] of [
     ['settings', { skills: ['/managed/skills'], mcpServers: {} }],
     ['mcp', { skills: [], mcpServers: { managed: { command: '/server' } } }],
@@ -119,7 +121,9 @@ test('only contributing files are created', () => {
     writeFileSync(fragment, JSON.stringify(contribution));
     const agent = join(root, name);
     mergeState('--merge', agent, fragment);
-    const expected = name === 'settings' ? ['settings.json'] : ['mcp.json', 'settings.json'];
+    const expected = name === 'settings'
+      ? ['.agent-distro-launch.json', 'settings.json']
+      : ['.agent-distro-launch.json', 'mcp.json', 'settings.json'];
     assert.deepEqual(readdirSync(agent).sort(), expected);
   }
 });
@@ -186,7 +190,7 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
   const steady = [servers(), skills()];
   mergeState('--check', agent, launched);
   assert.deepEqual([servers(), skills()], steady, '--check writes nothing');
-  assert.ok(!existsSync(join(agent, '.agent-distro-launch.json')));
+  assert.ok(existsSync(join(agent, '.agent-distro-launch.json')), 'the profile merge recorded what it wrote');
 
   mergeState('--merge', agent, launched);
   assert.deepEqual(servers(), { personal: { command: '/personal' }, kolu: launchServer, remote: { url: 'https://example.test/mcp', headers: {} } });
@@ -195,10 +199,15 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
   mergeState('--merge', agent, launched);
   assert.deepEqual(snapshot(join(agent, '.agent-distro-launch.json')), record, 'a steady launch rewrites nothing');
 
-  // Unset: the profile's own entries are back, and nothing of the launch remains.
+  // Unset: the profile's own entries are back, and nothing of the launch
+  // remains. The record is what took them back, and stays with the profile's
+  // own entries in it — the next merge has to undo those too, or the profile
+  // would be merged in twice.
   mergeState('--merge', agent, profile);
   assert.deepEqual([servers(), skills()], steady);
-  assert.ok(!existsSync(join(agent, '.agent-distro-launch.json')));
+  const recorded = readJson(join(agent, '.agent-distro-launch.json'));
+  assert.deepEqual(recorded.skills, ['/nix/store/x-pi-config/skills/kolu'], recorded);
+  assert.deepEqual(Object.keys(recorded.mcpServers), ['kolu'], recorded);
 
   // A launch entry the user has since edited is theirs to keep.
   mergeState('--merge', agent, launched);

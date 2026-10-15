@@ -22,9 +22,12 @@ assert any(path.endswith('/skills/launch-fixture') for path in launched['skills'
 name = next(iter(expected))
 others = {skill for plugin, skills in expected.items() if plugin != name for skill in skills}
 discover(plugins=checkout(name, 'shadowed'), skills=others | {'shadowed'})
-# Unset, the next launch takes it all back: Pi's files are the profile's again.
+# Unset, the next launch takes the variable's plugins back: Pi's files are the
+# profile's again. The record is what takes them back, so it is the record's
+# content that says so — a profile's own plugins come back with the profile and
+# are recorded too, or the merge would double them.
 assert inventory() == (original, old_mcp)
-assert not (agent_dir / '.agent-distro-launch.json').exists()
+assert not any(path.endswith('/skills/launch-fixture') for path in inventory()[0]['skills']), inventory()[0]
 discover()
 
 # Without a home for Pi's files the plugins could not load: the launch fails
