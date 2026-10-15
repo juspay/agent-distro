@@ -11,13 +11,10 @@
 # cannot drift unless the wiring is wrong. What it additionally does is force
 # the pieces the module does not: a missing required argument must fail naming
 # that argument (checked below by *calling* each function, not just reading
-# `functionArgs`), and mkPicker/mkFlake/lib.schedule must all evaluate.
+# `functionArgs`), and mkPicker and lib.schedule must evaluate.
 { pkgs, nixpkgs, agent-distro, home-manager }:
 let
   inherit (nixpkgs) lib;
-  # The one package the module installs, and the name its updater keys the
-  # index by: the registry's default profile.
-  default = (import "${agent-distro}/profiles/registry.nix").default;
   # A configuration from one `services.agent-distro` value, the module's own
   # options beside it.
   homeOf = service: (home-manager.lib.homeManagerConfiguration {
@@ -33,18 +30,18 @@ let
   }).config;
   configuration = homeOf { enable = true; };
   svc = configuration.services.agent-distro;
-  # The profile bundle the module resolves; a real one, so bundle.* is defined.
-  bundle = agent-distro.packages.${pkgs.system}.${default};
-  name = builtins.head bundle.commands;
+  # The one package the module installs; a real one, so package.* is defined.
+  package = agent-distro.packages.${pkgs.system}.default;
+  name = builtins.head package.commands;
   # The shims the module installs, and one of their commands: what each
   # configuration gives its commands as AI_PROFILE is written there.
   shimsOf = config: lib.findFirst (p: p.name == "agent-distro-shims") null config.home.packages;
   shimOf = config: builtins.readFile "${shimsOf config}/bin/${name}";
   # `profiles` as the module reads them, and `profile` as the one-release
-  # spelling of it: a reference is [ it ], a built-in name is none.
+  # spelling of it: a reference is [ it ], a bare word is none.
   withProfiles = homeOf { enable = true; profiles = [ "github:juspay/skills" ]; };
   withReference = homeOf { enable = true; profile = "github:juspay/skills"; };
-  withName = homeOf { enable = true; profile = default; };
+  withName = homeOf { enable = true; profile = "vanilla"; };
   withPath = homeOf { enable = true; profiles = [ ./fixtures/profile ]; };
   builtFixture = agent-distro.lib.mkProfile { system = pkgs.system; profile = ./fixtures/profile; };
   # A path is not the only thing built: a flake input is a source whose
@@ -61,19 +58,17 @@ let
   # The exports, reached by plain import with this test flake's pkgs.
   stateDirectory = import "${agent-distro}/lib/state-directory.nix" {
     inherit (svc) flake;
-    # No `profiles`: the module passes the default profile's name, so an
-    # install that predates the option keeps the state directory it has.
-    profile = default;
+    # No `profiles`: the module passes the one package's attribute (the same
+    # one mkUpdater builds), so an install keeps the state directory it has.
+    profile = "default";
     xdgStateHome = configuration.xdg.stateHome;
   };
   shims = import "${agent-distro}/lib/mk-shims.nix" {
-    inherit pkgs stateDirectory;
-    bundle = bundle;
+    inherit pkgs package stateDirectory;
   };
   updater = import "${agent-distro}/lib/mk-updater.nix" {
-    inherit pkgs bundle;
+    inherit pkgs package;
     inherit (svc) flake substituters;
-    profile = default;
     inherit stateDirectory;
     history = "${configuration.xdg.stateHome}/agent-distro/history.log";
     nix = lib.getExe (if configuration.nix.package == null then pkgs.nix else configuration.nix.package);
@@ -86,35 +81,30 @@ let
   otherPkgs = import pkgs.path { system = pkgs.system; config.allowUnfree = false; };
   otherShims = import "${agent-distro}/lib/mk-shims.nix" {
     pkgs = otherPkgs;
-    inherit stateDirectory;
-    bundle = bundle;
+    inherit package stateDirectory;
   };
   otherUpdater = import "${agent-distro}/lib/mk-updater.nix" {
     pkgs = otherPkgs;
-    inherit bundle;
+    inherit package;
     inherit (svc) flake substituters;
-    profile = default;
     inherit stateDirectory;
     history = "${configuration.xdg.stateHome}/agent-distro/history.log";
     nix = lib.getExe pkgs.nix;
   };
+  # The real launcher set of that second nixpkgs, and the `versions` file a
+  # package ships for them: a named dispatcher forces every launcher, so the
+  # picker is built over launchers that exist, not a stub.
+  otherLaunchers = agent-distro.lib.mkLaunchers { pkgs = otherPkgs; };
   otherPicker = import "${agent-distro}/lib/mk-picker.nix" {
     pkgs = otherPkgs;
-    # A real profile and its real mkLaunchers set (not a null stub), so the
-    # picker actually forces the launchers it dispatches to.
-    profile = agent-distro.profiles.vanilla;
-    launchers = agent-distro.lib.mkLaunchers {
-      pkgs = otherPkgs;
-      profile = agent-distro.profiles.vanilla;
-    };
+    launchers = otherLaunchers;
   };
-  # A distribution that publishes its own content-addressed bundles: the index
+  # A distribution that publishes its own content-addressed packages: the index
   # it names must reach the config its updater reads.
   ownIndex = "https://example.invalid/own-distro/ca-index";
   ownIndexUpdater = import "${agent-distro}/lib/mk-updater.nix" {
-    inherit pkgs bundle;
+    inherit pkgs package;
     inherit (svc) flake substituters;
-    profile = default;
     inherit stateDirectory;
     history = "${configuration.xdg.stateHome}/agent-distro/history.log";
     nix = lib.getExe pkgs.nix;
@@ -126,7 +116,7 @@ let
   # cannot drift: same state line, same exec/fallback logic, same shebang.
   sameShims = builtins.all
     (n: builtins.readFile "${shims}/bin/${n}" == builtins.readFile "${moduleShims}/bin/${n}")
-    bundle.commands;
+    package.commands;
 
   # The module's own values, to prove the exports agree with its wiring.
   moduleShims = lib.findFirst (p: p.name == "agent-distro-shims") null configuration.home.packages;
@@ -141,25 +131,9 @@ let
   config = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile updater.config));
   otherConfig = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile otherUpdater.config));
 
-  # mkFlake must not only import but *evaluate*: build a distribution from a
-  # real profile and force its package names and lib attribute names. This is
-  # what would have caught the lib/mk-flake.nix parse regression.
-  mkFlakeOut = agent-distro.lib.mkFlake {
-    profile = agent-distro.profiles.${default};
-    cache = agent-distro.lib.cache;
-  };
-  # mkFlake reads an agent-distro.nix by path just as the attribute set it holds.
-  mkFlakeFromFile = agent-distro.lib.mkFlake {
-    profile = "${agent-distro}/profiles/${default}/agent-distro.nix";
-  };
-  # A built-in profile names its plugins by path: a flake reference is read at launch.
-  referenced = builtins.tryEval (agent-distro.lib.mkLaunchers {
-    inherit pkgs;
-    profile = agent-distro.profiles.vanilla // { plugins = [ "github:juspay/skills" ]; };
-  }).omp.drvPath;
-  mkFlakeLibNames = builtins.attrNames mkFlakeOut.lib;
-  mkFlakePackageNames = builtins.attrNames mkFlakeOut.packages.${pkgs.system};
-  expectedLibNames = [ "caIndex" "cache" "mkFlake" "mkLaunchers" "mkPicker" "mkProfile" "mkShims"
+  libNames = builtins.attrNames agent-distro.lib;
+  packageNames = builtins.attrNames agent-distro.packages.${pkgs.system};
+  expectedLibNames = [ "caIndex" "cache" "mkLaunchers" "mkPicker" "mkProfile" "mkShims"
     "mkUpdater" "schedule" "stateDirectory" ];
 
   # --- missing-required-argument checks, executed in the builder below ---
@@ -169,29 +143,12 @@ let
   # Placeholder values (empty sets) are never forced: the missing-arg error fires
   # before the body runs.
   missingChecks = [
-    { file = "mk-shims.nix"; required = [ "pkgs" "bundle" "stateDirectory" ]; }
-    { file = "mk-updater.nix"; required = [ "pkgs" "bundle" "flake" "profile" "stateDirectory" "history" "nix" "substituters" ]; }
+    { file = "mk-shims.nix"; required = [ "pkgs" "package" "stateDirectory" ]; }
+    { file = "mk-updater.nix"; required = [ "pkgs" "package" "flake" "stateDirectory" "history" "nix" "substituters" ]; }
     { file = "state-directory.nix"; required = [ "xdgStateHome" "flake" "profile" ]; }
-    { file = "mk-picker.nix"; required = [ "pkgs" "profile" "launchers" ]; }
+    { file = "mk-picker.nix"; required = [ "pkgs" "launchers" ]; }
     { file = "mk-profile.nix"; required = [ "nixpkgs" "system" "profile" ]; }
   ];
-  # mkFlake's file imports with `{ nixpkgs }` and returns the builder, whose
-  # one required argument is `profile` — checked by applying the built builder.
-  mkFlakeMissingProfile = ''
-    set -e
-    if nix-instantiate --eval --expr ${lib.escapeShellArg ''
-      (import ${agent-distro}/lib/mk-flake.nix { nixpkgs = { }; })
-        (builtins.removeAttrs { profile = { }; } [ "profile" ])
-    ''} 2>err; then
-      echo "expected missing-argument error for 'profile' (mkFlake), but it evaluated" >&2
-      exit 1
-    fi
-    grep -F "without required argument 'profile'" err >/dev/null || {
-      echo "missing-argument error for 'profile' (mkFlake) not found in:" >&2
-      cat err >&2
-      exit 1
-    }
-  '';
   builderChecks = lib.concatMapStringsSep "\n" (case:
     lib.concatMapStringsSep "\n" (arg:
       let call = ''
@@ -218,19 +175,19 @@ assert stateDirectory == moduleState;
 assert myShim == moduleShim;
 assert config.state == moduleState;
 assert config.history == "${configuration.xdg.stateHome}/agent-distro/history.log";
-# The updater keys the index by the bundle's profile, whatever `profiles` names.
-assert config.profile == default;
+# One package per revision: the updater builds and the index names `default`,
+# whatever `profiles` names.
+assert config.attribute == "default";
 assert config.flake == svc.flake;
 assert config.substituters == svc.substituters;
 # `profiles`: the option the module reads, and what it gives every command it
-# installs as AI_PROFILE. A reference is exported as it was given; a built-in
-# name is the one package and no AI_PROFILE at all.
+# installs as AI_PROFILE. A reference is exported as it was given.
 assert configuration.services.agent-distro.profiles == [ ];
 assert withProfiles.services.agent-distro.profiles == [ "github:juspay/skills" ];
 assert !lib.hasInfix "AI_PROFILE" (shimOf configuration);
 assert lib.hasInfix (exported "github:juspay/skills") (shimOf withProfiles);
-# The deprecated `profile`: a reference becomes `profiles = [ it ]`; a built-in
-# name keeps the package and sets none.
+# The deprecated `profile`: a reference becomes `profiles = [ it ]`; a bare
+# word named a profile a package carried, and none does, so it sets no AI_PROFILE.
 assert lib.hasInfix (exported "github:juspay/skills") (shimOf withReference);
 assert !lib.hasInfix "AI_PROFILE" (shimOf withName);
 # A path is built by mkProfile, whose store path is the fallback. The path
@@ -259,18 +216,17 @@ assert otherShims.passthru.stateDirectory == stateDirectory;
 # returns (Home Manager normalises a single command line to a one-element list).
 assert lib.escapeShellArgs updater.command ==
   builtins.head configuration.systemd.user.services.agent-distro-update.Service.ExecStart;
-# mkFlake evaluates: exactly the same ten-name lib, packages include the bundle + picker.
-assert mkFlakeLibNames == expectedLibNames;
-assert lib.elem default mkFlakePackageNames;
-assert lib.elem "default" mkFlakePackageNames;
-assert builtins.attrNames mkFlakeFromFile.packages.${pkgs.system} == mkFlakePackageNames;
-assert !referenced.success;
-# A second nixpkgs must build the picker from a real profile and launchers
-# (named launchers dispatchers force the whole launcher set).
+# Exactly the nine-name library, and the packages a consumer reaches: the one
+# package as `default`, one per harness, and the profile checker.
+assert libNames == expectedLibNames;
+assert lib.elem "default" packageNames;
+assert lib.elem "check-profile" packageNames;
+assert builtins.all (harness: lib.elem harness packageNames) package.commands;
+# A second nixpkgs must build the picker from real launchers (named launcher
+# dispatchers force the whole launcher set).
 assert builtins.isString otherPicker.drvPath;
 pkgs.runCommand "lib-exports" { nativeBuildInputs = [ pkgs.nix ]; } ''
   export NIX_STATE_DIR="$TMPDIR/nix-state"
   ${builderChecks}
-  ${mkFlakeMissingProfile}
   touch "$out"
 ''

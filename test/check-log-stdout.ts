@@ -17,7 +17,7 @@ import { test } from 'node:test';
 
 const [src, plugin] = process.argv.slice(2);
 const temporary = () => mkdtempSync(join(tmpdir(), 'log-stdout-'));
-const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', env: {}, settings: {} }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
+const info = { nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
 
 /** Run a runtime module at trace level, from a directory in no repository. */
 function run(args: string[], env: Record<string, string> = {}) {
@@ -53,23 +53,24 @@ test('a launch prints shell assignments only', () => {
   assert.match(stdout, /^launched='--plugin-dir /m);
   assert.match(stderr, /^agent-distro plugin: .*my-skills: from AGENT_DISTRO_PLUGINS/m);
   assert.match(stderr, /^agent-distro claude: harness arguments: --plugin-dir /m);
-  assert.match(stderr, /^agent-distro profile: profile vanilla, built in$/m);
+  assert.match(stderr, /^agent-distro profile: no profile in effect$/m);
 });
 
 test('--list --json prints JSON only', () => {
   const infoFile = join(temporary(), 'info.json');
   writeFileSync(infoFile, JSON.stringify(info));
-  const menu = { profiles: [{ name: 'vanilla', description: 'Vanilla', harnesses: [] }] };
+  const menu = { harnesses: [{ name: 'claude', title: 'Claude Code', tagline: 'a tagline', version: '1' }] };
   const { stdout, stderr } = run([join(src, 'profile/cli.ts'), 'list', infoFile, JSON.stringify(menu), '--json']);
-  assert.equal(JSON.parse(stdout).profile.source, 'builtin');
+  // No repository and no AI_PROFILE: the menu alone.
+  assert.deepEqual(JSON.parse(stdout), menu);
   assert.equal(stdout.trimEnd().split('\n').length, 1);
   assert.equal(stderr, '');
 });
 
 test('update --progress prints JSON lines only', () => {
   const state = temporary();
-  const bundle = join(temporary(), 'bundle');
-  mkdirSync(bundle);
+  const installed = join(temporary(), 'package');
+  mkdirSync(installed);
   // Enough nix for one update: a trusted store, a resolvable flake, nothing to compile, a build.
   const nix = command('nix', `
 const { symlinkSync } = require('node:fs');
@@ -77,16 +78,16 @@ const args = process.argv.slice(2);
 const has = (word) => args.includes(word);
 if (args[0] === 'store') process.stdout.write('{"trusted":true}');
 else if (args[0] === 'flake') process.stdout.write('{"url":"path:/fixture"}');
-else if (args[0] === 'build' && has('--out-link')) symlinkSync(${JSON.stringify(bundle)}, args[args.indexOf('--out-link') + 1]);
+else if (args[0] === 'build' && has('--out-link')) symlinkSync(${JSON.stringify(installed)}, args[args.indexOf('--out-link') + 1]);
 `);
   const config = join(temporary(), 'config.json');
   writeFileSync(config, JSON.stringify({
-    profile: 'p', flake: 'path:/fixture', state, history: join(state, 'history.log'), nix,
+    flake: 'path:/fixture', state, history: join(state, 'history.log'), nix,
     substituters: {}, caIndex: 'https://example.invalid/ca-index', periodSeconds: 21600, offsetSeconds: 7200,
   }));
   const { stdout, stderr } = run([join(src, 'update/update.ts'), config, '--progress']);
   const lines = stdout.trimEnd().split('\n').map((line) => JSON.parse(line));
-  assert.deepEqual(lines.at(-1), { result: 'updated', bundle });
+  assert.deepEqual(lines.at(-1), { result: 'updated', package: installed });
   assert.match(stderr, /^agent-distro update: running .*nix flake metadata --refresh --json path:\/fixture$/m);
-  assert.match(stderr, /^agent-distro update: p updated nothing -> /m);
+  assert.match(stderr, /^agent-distro update: updated nothing -> /m);
 });

@@ -167,8 +167,7 @@ describe('OpenCode', () => {
     const translation = join(root, 'translation');
     adapter.translate(description, translation, { bash: '/bin/sh', env: '/usr/bin/env' }, () => {});
     const launch = {
-      args: { config, name: 'opencode', profile: [] }, kept: [], replaced: [], cache: join(root, 'cache'),
-      report: () => {},
+      args: { config, name: 'opencode' }, cache: join(root, 'cache'), report: () => {},
     };
     // No plugins to add: the launcher's own config stands.
     assert.equal(adapter.launch({ ...launch, plugins: [] }), join(config, 'opencode.json'));

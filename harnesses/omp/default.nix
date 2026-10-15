@@ -1,5 +1,5 @@
 # OMP loads Agent Plugins directories itself.
-{ pkgs, plugins, info, package }:
+{ pkgs, nixpkgs, package }:
 let
   inherit (pkgs) lib writeShellApplication formats gum;
   omp = package;
@@ -17,14 +17,10 @@ let
     hideThinkingBlock = true;
     task.showResolvedModelBadge = true;
   };
-  launchPlugins = runtime.launchPlugins {
-    harness = "omp";
-    inherit info;
-    profile = map (plugin: { description = "${runtime.readPlugin plugin}"; dir = "${runtime.specPlugin plugin}"; }) plugins;
-  };
+  launchPlugins = runtime.launchPlugins (runtime.info nixpkgs // { harness = "omp"; });
 
   initialization = ''
-    # The profile in effect, its env and settings, its packages and every
+    # The profiles in effect, their env and settings, their packages and every
     # plugin's root.
     ${launchPlugins}
     agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.omp/agent}"
@@ -52,8 +48,8 @@ writeShellApplication {
   text = ''
     ${initialization}
 
-    # The profile's roots, less those AGENT_DISTRO_PLUGINS replaces, then its
-    # own. CLI roots compose with the user's extensions; config arrays replace them.
+    # The profiles' plugin roots, then the ones AGENT_DISTRO_PLUGINS adds.
+    # CLI roots compose with the user's extensions; config arrays replace them.
     eval "set -- $launched \"\$@\""
     exec ${lib.getExe omp} "$@"
   '';

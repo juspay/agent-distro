@@ -1,2 +1,2 @@
 - DO NOT run vm tests locally. Use remote CI machines (e.g.: kolu-ci-*)
-- CI is odu: `nix run --accept-flake-config github:juspay/odu -- run`, with the lane hosts in `~/.config/odu/hosts.json`. The `cache.yml` GitHub workflow only warms the cache and publishes the content-addressed bundles.
+- CI is odu: `nix run --accept-flake-config github:juspay/odu -- run`, with the lane hosts in `~/.config/odu/hosts.json`. The `cache.yml` GitHub workflow only warms the cache and publishes the content-addressed package.

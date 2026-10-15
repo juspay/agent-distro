@@ -19,7 +19,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '../log.ts';
-import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
+import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -27,12 +27,12 @@ import { isSystemError, realpath, writeTemporary } from '../util.ts';
 type Servers = Record<string, Record<string, unknown>>;
 /**
  * What merge-state applies. `launch` names the parts that come from
- * AGENT_DISTRO_PLUGINS, and `replaces` the profile servers they displace.
+ * AGENT_DISTRO_PLUGINS, so the next merge can take them back.
  */
 type Fragment = {
   skills: string[];
   mcpServers: Servers;
-  launch?: { skills: string[]; mcpServers: string[]; replaces: Servers };
+  launch?: { skills: string[]; mcpServers: string[] };
 };
 type JsonObject = Record<string, any>;
 type Inputs = { bash: string; env: string };
@@ -132,7 +132,7 @@ function prepare(directory: string, fragment: Fragment): Changes {
   // Take back what the last launch added and what it displaced, unless the
   // user has changed it since; the fragment puts back what is still wanted.
   const remaining = { ...servers };
-  const undo = { ...previous.mcpServers, ...fragment.launch?.replaces };
+  const undo = { ...previous.mcpServers };
   for (const [name, entry] of Object.entries(undo)) {
     if (isDeepStrictEqual(remaining[name], entry)) delete remaining[name];
   }
@@ -188,19 +188,19 @@ export function mergeState(mode: string, directory: string, fragmentPath: string
   }
 }
 
-type LaunchArgs = Inputs & { config: string; profile: ProfileEntry[] };
+type LaunchArgs = Inputs & { config: string };
 
 /**
- * At launch: the profile's fragment without the replaced plugins and with the
- * variable's, written to the cache by content. Prints its path, which the
- * launcher hands merge-state in place of the profile's.
+ * At launch: the profile's fragment with every plugin merged into it, written
+ * to the cache by content. Prints its path, which the launcher hands
+ * merge-state in place of the profile's.
  */
-export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
+export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
-  launch: ({ args, kept, replaced, plugins, cache }) => {
-    if (!plugins.length && !replaced.length) return join(args.config, 'config.json');
+  launch: ({ args, plugins, cache }) => {
+    if (!plugins.length) return join(args.config, 'config.json');
     // Pi reads plugins only from its agent directory; without one they would
     // be dropped without a word.
     if (!process.env.PI_CODING_AGENT_DIR && !process.env.HOME) {
@@ -208,17 +208,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
     }
     const base: Fragment = JSON.parse(readFileSync(join(args.config, 'config.json'), 'utf8'));
     const owners: Record<string, string> = {};
-    for (const plugin of kept) claim(owners, plugin.description, LaunchError);
-    const replaces: Servers = {};
-    let skills = base.skills;
-    for (const plugin of replaced) {
-      skills = skills.filter((path) => path !== join(args.config, 'skills', plugin.name));
-      for (const name of Object.keys(plugin.description.mcpServers)) {
-        if (Object.hasOwn(base.mcpServers, name)) replaces[name] = base.mcpServers[name];
-        delete base.mcpServers[name];
-      }
-    }
-    const launch = { skills: [] as string[], mcpServers: [] as string[], replaces };
+    const launch = { skills: [] as string[], mcpServers: [] as string[] };
     for (const plugin of plugins) {
       claim(owners, plugin.description, LaunchError);
       const fragment = readCached(join(plugin.translation, 'fragment.json'), isFragment);
@@ -226,7 +216,7 @@ export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
       launch.mcpServers.push(...Object.keys(fragment.mcpServers));
       Object.assign(base.mcpServers, fragment.mcpServers);
     }
-    const fragment: Fragment = { skills: [...skills, ...launch.skills], mcpServers: base.mcpServers, launch };
+    const fragment: Fragment = { skills: [...base.skills, ...launch.skills], mcpServers: base.mcpServers, launch };
     return writeAddressed(join(cache!, 'pi', 'launch'), fragment);
   },
 };

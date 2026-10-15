@@ -6,11 +6,12 @@
  *
  * INFO_JSON is the launcher's build-time `Info` (lib/picker.nix). `resolve`
  * prints the resolved profile as JSON, for the picker to hand its launcher in
- * AGENT_DISTRO_PROFILE; PROFILE is the picker's positional selector. `list`
- * prints `--list` from the menu (src/listing.ts): with `--json`, the menu with
- * the profile in effect added; without, a line naming that profile, those it
- * is composed over, and where they came from, then one `harness title version`
- * line per harness.
+ * AGENT_DISTRO_PROFILE, and prints nothing when there is no profile in effect
+ * at all; PROFILE is the picker's positional selector. `list` prints `--list`
+ * from the menu (src/listing.ts): with `--json`, the menu with the profile in
+ * effect added; without, a line naming that profile, those it is composed
+ * over, and where they came from, then one `harness title version` line per
+ * harness.
  */
 import { readFileSync } from 'node:fs';
 import { nameText, sourceText, type Listing } from '../listing.ts';
@@ -19,28 +20,37 @@ import { LaunchError, printable } from '../plugin/launch.ts';
 import { isSystemError } from '../util.ts';
 import { resolveProfile, select, workingDirectory, type Info, type Resolved } from './resolve.ts';
 
-function inEffect(info: Info, positional: string | undefined): Resolved {
-  return resolveProfile(info, select(positional, workingDirectory(), process.env, info), process.env);
+/** The profile in effect here, or null when nothing chose one. */
+function inEffect(info: Info, positional: string | undefined): Resolved | null {
+  return resolveProfile(info, select(positional, workingDirectory(), process.env), process.env);
 }
 
 function run(argv: string[]): number {
   const [command, infoPath, ...rest] = argv;
   const info: Info = JSON.parse(readFileSync(infoPath, 'utf8'));
   if (command === 'resolve') {
-    process.stdout.write(JSON.stringify(inEffect(info, rest[0] || undefined)) + '\n');
+    const profile = inEffect(info, rest[0] || undefined);
+    // No output is no profile: the launcher resolves the same way, and adds
+    // nothing to the harness.
+    if (profile) process.stdout.write(JSON.stringify(profile) + '\n');
     return 0;
   }
   if (command !== 'list') throw new Error(`unknown command: ${command}`);
   const [menu, format] = rest;
   const listing: Listing = JSON.parse(menu);
-  const { name, description, source, origin, over } = inEffect(info, undefined);
-  const profile = { name, description, source, origin, ...(over && { over }) };
+  const profile = inEffect(info, undefined);
   if (format === '--json') {
-    process.stdout.write(JSON.stringify({ ...listing, profile }) + '\n');
+    const { name, description, source, origin, over } = profile ?? { name: '', description: '', source: undefined, origin: '', over: undefined };
+    process.stdout.write(JSON.stringify({
+      ...listing,
+      ...(profile ? { profile: { name, description, source, origin, ...(over && { over }) } } : {}),
+    }) + '\n');
     return 0;
   }
-  const lines = [`${nameText(profile)} · ${description} · ${sourceText(profile)}`,
-    ...listing.profiles[0].harnesses.map((h) => `${h.name} ${h.title} ${h.version}`)];
+  const lines = [
+    ...(profile ? [`${nameText(profile)} · ${profile.description} · ${sourceText(profile)}`] : []),
+    ...listing.harnesses.map((h) => `${h.name} ${h.title} ${h.version}`),
+  ];
   process.stdout.write(printable(lines.join('\n')) + '\n');
   return 0;
 }

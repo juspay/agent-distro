@@ -1,3 +1,3 @@
-# One list, so the distribution's own outputs and `mkFlake`'s default cannot
+# One list, so every output that is per system cannot
 # drift apart.
 [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]

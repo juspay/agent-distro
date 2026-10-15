@@ -56,12 +56,10 @@ const HARNESSES = [
   harness('opencode', 'OpenCode', 'private server per launch', '2.0.29', AUTH.opencode),
   harness('pi', 'Pi', "OMP's upstream · plugins per home", '1.0.4', AUTH.pi),
 ];
-const listing = (harnesses = HARNESSES): Listing => ({
-  profiles: [{ name: 'vanilla', description: 'Upstream harnesses with your own provider', harnesses }],
-});
-// The profile in effect: the built-in one, or one found in a repository, whose
-// path can be long enough to wrap the profile row, or one composed over
-// AI_PROFILE, which the header names too.
+const listing = (harnesses = HARNESSES): Listing => ({ harnesses });
+// The profile in effect: none, or one found in a repository, whose path can be
+// long enough to wrap the profile row, or one composed over AI_PROFILE, which
+// the header names too.
 const IN_EFFECT = [
   undefined,
   { name: 'juspay', description: 'Juspay skills + Kolu, via Juspay\'s LiteLLM gateway', source: 'repository',
@@ -70,10 +68,11 @@ const IN_EFFECT = [
   { name: 'repo', description: 'The repository\'s own tools', source: 'repository', origin: '/home/someone/src/repo/agent-distro.nix',
     over: { name: 'juspay', description: 'Juspay skills + Kolu', source: 'variable', origin: 'github:juspay/skills' } },
 ] as const;
-// What the header names, and what the profile row says it came from. The
-// header names the stack from the bottom up.
-const HEADER = ['vanilla', 'juspay', 'ekala', 'juspay + repo'];
-const FROM = ['built in', `from ${IN_EFFECT[1].origin}`, `chosen as ${IN_EFFECT[2].origin}`,
+// What the header names, and what the profile row says it came from. With no
+// profile in effect both are empty; otherwise the header names the stack from
+// the bottom up.
+const HEADER = ['', 'juspay', 'ekala', 'juspay + repo'];
+const FROM = ['', `from ${IN_EFFECT[1].origin}`, `chosen as ${IN_EFFECT[2].origin}`,
   `from ${IN_EFFECT[3].origin} over AI_PROFILE=github:juspay/skills`];
 
 /** The cells a frame draws, one string per row, exactly as written. */
@@ -171,15 +170,21 @@ for (const [i, profile] of IN_EFFECT.entries()) {
     const panel = panelText(menu, columns, rows);
     assert.ok(panel.includes(shown.tagline), panel);
     for (const item of shown.auth?.items ?? []) assert.ok(panel.includes(item), panel);
-    // The header names the profile in effect; the profile row under it
-    // describes it and says where it came from.
+    // The header names the profile in effect, and is the program alone when
+    // none is; the profile row under it describes it and says where it came
+    // from, and is absent with no profile.
     const header = screen(frame(menu, rows, columns), columns, rows)[l.y - 1];
-    assert.ok(header.includes(`agent-distro · ${HEADER[i]}`), header);
     const row = profileRow(menu, columns, rows);
-    assert.ok(row.includes(`${menu.active.name} · ${menu.active.description} · `), row);
-    const from = FROM[i];
-    // A long path may be broken across lines, which the row joins with a space.
-    assert.ok(row.replace(/ /g, '').includes(from.replace(/ /g, '')), row);
+    if (!profile) {
+      assert.ok(header.includes('agent-distro ─'), header);
+      assert.equal(l.profile, 0, header);
+      assert.equal(row, '', row);
+    } else {
+      assert.ok(header.includes(`agent-distro · ${HEADER[i]}`), header);
+      assert.ok(row.includes(`${menu.name} · ${menu.description} · `), row);
+      // A long path may be broken across lines, which the row joins with a space.
+      assert.ok(row.replace(/ /g, '').includes(FROM[i].replace(/ /g, '')), row);
+    }
   }
 }
 
@@ -195,12 +200,15 @@ assert.doesNotMatch(palette({ TERM: 'xterm-256color', NO_COLOR: '1' }).accent, /
 for (const key of ['right', 'tab', 'l', 'left', 'backtab', 'h']) {
   const menu = new Menu(listing(), '', IN_EFFECT[1]);
   assert.equal(menu.press(key), undefined);
-  assert.equal(menu.active.name, 'juspay');
+  assert.equal(menu.name, 'juspay');
   assert.equal(menu.index, 0);
 }
 assert.equal(new Menu(listing(), '').press('enter'), 'omp');
 assert.ok(!boxed(new Menu(listing(), ''), 80, 24).join('\n').includes('profile'), 'no profile key in the footer');
-assert.ok(rendered(new Menu(listing(), ''), 80, 24)[0].includes('\x1b[2m · vanilla'), 'the brand names the profile, dimmed');
+// The brand is the program alone with no profile in effect, and names the one
+// in effect after it, dimmed.
+assert.ok(!rendered(new Menu(listing(), ''), 80, 24)[0].includes(' · '), 'the brand names a profile with none in effect');
+assert.ok(rendered(new Menu(listing(), '', IN_EFFECT[1]), 80, 24)[0].includes('\x1b[2m · juspay'), 'the brand names the profile, dimmed');
 // The remembered harness has the cursor and keeps its dot; a choice
 // remembered with its profile, as releases with a profile selector wrote it,
 // is read as its harness.
@@ -267,7 +275,7 @@ assert.equal(new Menu(listing(), 'gone').index, 0);
 
 // A menu that is not a Listing is an argument error, exit 2.
 const node = process.execPath;
-const menuJson = (tagline: unknown) => JSON.stringify({ profiles: [{ name: 'a', description: '', harnesses: [{ name: 'x', title: 'X', tagline, version: '1' }] }] });
+const menuJson = (tagline: unknown) => JSON.stringify({ harnesses: [{ name: 'x', title: 'X', tagline, version: '1' }] });
 const bad = spawnSync(node, [join(src, 'picker/choose.ts'), menuJson(null)], { encoding: 'utf8' });
 assert.equal(bad.status, 2, bad.stderr);
 assert.match(bad.stderr, /tagline is not a string/);

@@ -4,16 +4,15 @@
 # Stub harnesses that print what they were started with show the plugins and
 # packages each launch got: path and git+file: references, discovery from a
 # nested directory, the positional selector taken exactly, the repository's
-# agent-distro.nix composed over AI_PROFILE over the built-in profile, the
-# environment and settings it carries, an evaluation that sees neither the
-# user's environment nor the network, and the refusal of a package the binary
-# cache lacks. Then the gateway profile of test/flake.nix, written out as a
-# repository would carry it, runs the real OMP, Codex and Claude Code.
+# agent-distro.nix composed over every AI_PROFILE entry, the environment and
+# settings they carry, an evaluation that sees neither the user's environment
+# nor the network, and the refusal of a package the binary cache lacks. Then
+# the gateway profile of test/flake.nix, written out as a repository would
+# carry it, runs the real OMP, Codex and Claude Code.
 { pkgs, agent-distro, nixpkgs, juspay-skills, koluPlugin }:
 let
   inherit (pkgs) lib;
   common = import ./common.nix;
-  vanilla = agent-distro.profiles.vanilla;
   # Each stub prints its arguments, one per line, then where it finds the
   # commands a profile's packages provide.
   stub = name: pkgs: pkgs.writeShellScriptBin name ''
@@ -21,7 +20,7 @@ let
     printf '%s\n' "$@"
     echo "hello=$(command -v hello || true)"
   '' // { version = "0"; };
-  probe = agent-distro.lib.mkLaunchers { inherit pkgs; profile = vanilla; sources = stub; };
+  probe = agent-distro.lib.mkLaunchers { inherit pkgs; sources = stub; };
   # Under their own names, so the real harnesses keep theirs.
   probes = map
     (name: pkgs.writeShellScriptBin "probe-${name}" ''
@@ -102,7 +101,7 @@ in
     imports = [ common.baseNode ];
     virtualisation.memorySize = 4096;
     virtualisation.diskSize = 4096;
-    environment.systemPackages = [ agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla pkgs.python3 pkgs.git koluFixture ] ++ probes;
+    environment.systemPackages = [ agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.default pkgs.python3 pkgs.git koluFixture ] ++ probes;
     # What the profiles' packages evaluate to is already here, as a binary
     # cache would provide it; nothing else is, and nothing can be fetched.
     # The nixpkgs source too, at the store path launchers find it by (the
@@ -170,9 +169,9 @@ in
             "origin": "/home/testuser/repo/agent-distro.nix"}
         # --list names it, and where it was found.
         assert "repo · The repository · from /home/testuser/repo/agent-distro.nix" in user("cd ~/repo && probe-agent-distro --list")
-        # Outside the repository, the built-in profile.
+        # Outside the repository, nothing is in effect at all.
         assert launched("probe-claude") == ([], "")
-        assert in_effect() == {"name": "vanilla", "description": "${vanilla.description}", "source": "builtin", "origin": "vanilla"}
+        assert "profile" not in json.loads(user("probe-agent-distro --list --json"))
 
     with subtest("a launch names a profile the directory or AI_PROFILE chose, on stderr"):
         def stderr_of(command):
@@ -181,7 +180,7 @@ in
         assert "agent-distro profile: using repo (from /home/testuser/repo/agent-distro.nix) · https://agent-distro.nixos.asia\n" in repo, repo
         variable = stderr_of("AI_PROFILE=/home/testuser/elsewhere probe-claude")
         assert "agent-distro profile: using elsewhere (from AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n" in variable, variable
-        # The built-in profile, and a positional choice, say nothing.
+        # No profile at all, and a positional choice, say nothing.
         builtin = stderr_of("probe-claude")
         assert "agent-distro" not in builtin, builtin
         positional = stderr_of("probe-agent-distro /home/testuser/elsewhere claude")
@@ -258,13 +257,13 @@ in
             assert "agent-distro never compiles" in output, output
             assert "STUB-STARTED" not in output, output
 
-    with subtest("the gateway profile, read at launch, behaves as a built-in one would"):
+    with subtest("the gateway profile, read at launch, reaches OMP, Codex and Claude Code"):
         user("cp -r ${juspay-skills} ~/gateway && chmod -R u+w ~/gateway")
         write("~/gateway/agent-distro.nix", ${builtins.toJSON profileFile})
         gateway = "AI_PROFILE=/home/testuser/gateway"
         assert in_effect("~", gateway)["name"] == "gateway"
         user(f"{gateway} python " + shlex.quote("${./profiles/check-gateway-profile.py}") + " " + " ".join(shlex.quote(a) for a in [
-            ${builtins.toJSON (builtins.toJSON expected)}, "gateway-ai",
+            ${builtins.toJSON (builtins.toJSON expected)}, "agent-distro-",
             "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
             "${pkgs.mcp-nixos}/bin",
             ${builtins.toJSON (builtins.toJSON profileEnv)},

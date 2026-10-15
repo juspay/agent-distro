@@ -79,13 +79,13 @@ else if (args[0] === 'build' && args.includes('--dry-run')) {
   }
 } else if (args[0] === 'build') {
   if (buildError) { console.error(buildError); process.exit(1); }
-  // The real build: an out-link to a bundle that records its versions.
-  const bundle = ${JSON.stringify(join(work, name + '-bundle'))};
-  fs.mkdirSync(bundle + '/share/agent-distro', { recursive: true });
-  fs.writeFileSync(bundle + '/share/agent-distro/versions', 'pi\\tPi\\t1.0\\n');
+  // The real build: an out-link to a package that records its versions.
+  const installed = ${JSON.stringify(join(work, name + '-package'))};
+  fs.mkdirSync(installed + '/share/agent-distro', { recursive: true });
+  fs.writeFileSync(installed + '/share/agent-distro/versions', 'pi\\tPi\\t1.0\\n');
   const link = args[args.indexOf('--out-link') + 1];
   fs.rmSync(link, { force: true });
-  fs.symlinkSync(bundle, link);
+  fs.symlinkSync(installed, link);
 }
 `);
   chmodSync(path, 0o755);
@@ -98,7 +98,7 @@ async function run(nix: string, { progress = false } = {}) {
   const results: Result[] = [];
   const notes: string[] = [];
   const status = await update({
-    profile: 'p', flake: 'path:/fixture', state, history, nix,
+    flake: 'path:/fixture', state, history, nix,
     substituters: {}, caIndex: 'https://example.invalid/ca-index', periodSeconds: 21600, offsetSeconds: 7200,
   }, {
     summary: () => {},
@@ -153,7 +153,7 @@ test('an update that cannot tell skips without building', async () => {
   const result = await run(fakeNix('unknown', { drvs: 1400, show: { raw: '{}' } }));
   assert.equal(result.status, 0);
   assert.deepEqual(result.builds, []);
-  assert.match(result.history, / p skipped: cannot tell what the bundle would build /);
+  assert.match(result.history, / skipped: cannot tell what the package would build /);
   assert.ok(!result.stamped);
 });
 
@@ -161,7 +161,7 @@ test('an update with nothing to compile builds', async () => {
   const result = await run(fakeNix('cached', { drvs: 0 }));
   assert.equal(result.status, 0);
   assert.equal(result.builds.length, 1);
-  assert.match(result.history, / p updated: Pi 1\.0\n$/);
+  assert.match(result.history, / updated: Pi 1\.0\n$/);
   assert.ok(result.stamped);
 });
 
@@ -180,7 +180,7 @@ test('a failed resolve names nix\'s own error in the --progress result', async (
     reason: 'cannot resolve flake',
     detail: "unable to download 'https://api.github.com/repos/juspay/agent-distro/commits/HEAD': HTTP error 401",
   }]);
-  assert.match(result.history, / p failed: cannot resolve flake\n$/);
+  assert.match(result.history, / failed: cannot resolve flake\n$/);
   assert.deepEqual(result.builds, []);
 });
 
@@ -203,7 +203,7 @@ test('a failed --progress build names nix\'s last error line', async () => {
     reason: 'nix build exit 1',
     detail: 'cannot build: the sandbox exploded',
   }]);
-  assert.match(result.history, / p failed: nix build exit 1\n$/);
+  assert.match(result.history, / failed: nix build exit 1\n$/);
 });
 
 test('no error: line means no detail on a failed result', async () => {

@@ -1,5 +1,5 @@
 {
-  description = "Build a coding-agent distribution with every discovered harness preloaded with Agent Plugins";
+  description = "The coding-agent distribution: every discovered harness preloaded with Agent Plugins";
 
   nixConfig = {
     extra-substituters = "https://cache.nixos.asia/oss";
@@ -14,73 +14,58 @@
     let
       inherit (nixpkgs) lib;
       discovered = import ./lib/discover-harnesses.nix;
-      mkFlake = import ./lib/mk-flake.nix { inherit nixpkgs; };
       cache = import ./lib/cache.nix;
       caIndex = import ./lib/ca-index.nix;
       # The library every consumer reaches as agent-distro.lib, and the two
       # builders both it and this flake use: `mkLaunchers` names this nixpkgs by
       # reference rather than hold its source, and the Home Manager module
       # builds a `profiles` path with `mkProfile`.
-      api = import ./lib/api.nix { inherit nixpkgs mkFlake cache caIndex; };
+      api = import ./lib/api.nix { inherit nixpkgs cache caIndex; };
       mkLaunchers = api.mkLaunchers;
       systems = import ./lib/systems.nix;
       # Unfree so harness recipes (lib/harness-pkgs.nix) share this one instance.
       packageSets = lib.genAttrs systems (system: import nixpkgs { inherit system; config.allowUnfree = true; });
       pkgsFor = system: packageSets.${system};
 
-      # The built-in profiles: `vanilla` alone. Any other profile is an
-      # `agent-distro.nix` in its own repository, read at launch.
-      profiles = lib.mapAttrs
-        (name: _:
-          let profile = import (./profiles + "/${name}/agent-distro.nix"); in
-          # AI_PROFILE, the Codex marketplace and the picker all key off the
-          # directory name, so a mismatch would surface far from its cause.
-          if profile.name == name then import ./lib/validate-profile.nix profile
-          else throw "profiles/${name}/agent-distro.nix declares name \"${profile.name}\"; it must match its directory.")
-        (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./profiles));
-
-      registry = import ./profiles/registry.nix;
-      default =
-        if profiles ? ${registry.default} then registry.default
-        else throw "profiles/registry.nix defaults to \"${registry.default}\", which is not a directory under profiles/.";
-
       # Upstream's own packages, once per system. Each instantiates its
       # packaging repo's nixpkgs, the dominant evaluation cost, so every
-      # profile and output shares these rather than re-importing them.
+      # launcher and output shares these rather than re-importing them.
       harnesses = lib.genAttrs systems (system:
         lib.genAttrs discovered.ordered (name:
           import (./harnesses + "/${name}/source.nix") { pkgs = pkgsFor system; }));
 
-      launchers = lib.genAttrs systems (system:
-        lib.mapAttrs
-          (_: profile: mkLaunchers {
-            inherit profile;
-            pkgs = pkgsFor system;
-            sources = name: _: harnesses.${system}.${name};
-          })
-          profiles);
-
-      bundles = lib.mapAttrs (_: lib.mapAttrs (_: ls: ls.bundle)) launchers;
-
-      pickers = lib.genAttrs systems (system: launchers.${system}.${default}.picker);
+      # The one package per system: every harness launcher, the picker as
+      # `bin/agent-distro`, and `share/agent-distro/versions`. A profile is not
+      # part of it: profiles are read at launch, or built by mkProfile.
+      launchers = lib.genAttrs systems (system: mkLaunchers {
+        pkgs = pkgsFor system;
+        sources = name: _: harnesses.${system}.${name};
+      });
+      agentDistro = lib.genAttrs systems (system: launchers.${system}.package);
       # The launcher's own no-compile policy, run ahead of time for a profile repository's CI.
       checkers = lib.genAttrs systems (system:
         let pkgs = pkgsFor system; in
         pkgs.callPackage ./lib/mk-check-profile.nix {
-          info = (import ./lib/runtime.nix pkgs).info profiles.${default} nixpkgs;
+          info = (import ./lib/runtime.nix pkgs).info nixpkgs;
         });
     in
     {
-      # The picker stays the runnable default; profile bundles install every harness command.
-      packages = lib.genAttrs systems (system: bundles.${system} // { default = pickers.${system}; check-profile = checkers.${system}; });
+      packages = lib.genAttrs systems (system: lib.removeAttrs launchers.${system} [ "picker" "package" ] // {
+        default = agentDistro.${system};
+        # The one package under the name the profile-keyed index published it:
+        # the transition the installed updates are served from, removed with
+        # the extra index keys .github/workflows/cache.yml writes.
+        vanilla = agentDistro.${system};
+        check-profile = checkers.${system};
+      });
       homeManagerModules.default = import ./modules/home-manager.nix {
-        inherit bundles cache caIndex;
+        packages = agentDistro;
         mkProfile = api.mkProfile;
-        defaultProfile = default;
         defaultFlake = "github:juspay/agent-distro";
+        inherit cache caIndex;
       };
       apps = lib.genAttrs systems (system: {
-        default = { type = "app"; program = lib.getExe pickers.${system}; };
+        default = { type = "app"; program = lib.getExe agentDistro.${system}; };
         check-profile = { type = "app"; program = lib.getExe checkers.${system}; };
       });
 
@@ -95,11 +80,9 @@
         discovered.metadata;
 
       lib = api;
-      # Resolved profile data, for the tests and for third parties.
-      inherit profiles;
       templates.default = {
         path = ./templates/default;
-        description = "A coding-agent distribution from one agent-distro.nix";
+        description = "A profile: an agent-distro.nix any agent-distro reads";
       };
     };
 }

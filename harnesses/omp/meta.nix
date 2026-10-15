@@ -8,7 +8,7 @@
     { name = "ompEnv"; script = import ../../test/guest-script.nix ./tests/check-env.py; requires = [ "gateway" ]; }
     { name = "ompKolu"; script = import ../../test/guest-script.nix ./tests/check-kolu.py; requires = [ "kolu" ]; packages = [ "koluFixture" ]; env.AGENT_DISTRO_SETTINGS = "0"; }
     { name = "ompKoluLaunch"; script = import ../../test/guest-script.nix ./tests/check-kolu-launch.py; requires = [ "koluLaunch" ]; packages = [ "koluFixture" ]; env.AGENT_DISTRO_SETTINGS = "0"; }
-    { name = "ompPlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "updated" ]; env.AGENT_DISTRO_SETTINGS = "0"; }
+    { name = "ompPlugins"; script = import ../../test/guest-script.nix ./tests/check-plugins.py; requires = [ "plugins" ]; packages = [ "changed" ]; env.AGENT_DISTRO_SETTINGS = "0"; }
     { name = "omp"; script = import ../../test/guest-script.nix ./tests/check.py; requires = [ ]; packages = [ ]; env.AGENT_DISTRO_SETTINGS = "0"; }
   ];
 }

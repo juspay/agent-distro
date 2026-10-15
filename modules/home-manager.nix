@@ -2,26 +2,26 @@
 # Shims, the updater and the state directory are built by lib/ so any Nix
 # consumer can run the same update machinery; only the OS glue (systemd,
 # launchd, activation) belongs to Home Manager.
-{ bundles, mkProfile, defaultProfile, defaultFlake ? null, cache, caIndex ? import ../lib/ca-index.nix }:
+{ packages, mkProfile, defaultFlake ? null, cache, caIndex ? import ../lib/ca-index.nix }:
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.agent-distro;
-  available = bundles.${pkgs.stdenv.hostPlatform.system};
+  # The one package, for this system: every harness launcher and the picker.
+  package = packages.${pkgs.stdenv.hostPlatform.system};
+  # The attribute it is published and updated under (mkUpdater's own default).
+  attribute = "default";
   # What `profiles` means: a string is a reference read at launch
   # (src/profile/resolve.ts); a derivation is already a built profile and is
   # used as it is; anything else — a path, a flake input — is built by mkProfile,
-  # whose store path is a reference too. One package is installed either way —
-  # the harnesses — and `profiles` is what each command exports as AI_PROFILE,
+  # whose store path is a reference too. One package is installed either way,
+  # and `profiles` is what every command it installs exports as AI_PROFILE,
   # whitespace-separated.
   # `profile` was the one-profile spelling of this, and is deprecated: a
-  # built-in name (the profile a package carries) is the one package and no
-  # AI_PROFILE, a reference is one entry of `profiles`, and anything else is a
-  # mistake worth naming rather than passing on to be read as a reference.
+  # reference is one entry of `profiles`, and a built-in name — which no
+  # package carries any more — is the one package and no AI_PROFILE.
   deprecated =
-    if cfg.profile == null then [ ]
-    else if builtins.hasAttr (builtins.unsafeDiscardStringContext cfg.profile) available then [ ]
-    else if lib.hasPrefix "/" cfg.profile || lib.hasInfix ":" cfg.profile then [ cfg.profile ]
-    else throw "Unknown agent-distro profile \"${cfg.profile}\"; name a reference in services.agent-distro.profiles instead: an absolute path or a flake reference such as github:juspay/skills.";
+    if cfg.profile != null && (lib.hasPrefix "/" cfg.profile || lib.hasInfix ":" cfg.profile)
+    then [ cfg.profile ] else [ ];
   profiles = cfg.profiles ++ deprecated;
   built = map
     (entry:
@@ -30,33 +30,30 @@ let
       else mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = entry; })
     profiles;
   aiProfile = lib.concatStringsSep " " (map toString built);
-  # The one package: the default profile's build, whatever `profiles` names.
-  bundleName = defaultProfile;
-  bundle = available.${bundleName};
   schedule = import ../lib/schedule.nix lib;
   stateDirectory = import ../lib/state-directory.nix {
     inherit (cfg) flake;
-    # What the updater builds, not the AI_PROFILE string: a profile's own store
-    # path changes whenever its input does, and keying the state by it would
-    # prune `current` and `last-success` on every `nix flake update`. This is
-    # also the name an install that predates `profiles` already hashed.
-    profile = defaultProfile;
+    # What the updater builds — `packages.<system>.${attribute}` — not the
+    # AI_PROFILE string: a profile's own store path changes whenever its input
+    # does, and keying the state by it would prune `current` and `last-success`
+    # on every `nix flake update`. It is also the value an install that
+    # predates `profiles` already hashed.
+    profile = attribute;
     xdgStateHome = config.xdg.stateHome;
   };
   shims = import ../lib/mk-shims.nix {
-    inherit pkgs bundle stateDirectory;
+    inherit pkgs package stateDirectory;
     profile = if aiProfile == "" then null else aiProfile;
   };
   nix = lib.getExe (if config.nix.package != null then config.nix.package else pkgs.nix);
   updater = import ../lib/mk-updater.nix {
-    inherit pkgs bundle nix;
+    inherit pkgs package nix;
     history = "${config.xdg.stateHome}/agent-distro/history.log";
     inherit stateDirectory;
     inherit (cfg) flake substituters caIndex;
-    profile = bundleName;
   };
-  # Discover commands from the bundle, keeping shims and collision checks together.
-  names = bundle.commands;
+  # Discover commands from the package, keeping shims and collision checks together.
+  names = package.commands;
   state = "state=${lib.escapeShellArg stateDirectory}";
   # The updater command escaped for systemd/activation: bare `command` list.
   updaterCommand = lib.escapeShellArgs updater.command;
@@ -92,14 +89,15 @@ in
         "services.agent-distro.profile is deprecated; set services.agent-distro.profiles instead."
         value;
       description = ''
-        Deprecated: use `profiles`. One profile, by a built-in name — which
-        installs the default package and sets no AI_PROFILE — or a reference,
-        which is `profiles = [ it ]`.
+        Deprecated: use `profiles`. One reference, which is `profiles = [ it ]`.
+        A value that is not a reference named the profile a built package
+        carried, and there is none now: it is the one package, and no
+        AI_PROFILE.
       '';
     };
     flake = lib.mkOption ({
       type = lib.types.str;
-      description = "Flake reference supplying the profile bundle.";
+      description = "Flake reference supplying the package the updater builds.";
     } // lib.optionalAttrs (defaultFlake != null) { default = defaultFlake; });
     substituters = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
@@ -108,8 +106,8 @@ in
         Binary caches (URL to public key) the updater passes to nix. A daemon
         ignores them for a user it does not trust unless the system config
         already lists them; that user's update takes the published
-        content-addressed bundle instead (caIndex). Updates never compile, so
-        only a bundle your caches or the content-addressed one holds will
+        content-addressed store path instead (caIndex). Updates never compile,
+        so only what your caches or the content-addressed one holds will
         install. {} adds none.
       '';
     };
@@ -117,17 +115,17 @@ in
       type = lib.types.str;
       default = caIndex.rawBase;
       description = ''
-        Where the updater reads which content-addressed bundle CI published:
-        `<caIndex>/<rev>/<system>/<profile>.json`, the revision being the one
-        the flake resolves to. The default is agent-distro's index; a
-        distribution that publishes its own bundles names its own, and one
-        whose revisions this index does not carry leaves the update skipped.
-        An `https://` URL with no credentials, query or fragment: the updater
-        fetches nothing else, and says so as a warning. Content-addressed
-        bundles are Linux-only, and built with Nix 2.34.x (2.35 addresses a
-        self-referential path differently, and a host on it cannot take them):
-        on macOS the index names the signed bundle, which needs the cache key
-        or a trusted user like any signed path.
+        Where the updater reads which content-addressed closure CI published:
+        `<caIndex>/<rev>/<system>/default.json`, the revision being the one the
+        flake resolves to. The default is agent-distro's index; a distribution
+        that publishes its own names its own, and one whose revisions this index
+        does not carry leaves the update skipped. An `https://` URL with no
+        credentials, query or fragment: the updater fetches nothing else, and
+        says so as a warning. Content-addressed closures are Linux-only, and
+        built with Nix 2.34.x (2.35 addresses a self-referential path
+        differently, and a host on it cannot take them): on macOS the index
+        names the signed package, which needs the cache key or a trusted user
+        like any signed path.
       '';
     };
     frequency = lib.mkOption {
@@ -156,7 +154,7 @@ in
     home.activation.agent-distro-prune = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       (
         ${state}
-        # Superseded out-links must stop rooting bundles the shims no longer use.
+        # Superseded out-links must stop rooting what the shims no longer use.
         for previous in ${lib.escapeShellArg "${config.xdg.stateHome}/agent-distro"}/*; do
           [ -d "$previous" ] && [ "$previous" != "$state" ] || continue
           run ${pkgs.coreutils}/bin/rm -rf -- "$previous"

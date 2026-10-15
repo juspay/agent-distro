@@ -23,7 +23,7 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
   { pkgs }: pkgs.writeShellScriptBin "discovery-stub" "echo stub"
   SOURCE
   cat > source/harnesses/discovery-stub/default.nix <<'ADAPTER'
-  { pkgs, plugins, info, package }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
+  { pkgs, nixpkgs, package }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
   ADAPTER
   hash=$(nix-hash --type sha256 --base32 source)
   tar -cf source.tar source
@@ -39,9 +39,8 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
         legacyPackages.x86_64-linux = pkgs;
       };
       distro = (import (root + \"/flake.nix\")).outputs { nixpkgs = nixpkgsInput; };
-      profile = { name = \"discovery\"; description = \"Discovery\"; plugins = []; };
-      launchers = distro.lib.mkLaunchers { inherit pkgs profile; };
-      checks = import (root + \"/test/lib.nix\") { inherit pkgs profile launchers; };
+      launchers = distro.lib.mkLaunchers { inherit pkgs; };
+      checks = import (root + \"/test/lib.nix\") { inherit pkgs; };
       testOutputs = (import (root + \"/test/flake.nix\")).outputs {
         nixpkgs = nixpkgsInput;
         agent-distro = distro // { outPath = root; };
@@ -50,16 +49,15 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
         juspay-skills = \"/nonexistent\";
         kolu = \"/nonexistent\";
       };
-    in assert builtins.elem \"discovery-stub\" launchers.bundle.commands;
-       assert builtins.any (row: row.name == \"discovery-stub\" && row.title == \"Discovery Stub\") (builtins.head launchers.picker.listing.profiles).harnesses;
+    in assert builtins.elem \"discovery-stub\" launchers.package.passthru.commands;
+       assert builtins.any (row: row.name == \"discovery-stub\" && row.title == \"Discovery Stub\") launchers.picker.listing.harnesses;
        assert distro.harnesses.x86_64-linux ? discovery-stub;
        assert (distro.harnesses.x86_64-linux.discovery-stub).name == \"discovery-stub\";
-       assert !(builtins.tryEval (distro.lib.mkFlake { profile = profile // { name = \"discovery-stub\"; }; })).success;
        assert checks ? discoveryStub;
        assert !(checks ? discoveryStubGateway);
-       assert testOutputs.checks.x86_64-linux ? vanilla-discoveryStub;
+       assert testOutputs.checks.x86_64-linux ? plain-discoveryStub;
        assert testOutputs.checks.x86_64-linux ? gateway-discoveryStubGateway;
-       assert !(testOutputs.checks.x86_64-linux ? vanilla-discoveryStubGateway);
+       assert !(testOutputs.checks.x86_64-linux ? plain-discoveryStubGateway);
        true
   " > result.json
   grep -Fx true result.json

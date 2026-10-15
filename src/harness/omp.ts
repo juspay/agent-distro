@@ -21,7 +21,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname } from 'node:path';
 import { Document, isAlias, isMap, isScalar, isSeq, parse, parseDocument, type YAMLMap } from 'yaml';
 import { log } from '../log.ts';
-import type { Adapter, ProfileEntry } from '../plugin/launch.ts';
+import type { Adapter } from '../plugin/launch.ts';
 import { shellQuote } from '../plugin/launcher.ts';
 import { writeSpecPlugin, type Inputs } from '../plugin/resources.ts';
 import { decodeUtf8, isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -120,14 +120,12 @@ export function fillDefaults(configPath: string, layers: Defaults[]) {
   }
 }
 
-/** At launch: every plugin's `-e` root, as shell words, replacing the launcher's own. */
-export const adapter: Adapter<{ profile: (ProfileEntry & { dir: string })[] }, ProfileEntry & { dir: string }, Inputs> = {
+/** At launch: every plugin's `-e` root, as shell words. */
+export const adapter: Adapter<Inputs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) => writeSpecPlugin(description, out, inputs, report),
-  launch: ({ kept, plugins }) => [
-    ...kept.map((plugin) => plugin.entry.dir),
-    ...plugins.map((plugin) => plugin.translation),
-  ].flatMap((dir) => ['-e', shellQuote(dir)]).join(' '),
+  launch: ({ plugins }) => plugins.map((plugin) => plugin.translation)
+    .flatMap((dir) => ['-e', shellQuote(dir)]).join(' '),
 };
 
 if (import.meta.main) {

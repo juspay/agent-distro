@@ -1,74 +1,52 @@
-# A profile's launchers: one command per harness, the picker over this profile,
-# and the bundle, which joins the commands and that picker as `bin/agent-distro`.
-# The bundle describes its profile: `share/agent-distro/profile.json` names it
-# and `share/agent-distro/versions` lists its harnesses (src/listing.ts).
+# The agent-distro package: one command per harness, the picker over them, and
+# `bin/agent-distro` as the picker. `share/agent-distro/versions` lists the
+# harnesses it carries and their versions (src/listing.ts).
 #
-# A profile here is built in: its plugins are paths at build time, never the
-# flake references an `agent-distro.nix` read at launch may also name.
+# No profile is part of the build. A profile is an `agent-distro.nix` read when
+# a harness starts, or one built into its own store path by lib/mk-profile.nix;
+# a launch composes them (src/profile/resolve.ts). What a launcher knows of the
+# build is the nixpkgs its profiles' `packages` are evaluated against, and the
+# picker's menu.
 #
 # `nixpkgs`, the flake input `pkgs` was imported from, lets the launchers name
 # it by a locked reference rather than hold its source
-# (lib/nixpkgs-reference.nix); flake.nix and mkFlake pass their own.
-{ pkgs, profile, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }), nixpkgs ? null }:
+# (lib/nixpkgs-reference.nix); flake.nix passes its own.
+{ pkgs, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }), nixpkgs ? null }:
 let
   inherit (pkgs) lib;
-  plugins = map
-    (plugin:
-      if builtins.isString plugin && !(lib.hasPrefix "/" plugin) then
-        throw "Profile \"${profile.name}\" names plugin \"${plugin}\": a flake reference is read at launch, not built in; pass a flake input's path instead."
-      else plugin)
-    profile.plugins;
-  runtime = import ./runtime.nix pkgs;
-  # What every launcher and the picker know of this build (src/profile/resolve.ts).
-  info = runtime.info profile nixpkgs;
-
-  # What a plugin's MCP servers name by bare command. They reach every harness
-  # the same way, so they go on PATH here, around the adapters, rather than
-  # once inside each; they come first, so a launch runs what the build pinned.
-  packages = (profile.packages or (_: [ ])) pkgs;
-  withPackages = launcher:
-    if packages == [ ] then launcher
-    else
-      pkgs.writeShellApplication {
-        inherit (launcher) name;
-        runtimeInputs = packages;
-        derivationArgs = lib.optionalAttrs (launcher ? version) { inherit (launcher) version; };
-        text = ''
-          exec ${lib.getExe launcher} "$@"
-        '';
-      };
-
   discovery = import ./discover-harnesses.nix;
   harnesses = discovery.ordered;
-  commands = lib.genAttrs harnesses (name: withPackages (import (../harnesses + "/${name}/default.nix") {
-    inherit pkgs plugins info;
+  commands = lib.genAttrs harnesses (name: import (../harnesses + "/${name}/default.nix") {
+    inherit pkgs nixpkgs;
     package = sources name pkgs;
-  }));
-
-  # The profile's own chooser; the bundle carries it so a fetch of the
-  # bundle refreshes the picker along with the harnesses.
-  picker = pkgs.callPackage ./picker.nix { inherit info; launchers = commands; };
-
+  });
+  # What the package carries: one line per harness, in menu order. The picker's
+  # menu (lib/picker.nix), the launchers beside it and this file are one list,
+  # so the three cannot drift.
+  versions = pkgs.writeText "agent-distro-versions" (lib.concatMapStrings
+    (name: "${name}\t${discovery.metadata.${name}.title}\t${commands.${name}.version}\n")
+    harnesses);
+  # The package carries its picker, so a fetch of the package refreshes the
+  # picker along with the harnesses.
+  picker = pkgs.callPackage ./picker.nix { launchers = commands; inherit nixpkgs; };
 in
 commands // {
-  bundle = pkgs.symlinkJoin {
-    name = "agent-distro-${profile.name}";
+  package = pkgs.symlinkJoin {
+    name = "agent-distro";
     paths = map (name: commands.${name}) harnesses ++ [ picker ];
     postBuild = ''
       mkdir -p "$out/share/agent-distro"
-      cp ${pkgs.writeText "agent-distro-versions" (lib.concatMapStrings
-        (name: "${name}\t${discovery.metadata.${name}.title}\t${commands.${name}.version}\n")
-        harnesses)} "$out/share/agent-distro/versions"
-      cp ${pkgs.writeText "agent-distro-profile.json" (builtins.toJSON {
-        # The attributes the picker's listing reads, so the two cannot drift.
-        inherit (profile) name description;
-      })} "$out/share/agent-distro/profile.json"
+      cp ${versions} "$out/share/agent-distro/versions"
     '';
     meta.mainProgram = "agent-distro";
     passthru = {
+      # The harness names its `bin/` holds, in menu order.
       commands = harnesses;
       # For the Home Manager updater: the Node and tree the launchers use.
-      inherit runtime;
+      runtime = import ./runtime.nix pkgs;
+      # What the picker resolves a profile with, which a launch's packages are
+      # evaluated against (src/profile/resolve.ts `Info`).
+      inherit (picker.passthru) infoFile;
     };
   };
   inherit picker;

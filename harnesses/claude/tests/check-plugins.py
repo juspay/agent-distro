@@ -9,7 +9,7 @@ for plugin, names in expected.items():
 for plugin in plugins:
     run('plugin', 'validate', plugin['installPath'])
 
-# A user's extra plugin composes with the bundled roots, including a spaced path.
+# A user's extra plugin composes with the profile's roots, including a spaced path.
 personal = home / 'personal plugin'
 (personal / '.claude-plugin').mkdir(parents=True)
 (personal / '.claude-plugin/plugin.json').write_text('{"name":"personal"}')
@@ -19,14 +19,14 @@ extra = json.loads(run('--plugin-dir', str(personal), 'plugin', 'list', '--json'
 assert {p['id'] for p in extra} == {p + '@inline' for p in expected} | {'personal@inline'}, extra
 
 # A second build must discover its new roots in the same existing home.
-updated = json.loads(run('plugin', 'list', '--json', launcher='claude-updated'))
+updated = json.loads(run('plugin', 'list', '--json', launcher='claude-changed'))
 assert {p['id'] for p in updated} == {p + '@inline' for p in expected}, updated
 previous_paths = {p['installPath'] for p in plugins}
 assert all(p['enabled'] and p['scope'] == 'session' for p in updated), updated
 assert all(p['installPath'].startswith('/nix/store/') and
            p['installPath'] not in previous_paths for p in updated), updated
 for plugin, names in expected.items():
-    assert inventory(plugin, launcher='claude-updated')[0] == set(names)
+    assert inventory(plugin, launcher='claude-changed')[0] == set(names)
 
 # AGENT_DISTRO_PLUGINS: a store plugin the profile lacks joins for that launch.
 fixture = os.environ['AGENT_DISTRO_TEST_PLUGIN']

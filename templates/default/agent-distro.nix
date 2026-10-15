@@ -1,6 +1,7 @@
 # This repository's profile. agent-distro reads it when a harness starts in
-# this repository, or anywhere with `agent-distro github:<you>/<repo>`; the
-# flake builds it into a distribution of its own.
+# this repository, or anywhere with `agent-distro github:<you>/<repo>`;
+# nothing of it is built unless someone pins it with
+# `agent-distro.lib.mkProfile`.
 {
   name = "my-distribution";
   description = "My skills with your choice of coding agent";

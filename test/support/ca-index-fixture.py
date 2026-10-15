@@ -1,6 +1,6 @@
 """A stub of the content-addressed index: one port answers with the entry a test
 wrote, the other refuses with 404, so a test can drive a published revision, an
-unpublished one, and an entry that names the signed bundle alone (which is what
+unpublished one, and an entry that names the signed package alone (which is what
 a darwin system gets).
 
 Serves TLS: the updater fetches only an https base, so the stub has to be one

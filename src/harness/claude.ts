@@ -21,7 +21,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../log.ts';
-import type { Adapter, ProfileEntry, Report } from '../plugin/launch.ts';
+import type { Adapter, Report } from '../plugin/launch.ts';
 import { launcher, shellQuote } from '../plugin/launcher.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, fileName, launchable, readDescription } from '../plugin/resources.ts';
@@ -70,20 +70,16 @@ export function writePlugin(description: Description, out: string, { bash, env }
   }
 }
 
-type LaunchArgs = Inputs & { profile: (ProfileEntry & { dir: string })[] };
-
 /**
- * At launch: the `--plugin-dir` arguments for every plugin, as shell words,
- * replacing the launcher's own. A plugin on the variable is one more
- * session-only plugin directory.
+ * At launch: the `--plugin-dir` arguments for every plugin, as shell words. A
+ * plugin of a profile, or of the variable, is one more session-only plugin
+ * directory.
  */
-export const adapter: Adapter<LaunchArgs, LaunchArgs['profile'][number], Inputs> = {
+export const adapter: Adapter<Inputs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) => writePlugin(description, out, inputs, report),
-  launch: ({ kept, plugins }) => [
-    ...kept.map((plugin) => plugin.entry.dir),
-    ...plugins.map((plugin) => plugin.translation),
-  ].flatMap((dir) => ['--plugin-dir', shellQuote(dir)]).join(' '),
+  launch: ({ plugins }) => plugins.map((plugin) => plugin.translation)
+    .flatMap((dir) => ['--plugin-dir', shellQuote(dir)]).join(' '),
 };
 
 if (import.meta.main) {

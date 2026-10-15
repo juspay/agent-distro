@@ -1,37 +1,26 @@
 /**
  * What `agent-distro --list --json` prints, and what the picker draws: one
- * value computed in lib/picker.nix, so the two cannot drift, with the profile
- * in effect resolved at launch (src/profile/resolve.ts).
+ * value computed in lib/picker.nix from the versions the package ships
+ * (lib/mk-launchers.nix), with the profile in effect resolved at launch
+ * (src/profile/resolve.ts).
  *
- *   { "profiles": [ { "description": "…",
- *                     "harnesses": [ { "name": "claude", "tagline": "…",
- *                                      "title": "Claude Code", "version": "2.1.291" } ],
- *                     "name": "vanilla" } ],
+ *   { "harnesses": [ { "name": "claude", "tagline": "…",
+ *                      "title": "Claude Code", "version": "2.1.291" } ],
  *     "profile": { "description": "…", "name": "ekala",
  *                  "origin": "/home/me/ekala/agent-distro.nix", "source": "repository",
  *                  "over": { "description": "…", "name": "juspay",
  *                            "origin": "github:juspay/skills", "source": "variable" } } }
  *
- * `profiles` is the launcher's built-in profile; `harnesses` is in menu order.
- * `version` is the display version, without the package's `+` revision
- * suffix. `profile` is the one a launch from here uses, and where it came
- * from: `source` is `positional` (`agent-distro <reference>`), `repository`
- * (the `agent-distro.nix` found from the working directory up to the git
- * root), `variable` (AI_PROFILE) or `builtin`, and `origin` is that reference,
- * the path to that `agent-distro.nix`, or the built-in name. `over`, when
- * present, is the profile it is composed over, in the same shape: a
- * repository's over AI_PROFILE. The launcher's built-in profile, beneath
- * every other but a positional one, is never named there. The picker's own
- * menu has no `profile`; `--list --json` always does.
- *
- * A profile's bundle is self-describing, so a consumer reads files rather than
- * running its picker: `share/agent-distro/profile.json` is a `ProfileFile`,
- * from the same profile attributes as this listing's `name` and `description`,
- *
- *   { "description": "…", "name": "juspay" }
- *
- * and `share/agent-distro/versions` has one `name\ttitle\tversion` line per
- * harness, in menu order, each version as packaged (`+` suffix and all).
+ * `harnesses` is what the package carries, in menu order. `version` is the
+ * display version, without the package's `+` revision suffix. `profile` is the
+ * one a launch from here uses, and where it came from: `source` is
+ * `positional` (`agent-distro <reference>`), `repository` (the
+ * `agent-distro.nix` found from the working directory up to the git root) or
+ * `variable` (AI_PROFILE), and `origin` is that reference or the path to that
+ * `agent-distro.nix`. `over`, when present, is the profile it is composed
+ * over, in the same shape: a repository's over your AI_PROFILE, each entry
+ * over the one before. A launch with no profile at all — nothing set, and no
+ * repository — has no `profile` here.
  */
 
 export type Harness = {
@@ -42,15 +31,8 @@ export type Harness = {
   version: string;
 };
 
-export type Profile = {
-  /** The built-in profile's name, an `AI_PROFILE` value. */
-  name: string;
-  description: string;
-  harnesses: Harness[];
-};
-
 /** Where the profile in effect came from, first to last in precedence. */
-export const SOURCES = ['positional', 'repository', 'variable', 'builtin'] as const;
+export const SOURCES = ['positional', 'repository', 'variable'] as const;
 export type Source = typeof SOURCES[number];
 
 /** The profile in effect, and where it came from. */
@@ -58,22 +40,23 @@ export type InEffect = {
   name: string;
   description: string;
   source: Source;
-  /** The reference, the path to the `agent-distro.nix`, or the built-in name. */
+  /** The reference, or the path to the `agent-distro.nix`. */
   origin: string;
-  /** The profile this one is composed over, unless that is the launcher's built-in one. */
+  /** The profile this one is composed over, if any. */
   over?: InEffect;
 };
 
 export type Listing = {
-  /** The launcher's built-in profile. */
-  profiles: Profile[];
+  /** The harnesses the package carries, in menu order. */
+  harnesses: Harness[];
+  /** The profile in effect for a launch from the same directory and environment. */
   profile?: InEffect;
 };
 
 /** Names are selectors: one shell word, no `/`. */
 export const isName = (value: unknown): value is string => typeof value === 'string' && /^[^\s/]+$/.test(value);
 
-/** The profiles it is composed over, then its own name: `juspay + repo`. */
+/** The profile in effect's name, then those it is composed over: `juspay + repo`. */
 export function nameText({ name, over }: Pick<InEffect, 'name' | 'over'>): string {
   return over ? `${nameText(over)} + ${name}` : name;
 }
@@ -81,14 +64,10 @@ export function nameText({ name, over }: Pick<InEffect, 'name' | 'over'>): strin
 /** Where the profile in effect came from, in a few words, then what it is composed over. */
 export function sourceText(profile: Pick<InEffect, 'source' | 'origin' | 'over'>): string {
   if (profile.source === 'positional') return `chosen as ${profile.origin}`;
-  if (profile.source === 'builtin') return 'built in';
   const where = ({ source, origin, over }: Pick<InEffect, 'source' | 'origin' | 'over'>): string =>
     `${source === 'variable' ? 'AI_PROFILE=' : ''}${origin}${over ? ` over ${where(over)}` : ''}`;
   return `from ${where(profile)}`;
 }
-
-/** A bundle's `share/agent-distro/profile.json`. */
-export type ProfileFile = Pick<Profile, 'name' | 'description'>;
 
 type Field = 'string' | 'name' | 'list' | 'source' | 'object';
 
@@ -125,26 +104,17 @@ function unique(names: string[], path: string) {
 
 /** Check a parsed `--list --json` value against `Listing`; throws naming the first bad field. */
 export function parseListing(value: unknown): Listing {
-  const listing = record(value, 'listing', { profiles: 'list', profile: 'object' }, ['profile']) as Listing;
+  const listing = record(value, 'listing', { harnesses: 'list', profile: 'object' }, ['profile']) as Listing;
   const inEffect = (value: unknown, path: string) => {
     const profile = record(value, path, { name: 'name', description: 'string', source: 'source', origin: 'string', over: 'object' }, ['over']);
     if (profile.over !== undefined) inEffect(profile.over, `${path}.over`);
   };
   if (listing.profile !== undefined) inEffect(listing.profile, 'listing.profile');
-  listing.profiles.forEach((profile, i) => {
-    record(profile, `profiles[${i}]`, { name: 'name', description: 'string', harnesses: 'list' });
-    profile.harnesses.forEach((harness, j) => {
-      const path = `profiles[${i}].harnesses[${j}]`;
-      record(harness, path, { name: 'name', title: 'string', tagline: 'string', version: 'string' });
-      if (harness.version.includes('+')) throw new Error(`${path}.version keeps a + suffix`);
-    });
-    unique(profile.harnesses.map((h) => h.name), `profiles[${i}].harnesses`);
+  listing.harnesses.forEach((harness, i) => {
+    const path = `harnesses[${i}]`;
+    record(harness, path, { name: 'name', title: 'string', tagline: 'string', version: 'string' });
+    if (harness.version.includes('+')) throw new Error(`${path}.version keeps a + suffix`);
   });
-  unique(listing.profiles.map((p) => p.name), 'profiles');
+  unique(listing.harnesses.map((h) => h.name), 'harnesses');
   return listing;
-}
-
-/** Parse a bundle's `profile.json` as a `ProfileFile`; throws naming the first bad field. */
-export function parseProfileFile(text: string): ProfileFile {
-  return record(JSON.parse(text), 'profile', { name: 'name', description: 'string' }) as ProfileFile;
 }

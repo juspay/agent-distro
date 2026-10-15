@@ -171,7 +171,6 @@ test('plugins from AGENT_DISTRO_PLUGINS last one launch', () => {
     launch: {
       skills: ['/cache/kolu/skills/kolu', '/cache/extra/skills/extra'],
       mcpServers: ['kolu', 'remote'],
-      replaces: { kolu: profileServer },
     },
   });
   writeFileSync(join(agent, 'mcp.json'), JSON.stringify({ mcpServers: { personal: { command: '/personal' } } }));
@@ -214,7 +213,7 @@ test('a launch with plugins needs a home; one without is the profile', async () 
   const { adapter } = await import(join(process.argv[2], 'harness/pi.ts'));
   const config = temporary();
   writeFileSync(join(config, 'config.json'), JSON.stringify({ skills: [], mcpServers: {} }));
-  const launch = { args: { config, profile: [] }, kept: [], replaced: [], cache: null, report: () => {} };
+  const launch = { args: { config }, cache: null, report: () => {} };
   assert.equal(adapter.launch({ ...launch, plugins: [] }), join(config, 'config.json'));
   const saved = { HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR };
   delete process.env.HOME;

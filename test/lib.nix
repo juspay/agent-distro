@@ -1,37 +1,61 @@
 # Metadata selects the checks; shared code supplies only VM and fixture plumbing.
-# `koluPlugin` is kolu's Agent Plugin directory, for the `koluLaunch` checks:
-# they load it through AGENT_DISTRO_PLUGINS rather than from the profile.
-{ pkgs, launchers, profile, mkLaunchers ? import ../lib/mk-launchers.nix, features ? [ ], koluPlugin ? null }:
+#
+# The checks launch the one package, and a profile reaches them the way it
+# reaches a user: `AI_PROFILE`, holding the store paths of the `mkProfile`
+# outputs the caller passes. What the checks expect of those profiles — their
+# `env`, their `settings`, and each plugin's skills — is read back from those
+# builds (`share/agent-distro/profile.json` and its plugins' descriptions), so
+# an expectation and the launch cannot drift.
+#
+# `updated` is the same profiles with their plugins rebuilt to new store paths:
+# the `changed` fixture launches with those, for the checks that a plugin whose
+# content changed is installed again. `koluPlugin` is kolu's Agent Plugin
+# directory, for the `koluLaunch` checks: they load it through
+# AGENT_DISTRO_PLUGINS rather than from the profile.
+{ pkgs, profiles ? [ ], updated ? null, features ? [ ], koluPlugin ? null }:
 let
   inherit (pkgs) lib;
   common = import ./common.nix;
-  discovered = import ../lib/discover-harnesses.nix;
-  expected = builtins.listToAttrs (map
-    (plugin:
-      let
-        manifest = builtins.fromJSON (builtins.readFile "${plugin}/plugin.json");
-        skills = "${plugin}/skills";
-        entries = if builtins.pathExists skills then builtins.readDir skills else { };
-      in
-      {
-        name = manifest.name;
-        value = builtins.filter (name: builtins.pathExists "${skills}/${name}/SKILL.md") (builtins.attrNames entries);
-      })
-    profile.plugins);
-  updated = common.updatedLaunchers mkLaunchers pkgs profile;
-  # The same distribution with nothing of its own: no plugins, no environment
-  # and no settings, for the checks that prove a launch's are the profile's.
-  upstream = mkLaunchers { inherit pkgs; profile = profile // { plugins = [ ]; env = { }; settings = { }; }; };
-  # The `secret` variables of the profile's `env`: a check that needs the
+  discovery = import ../lib/discover-harnesses.nix;
+  launchers = import ../lib/mk-launchers.nix { inherit pkgs; };
+  # What one built profile says: its `env` and `settings`, and its plugins, each
+  # with the skills the reader found in it.
+  described = profile:
+    let
+      json = builtins.fromJSON (builtins.readFile "${profile}/share/agent-distro/profile.json");
+      indexes = builtins.attrNames (builtins.readDir "${profile}/share/agent-distro/plugins");
+      plugins = map
+        (index: builtins.fromJSON
+          (builtins.readFile "${profile}/share/agent-distro/plugins/${index}/description.json"))
+        indexes;
+    in
+    {
+      inherit (json) env settings;
+      expected = builtins.listToAttrs (map
+        (plugin: { name = plugin.manifest.name; value = builtins.attrNames plugin.skills; })
+        plugins);
+    };
+  # The stack, composed left to right as a launch composes it: plugins both, in
+  # order, and `env`/`settings` key-wise with the later profile winning.
+  each = map described profiles;
+  expected = builtins.foldl' (all: one: all // one.expected) { } each;
+  env = builtins.foldl' (all: one: all // one.env) { } each;
+  settings = builtins.foldl' (all: one: all // one.settings) { } each;
+  aiProfile = lib.concatStringsSep ":" (map toString profiles);
+  # The prefix every one-launch Codex marketplace is named with
+  # (src/harness/codex.ts); a check that needs the marketplaces derives the rest.
+  marketplace = "agent-distro-";
+  # The `secret` variables of the profiles' `env`: a check that needs the
   # harness to start sets them, as a user who has a key would.
   secrets = lib.mapAttrs (_: _: "test-api-key")
-    (lib.filterAttrs (_: value: lib.isAttrs value && (value.secret or false)) (profile.env or { }));
+    (lib.filterAttrs (_: value: lib.isAttrs value && (value.secret or false)) env);
   fixtures = harness: {
-    updated = pkgs.writeShellScriptBin "${harness}-updated" ''
-      exec ${lib.getExe updated.${harness}} "$@"
+    changed = pkgs.writeShellScriptBin "${harness}-changed" ''
+      AI_PROFILE=${lib.escapeShellArg (lib.concatStringsSep ":" (map toString (if updated == null then profiles else updated)))} \
+        exec ${lib.getExe launchers.${harness}} "$@"
     '';
     upstream = pkgs.writeShellScriptBin "${harness}-upstream" ''
-      exec ${lib.getExe upstream.${harness}} "$@"
+      AI_PROFILE= exec ${lib.getExe launchers.${harness}} "$@"
     '';
     koluFixture = pkgs.writeShellScriptBin "kolu" ''
       exec ${pkgs.python3}/bin/python ${./support/kolu-mcp-fixture.py} "$@"
@@ -50,8 +74,10 @@ let
         imports = [ common.baseNode ] ++ lib.optional gateway common.gatewayNode;
         virtualisation.diskSize = if diskSize == null then 1024 else diskSize;
         environment.systemPackages = [ launchers.${harness} pkgs.python3 ] ++ map (key: (fixtures harness).${key}) packages;
-        # Plugins a check may put on AGENT_DISTRO_PLUGINS; it is never set globally.
-        environment.variables = lib.optionalAttrs gateway secrets
+        # The profiles these checks launch with, and the plugins a check may put
+        # on AGENT_DISTRO_PLUGINS; that variable is never set globally.
+        environment.variables = lib.optionalAttrs (aiProfile != "") { AI_PROFILE = aiProfile; }
+          // lib.optionalAttrs gateway secrets
           // { AGENT_DISTRO_TEST_PLUGIN = "${./fixtures/launch-plugin}"; }
           // { AGENT_DISTRO_TEST_SPEC = "${./fixtures/spec-plugin}"; }
           // lib.optionalAttrs (builtins.elem "koluLaunch" requires) {
@@ -67,15 +93,15 @@ let
           machine.wait_for_unit("fake-gateway.service")
           machine.wait_for_open_port(8080)
         ''}
-        # What the profile in effect declares. A check the driver runs itself
-        # (`builtins.readFile` in meta.nix) reads these two as globals; a guest
+        # What the profiles in effect declare. A check the driver runs itself
+        # (`builtins.readFile` in meta.nix) reads these as globals; a guest
         # script, which runs inside the VM with its support module beside it
         # (test/guest-script.nix), reads the `env` from its argv instead, after
-        # the expected skills and the marketplace name.
-        profile_env = json.loads(${builtins.toJSON (builtins.toJSON (profile.env or { }))})
-        profile_settings = json.loads(${builtins.toJSON (builtins.toJSON (profile.settings or { }))})
+        # the expected skills and the Codex marketplace prefix.
+        profile_env = json.loads(${builtins.toJSON (builtins.toJSON env)})
+        profile_settings = json.loads(${builtins.toJSON (builtins.toJSON settings)})
         arguments = ${builtins.toJSON (lib.escapeShellArgs [
-          (builtins.toJSON expected) "${profile.name}-ai" (builtins.toJSON (profile.env or { }))
+          (builtins.toJSON expected) marketplace (builtins.toJSON env)
         ])}
         ${script}
       '';
@@ -86,12 +112,11 @@ let
         (check:
           assert builtins.all (feature: builtins.elem feature [ "plugins" "gateway" "kolu" "spec" "koluLaunch" ]) (check.requires or [ ]);
           builtins.all (feature: builtins.elem feature features) (check.requires or [ ]))
-        discovered.metadata.${harness}.checks))
-    discovered.ordered;
+        discovery.metadata.${harness}.checks))
+    discovery.ordered;
 in
 builtins.listToAttrs checks // {
   picker = pkgs.testers.runNixOSTest (import ./test-picker.nix {
     menu = launchers.picker;
-    inherit profile;
   });
 }

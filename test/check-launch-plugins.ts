@@ -1,7 +1,9 @@
 /**
  * AGENT_DISTRO_PLUGINS without a VM or a harness: cache keys, re-translation,
- * name-based precedence, a profile's plugins replacing the built-in ones, the
- * cache's upkeep, the shell a launcher evaluates, and the launches it must fail.
+ * name-based precedence between the profile in effect's plugins and the
+ * variable's, the cache's upkeep, the shell a launcher evaluates, and the
+ * launches it must fail. How the stack composes into that one profile is
+ * check-profile.ts's.
  *
  * Usage: node check-launch-plugins.ts SRC STORE_PLUGIN STORE_SUBDIRECTORY_PLUGIN NIX_HASH PROMPT_SECRETS_NIX
  *
@@ -41,35 +43,30 @@ function plugin(name: string, skill = 'hello', body = 'Hello'): string {
   return root;
 }
 
-/** A profile entry as a launcher's ARGS_JSON lists it. */
-function profileEntry(root: string, dir: string) {
+/** A description a built profile of the stack holds for a plugin root (`Described`). */
+function describedPlugin(root: string) {
   const description = join(temporary(), 'description.json');
   writeFileSync(description, JSON.stringify({
     root, version: '1.0.0', manifest: { $schema: SCHEMA, name: JSON.parse(readFileSync(join(root, 'plugin.json'), 'utf8')).name },
     skills: {}, mcpServers: {}, reports: [],
   }));
-  return { description, dir };
+  return { root, description };
 }
 
-const info = { default: 'vanilla', builtins: [{ name: 'vanilla', description: '', env: {}, settings: {} }], nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
-const claudeArgs = (profile: unknown[] = []) => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', profile, info });
+const info = { nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
+const claudeArgs = () => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', info });
 
-function resolve(value: string, cache: string, profile: unknown[] = [], reports: string[] = [], adapter = claude) {
-  return launch.resolve('claude', adapter, claudeArgs(profile), value, { XDG_CACHE_HOME: cache },
-    (message: string) => reports.push(message));
-}
-
-/** `resolve` for a profile that does not include the built-in one, whose plugin is `own`. */
-function launch_(own: string, value: string, cache: string, profile: unknown[] = []) {
-  return launch.resolve('claude', claude, claudeArgs(profile), value, { XDG_CACHE_HOME: cache }, () => {}, [own], true);
+function resolve(value: string, cache: string, own: string[] = [], reports: string[] = [], adapter = claude) {
+  return launch.resolve('claude', adapter, claudeArgs(), value, { XDG_CACHE_HOME: cache },
+    (message: string) => reports.push(message), own);
 }
 
 /** The cache root `resolve` uses for an XDG_CACHE_HOME. */
 const cacheDir = (cache: string) => join(cache, 'agent-distro');
 
-function argsFile(profile: unknown[] = []) {
+function argsFile() {
   const args = join(temporary(), 'args.json');
-  writeFileSync(args, JSON.stringify(claudeArgs(profile)));
+  writeFileSync(args, JSON.stringify(claudeArgs()));
   return args;
 }
 
@@ -199,60 +196,57 @@ test('relative, trailing-slash and symlinked entries resolve to their directory'
 
 test('a translation is replaced only by name, and the variable wins', () => {
   const cache = temporary();
-  const profile = [profileEntry(plugin('kolu'), '/profile/kolu'), profileEntry(plugin('skills'), '/profile/skills')];
+  // The profile in effect's own plugin directories, which lead the variable's.
+  const own = [plugin('kolu'), plugin('skills')];
   const early = plugin('kolu', 'early');
   const late = plugin('kolu', 'late');
   const extra = plugin('extra');
-  const result = resolve([early, extra, late].join(':'), cache, profile);
-  assert.deepEqual(result.kept.map((p: any) => p.entry.dir), ['/profile/skills']);
-  assert.deepEqual(result.replaced.map((p: any) => p.name), ['kolu']);
-  assert.deepEqual(result.plugins.map((p: any) => [p.name, p.description.root]), [['extra', extra], ['kolu', late]]);
+  const result = resolve([early, extra, late].join(':'), cache, own);
+  assert.deepEqual(result.plugins.map((p: any) => [p.name, p.description.root]),
+    [['skills', own[1]], ['extra', extra], ['kolu', late]]);
   const words = claude.launch(result);
-  assert.equal(words, ['--plugin-dir /profile/skills', ...result.plugins.map((p: any) => `--plugin-dir ${p.translation}`)].join(' '));
-  assert.ok(!words.includes('/profile/kolu'), 'the replaced profile plugin is gone');
+  // Every directory the harness is handed is a translation, the profile's too.
+  assert.equal(words, result.plugins.map((p: any) => `--plugin-dir ${p.translation}`).join(' '));
+  assert.ok(!words.includes(own[0]), 'the replaced profile plugin is gone');
+  // A name matches whatever the versions are.
   const versioned = plugin('skills');
   writeFileSync(join(versioned, 'plugin.json'), JSON.stringify({ $schema: SCHEMA, name: 'skills', version: '0.0.1' }));
-  assert.deepEqual(resolve(versioned, cache, profile).replaced.map((p: any) => p.name), ['skills']);
+  assert.deepEqual(resolve(versioned, cache, own).plugins.map((p: any) => p.description.root), [own[0], versioned]);
 });
 
 test('no entries load nothing and need no cache', () => {
   assert.deepEqual(launch.entries(''), []);
   assert.deepEqual(launch.entries('::a::b:'), ['a', 'b']);
-  const profile = [profileEntry(plugin('kept'), '/profile/kept')];
-  const result = run(':', { XDG_CACHE_HOME: undefined, HOME: undefined }, profile);
+  const result = run(':', { XDG_CACHE_HOME: undefined, HOME: undefined });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(launched(result.stdout), '--plugin-dir /profile/kept');
+  assert.equal(launched(result.stdout), '');
 });
 
-test('a profile chosen positionally replaces every built-in plugin, ahead of the variable', () => {
+test("a profile's plugins lead the variable's, which still wins by name", () => {
   const cache = temporary();
-  const kept = profileEntry(plugin('kept'), '/profile/kept');
   const own = plugin('own');
   const extra = plugin('extra');
-  const launch = launch_(own, extra, cache, [kept]);
-  assert.deepEqual(launch.kept, []);
-  assert.deepEqual(launch.replaced.map((p: any) => p.name), ['kept']);
-  assert.deepEqual(launch.plugins.map((p: any) => p.name), ['own', 'extra']);
-  // The variable still wins over the profile by name.
+  assert.deepEqual(resolve(extra, cache, [own]).plugins.map((p: any) => p.name), ['own', 'extra']);
   const same = plugin('own', 'other');
-  assert.equal(launch_(own, same, cache, [kept]).plugins[0].description.root, same);
-  // Taking the built-in plugins away needs no cache when nothing is added,
-  // but a launch that does must name the profile when there is none.
-  const homeless = (value: string, replacement: string[]) => () => launchModule.resolve('claude', claude, claudeArgs([kept]),
-    value, {}, () => {}, replacement, true);
+  assert.equal(resolve(same, cache, [own]).plugins[0].description.root, same);
+  // A launch with anything to translate and nowhere to cache fails, named for
+  // the profile when the profile is what brought a plugin.
+  const homeless = (value: string, roots: string[]) => () =>
+    launchModule.resolve('claude', claude, claudeArgs(), value, {}, () => {}, roots);
   assert.throws(homeless('', [own]), /profile: cannot cache translations/);
-  assert.throws(homeless(extra, []), /profile: cannot cache/);
+  assert.throws(homeless(extra, []), /AGENT_DISTRO_PLUGINS: cannot cache/);
 });
 
-test('a profile composed over the built-in one keeps its plugins, replacing only those of the same name', () => {
-  const cache = temporary();
-  const kept = profileEntry(plugin('kept'), '/profile/kept');
-  const shadowed = profileEntry(plugin('own'), '/profile/own');
-  const own = plugin('own', 'repo');
-  const launch = launchModule.resolve('claude', claude, claudeArgs([kept, shadowed]), '', { XDG_CACHE_HOME: cache }, () => {}, [own]);
-  assert.deepEqual(launch.kept.map((p: any) => p.name), ['kept']);
-  assert.deepEqual(launch.replaced.map((p: any) => p.name), ['own']);
-  assert.deepEqual(launch.plugins.map((p: any) => p.description.root), [own]);
+test('a description a built profile holds is used instead of reading the root', () => {
+  const root = plugin('held');
+  const held = describedPlugin(root);
+  // Only the description names it this, so a re-read of the root cannot.
+  const description = JSON.parse(readFileSync(held.description, 'utf8'));
+  description.manifest.name = 'from-the-description';
+  writeFileSync(held.description, JSON.stringify(description));
+  const result = launchModule.resolve('claude', claude, claudeArgs(), '', { XDG_CACHE_HOME: temporary() },
+    () => {}, [root], [held]);
+  assert.deepEqual(result.plugins.map((p: any) => p.name), ['from-the-description']);
 });
 
 test('the shell a launcher evaluates', () => {

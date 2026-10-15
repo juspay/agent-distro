@@ -15,7 +15,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../log.ts';
-import { LaunchError, readCached, writeAddressed, type Adapter, type ProfileEntry, type Report } from '../plugin/launch.ts';
+import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, readDescription, writeLauncher } from '../plugin/resources.ts';
 
@@ -90,32 +90,25 @@ function main(out: string, argsPath: string) {
   writeFileSync(join(out, 'opencode.json'), JSON.stringify(config, null, 2));
 }
 
-type LaunchArgs = Inputs & { name: string; config: string; profile: ProfileEntry[] };
+type LaunchArgs = Inputs & { name: string; config: string };
 /** The session config the launcher writes, and this adapter merges into. */
 type Session = { skills: string[]; mcp: { servers: Record<string, Server> } };
 
 /**
- * At launch: the launcher's session config, without the replaced profile
- * plugins and with the variable's, written to the cache by content. Prints its
- * path, for OPENCODE_CONFIG.
+ * At launch: the launcher's session config with every plugin merged into it,
+ * written to the cache by content. Prints its path, for OPENCODE_CONFIG.
  */
-export const adapter: Adapter<LaunchArgs, ProfileEntry, Inputs> = {
+export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
-  launch: ({ args, kept, replaced, plugins, cache }) => {
+  launch: ({ args, plugins, cache }) => {
     const base = join(args.config, 'opencode.json');
-    if (!plugins.length && !replaced.length) return base;
+    if (!plugins.length) return base;
     const config = JSON.parse(readFileSync(base, 'utf8')) as Session;
     const skills = config.skills;
     const servers = config.mcp.servers;
     const owners: Record<string, string> = {};
-    for (const plugin of kept) claim(owners, plugin.description);
-    for (const plugin of replaced) {
-      const index = skills.indexOf(join(args.config, 'skills', plugin.name));
-      if (index >= 0) skills.splice(index, 1);
-      for (const name of Object.keys(plugin.description.mcpServers)) delete servers[name];
-    }
     for (const plugin of plugins) {
       claim(owners, plugin.description);
       const fragment = readCached(join(plugin.translation, 'fragment.json'), isFragment);

@@ -1,10 +1,10 @@
 # The content-addressed update path, in a VM: a user whose nix will not honour
-# the cache updates from the bundle the index publishes for the revision, which
+# the cache updates from the package the index publishes for the revision, which
 # needs no signature and no nix.conf change — and takes the old skip where the
 # index publishes none (src/update/update.ts `contentAddressed`).
 #
 # The stub index answers on 200 and 404 ports over TLS (the updater fetches
-# only an https base, and refuses anything else), the bundle's content-addressed
+# only an https base, and refuses anything else), the package's content-addressed
 # rewrite stands in for what CI publishes, and the cache that holds it is one
 # this user's nix would not take a signed path from.
 { pkgs, agent-distro }:
@@ -12,9 +12,9 @@ let
   inherit (pkgs) lib;
   common = import ./common.nix;
   runtime = import "${agent-distro}/lib/runtime.nix" pkgs;
-  # What CI publishes: the bundle's closure rewritten, so the updater copies
+  # What CI publishes: the package's closure rewritten, so the updater copies
   # paths this store does not have under names it has never seen.
-  bundle = pkgs.runCommand "agent-distro-ca-bundle" { } ''
+  published = pkgs.runCommand "agent-distro-ca-package" { } ''
     mkdir -p "$out/bin" "$out/share/agent-distro"
     # A store path in the launcher, so the rewrite has real work to do.
     printf '#!${pkgs.bash}/bin/bash\nexec ${pkgs.coreutils}/bin/echo ca-fixture "$@"\n' > "$out/bin/claude"
@@ -42,23 +42,22 @@ let
       -addext "basicConstraints=critical,CA:TRUE"
   '';
   # Each stub serves the file it is given: the pair, or — as a darwin system's
-  # entry has it — the signed bundle alone.
+  # entry has it — the signed package alone.
   indexServer = status: port: entry: pkgs.writeShellScript "ca-index-${toString port}" ''
     exec ${pkgs.python3}/bin/python ${./support/ca-index-fixture.py} \
       ${toString status} ${toString port} ${cert}/cert.pem ${cert}/key.pem ${entry}
   '';
   indexUrl = port: "https://127.0.0.1:${toString port}";
-  # What a `*-darwin` entry looks like: the signed bundle, nothing rewritten.
-  signedEntry = pkgs.writeText "ca-signed.json" (builtins.toJSON { ia = bundle; });
+  # What a `*-darwin` entry looks like: the signed package, nothing rewritten.
+  signedEntry = pkgs.writeText "ca-signed.json" (builtins.toJSON { ia = published; });
   # An entry whose ca the cache does not hold: what a copy that cannot be made
   # looks like from here (a cache that has not caught up, or a nix that will
   # not take it).
   absentEntry = pkgs.writeText "ca-absent.json" (builtins.toJSON {
-    ia = bundle;
-    ca = "/nix/store/00000000000000000000000000000000-agent-distro-vanilla";
+    ia = published;
+    ca = "/nix/store/00000000000000000000000000000000-agent-distro-default";
   });
   config = caIndex: pkgs.writeText "ca-update-config.json" (builtins.toJSON {
-    profile = "vanilla";
     # A revision (git+file:), which is what the index is keyed by.
     flake = "git+file:///home/testuser/update-flake";
     state = "/home/testuser/state";
@@ -75,9 +74,9 @@ in
   nodes.machine = { ... }: {
     imports = [ common.baseNode ];
     environment.systemPackages = [ pkgs.git ];
-    # The fixtures are in the guest store: the bundle the rewrite starts from,
+    # The fixtures are in the guest store: the package the rewrite starts from,
     # and the flake whose revision the index is keyed by.
-    virtualisation.additionalPaths = [ bundle flake ];
+    virtualisation.additionalPaths = [ published flake ];
     # The cache is one this user's nix would not take a signed path from: it
     # is not in the system configuration, and the updater's own substituters
     # and key are dropped for a user the daemon does not trust.
@@ -131,15 +130,15 @@ in
         return user("cat /home/testuser/state/history.log")
 
     # The premise: not a trusted user, so nix drops the updater's own
-    # substituters and keys and the signed bundle stays out of reach. A
+    # substituters and keys and the signed package stays out of reach. A
     # trusted testuser would prove nothing.
     info = json.loads(user("nix store info --json"))
     assert info["trusted"] is False, info
 
-    ia = "${bundle}"
+    ia = "${published}"
     ca = json.loads(machine.succeed("nix store make-content-addressed --json " + ia))["rewrites"][ia]
     assert ca != ia, (ia, ca)
-    # The cache holds the content-addressed bundle and this store does not:
+    # The cache holds the content-addressed package and this store does not:
     # nothing but the updater's copy can bring it back.
     machine.succeed("nix copy --to ${cacheUrl} " + ca)
     machine.succeed("nix store delete " + ca)
@@ -151,34 +150,34 @@ in
 
     with subtest("the index publishes the revision: an untrusted user updates"):
         output = update("${config "${indexUrl okPort}"}")
-        assert "vanilla updated nothing -> " + ca in output, output
+        assert "updated nothing -> " + ca in output, output
         assert current() == ca, current()
         # The content-addressed path is back, unsigned and uncached by nix.conf.
         machine.succeed("test -e " + ca)
-        # The bundle is usable: the launcher runs from the updated link.
+        # The package is usable: the launcher runs from the updated link.
         assert "ca-fixture" in user("$(readlink -f /home/testuser/state/current)/bin/claude --version")
-        # `versions` came out of the content-addressed bundle.
+        # `versions` came out of the content-addressed package.
         assert "updated: Claude Code 1.2.3" in history(), history()
         # A repeat is unchanged, and copies nothing — under `--progress`, where
         # the copy is asked for nix's own progress on stderr.
         output = update("${config "${indexUrl okPort}"} --progress")
-        assert '"result":"unchanged","bundle":"' + ca + '"' in output, output
+        assert '"result":"unchanged","package":"' + ca + '"' in output, output
 
     with subtest("a base that is not https is refused, and not fetched"):
         output = update("${config "http://127.0.0.1:${toString okPort}"}")
         assert 'ignoring caIndex "http://127.0.0.1:${toString okPort}"' in output, output
         assert "must be an https URL with no credentials, query or fragment" in output, output
-        assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
+        assert "update skipped: cache ${cacheUrl} not usable" in output, output
         assert current() == ca, current()
 
-    with subtest("an entry that names the signed bundle alone is the ordinary skip"):
+    with subtest("an entry that names the signed package alone is the ordinary skip"):
         # What a Mac gets from this index: nothing to copy content-addressed, so
         # the update skips — and says nothing about it being malformed.
         output = update("${config "${indexUrl signedPort}"}")
-        assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
-        assert "no content-addressed bundle is published for revision" in output, output
+        assert "update skipped: cache ${cacheUrl} not usable" in output, output
+        assert "no content-addressed package is published for revision" in output, output
         assert "ignoring caIndex" not in output, output
-        assert "names no signed bundle" not in output, output
+        assert "names no signed package" not in output, output
         assert current() == ca, current()
 
     with subtest("a ca the cache cannot supply is a skip that claims no more"):
@@ -186,21 +185,21 @@ in
         # The entry is well formed and names a ca; the cache simply cannot
         # supply it, so the reason says exactly that and nothing about what the
         # cache holds (a nix that will not take the path looks the same here).
-        assert "vanilla update skipped: content-addressed bundle " \
-               "/nix/store/00000000000000000000000000000000-agent-distro-vanilla " \
+        assert "update skipped: content-addressed package " \
+               "/nix/store/00000000000000000000000000000000-agent-distro-default " \
                "could not be copied from ${cacheUrl}" in output, output
         assert current() == ca, current()
 
     with subtest("the index publishes no revision: the old skip, reworded"):
         before = len(history().splitlines())
         output = update("${config "${indexUrl missingPort}"}")
-        assert "vanilla update skipped: cache ${cacheUrl} not usable" in output, output
-        assert "no content-addressed bundle is published for revision" in output, output
+        assert "update skipped: cache ${cacheUrl} not usable" in output, output
+        assert "no content-addressed package is published for revision" in output, output
         assert current() == ca, current()
         # Recorded, as the last thing that happened — and a repeat of the same
         # reason, which the next run is, adds nothing.
         last = history().splitlines()[-1]
-        assert "vanilla skipped: cache ${cacheUrl} not usable and no content-addressed bundle is " \
+        assert "skipped: cache ${cacheUrl} not usable and no content-addressed package is " \
                "published for revision " in last, last
         assert "could not be copied" not in last, last
         update("${config "${indexUrl missingPort}"}")

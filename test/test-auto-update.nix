@@ -7,7 +7,7 @@ let
   # additionalPaths below keeps the directory in the guest store.
   cacheUrl = builtins.unsafeDiscardStringContext "file://${cacheDir}";
   cacheKey = "test-cache-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-  commands = agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla.commands;
+  commands = agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.default.commands;
   homeConfig = {
     imports = [ agent-distro.homeManagerModules.default ];
     home = {
@@ -18,8 +18,7 @@ let
     xdg.stateHome = "/home/testuser/custom-state";
     services.agent-distro = {
       enable = true;
-      # The offline update fixture below exports the vanilla bundle.
-      profile = "vanilla";
+      # The offline update fixture below exports the one package.
       flake = "path:/home/testuser/update-flake";
       # Avoid a timer firing before the fallback assertions.
       frequency = "2099-01-01";
@@ -31,14 +30,13 @@ let
     inherit pkgs;
     modules = [ homeConfig { services.agent-distro = pkgs.lib.mapAttrs (_: pkgs.lib.mkForce) settings; } ];
   }).activationPackage;
-  # A profile by reference: the vanilla bundle, with the shims exporting the
-  # reference as AI_PROFILE; a store path, so the VM needs no network.
+  # A profile by reference, with the shims exporting the reference as
+  # AI_PROFILE; a store path, so the VM needs no network.
   referencedProfile = pkgs.writeTextDir "agent-distro.nix" ''
     { name = "referenced"; description = "Referenced"; plugins = [ ]; }
   '';
-  switchedProfile = switched { profile = "${referencedProfile}"; };
-  # Another profile, for the commands whose own AI_PROFILE must win over the
-  # shim's fallback.
+  switchedProfile = switched { profiles = [ "${referencedProfile}" ]; };
+  # Another profile, for the commands whose AI_PROFILE must win over the shim's.
   ownProfile = pkgs.writeTextDir "agent-distro.nix" ''
     { name = "own"; description = "The user's own"; plugins = [ ]; }
   '';
@@ -47,12 +45,12 @@ let
   # A cache the system config does not list: the daemon would ignore it.
   unusableCache = switched { substituters = { "file:///not-configured" = cacheKey; }; };
   # Offline flake mechanics stay independent of the build outcome under test.
-  # Like the real bundle's trivial builders, fixtures are not substitutable
+  # Like the real package's trivial builders, fixtures are not substitutable
   # unless a test says otherwise.
   fixtureFlake' = substitutable: name: script: pkgs.writeTextDir "flake.nix" ''
     {
       outputs = { self }: {
-        packages.x86_64-linux.vanilla = derivation {
+        packages.x86_64-linux.default = derivation {
           name = "${name}";
           system = "x86_64-linux";
           allowSubstitutes = ${if substitutable then "true" else "false"};
@@ -133,7 +131,7 @@ in
         journal = "journalctl _UID=1000 _SYSTEMD_USER_UNIT=agent-distro-update.service --no-pager"
         machine.wait_until_succeeds(journal + " | grep -F " + shlex.quote(line))
 
-    source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = "vanilla"; })}"
+    source = "${builtins.hashString "sha256" (builtins.toJSON { flake = "path:/home/testuser/update-flake"; profile = ""; })}"
     state = "/home/testuser/custom-state/agent-distro/" + source + "/current"
     history = "/home/testuser/custom-state/agent-distro/history.log"
     events = []
@@ -142,7 +140,7 @@ in
         lines = machine.succeed("cat " + history).splitlines()
         assert len(lines) == len(events), lines
         for line, event in zip(lines, events):
-            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} vanilla " + re.escape(event), line), line
+            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} " + re.escape(event), line), line
 
     machine.succeed("test ! -e " + state)
     for name in ${builtins.toJSON commands}:
@@ -159,7 +157,7 @@ in
     first = machine.succeed("readlink -f " + state).strip()
     assert first.startswith("/nix/store/"), first
     stamp = state.rsplit("/", 1)[0] + "/last-success"
-    journal_has("agent-distro update: vanilla updated nothing -> " + first)
+    journal_has("agent-distro update: updated nothing -> " + first)
     events.append("updated: Claude Code 2.0, Codex 1.0+abc123")
     check_history()
     for name in ${builtins.toJSON commands}:
@@ -170,14 +168,14 @@ in
     machine.succeed(systemctl("start agent-distro-update.service"))
     second = machine.succeed("readlink -f " + state).strip()
     assert second.startswith("/nix/store/") and second != first, second
-    journal_has("agent-distro update: vanilla updated " + first + " -> " + second)
+    journal_has("agent-distro update: updated " + first + " -> " + second)
     events.append("updated: Codex 1.0+abc123 → 1.1+def456")
     check_history()
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    journal_has("agent-distro update: vanilla unchanged (" + second + ")")
+    journal_has("agent-distro update: unchanged (" + second + ")")
     check_history()
-    # A changed bundle can retain every harness version.
+    # A changed package can retain every harness version.
     machine.succeed(user("cp ${fixtureSame}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
@@ -193,11 +191,11 @@ in
     machine.succeed(systemctl("start agent-distro-update.service"))
     events.append("updated: Pi removed")
     check_history()
-    # Upgrading a pre-manifest bundle has no previous versions to report.
+    # Upgrading a pre-manifest package has no previous versions to report.
     machine.succeed(user("cp ${legacy}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    events.append("updated: versions not recorded by this bundle")
+    events.append("updated: versions not recorded by this package")
     check_history()
     machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
@@ -212,7 +210,7 @@ in
     machine.wait_until_succeeds(systemctl("is-failed agent-distro-update.service"))
     retries = machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value"))
     assert retries.strip().endswith("3"), retries
-    journal_has("agent-distro update: error: vanilla update failed")
+    journal_has("agent-distro update: error: update failed")
     events.extend(["failed: nix build exit 1"] * 3)
     check_history()
     assert machine.succeed("cat " + stamp).strip() == successful_update
@@ -245,7 +243,7 @@ in
                 traced = machine.succeed(user("unset XDG_STATE_HOME; AI_PROFILE=${ownProfile} AGENT_DISTRO_SETTINGS=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
                 assert "export AI_PROFILE" not in traced, traced
             # And the launchers take it as the profile in effect.
-            listed = machine.succeed(user("AI_PROFILE=${referencedProfile} ${agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla}/bin/agent-distro --list --json"))
+            listed = machine.succeed(user("AI_PROFILE=${referencedProfile} ${agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/agent-distro --list --json"))
             assert '"name":"referenced"' in listed and '"source":"variable"' in listed, listed
 
     # A greeting and a native binary before the shim must still give a precise warning.
@@ -258,19 +256,19 @@ in
     machine.succeed(user("cp ${legacy}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    events.append("updated: versions not recorded by this bundle")
+    events.append("updated: versions not recorded by this package")
     check_history()
 
     # Never compile on a cache miss: the substitutable derivation is skipped,
-    # the current bundle stays, and the run is neither a failure nor a retry.
+    # the current package stays, and the run is neither a failure nor a retry.
     before = machine.succeed("readlink -f " + state).strip()
     restarts = lambda: machine.succeed(systemctl("show agent-distro-update.service -p NRestarts --value")).strip()
     restarted = restarts()
     machine.succeed(user("cp ${uncached}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    journal_has("agent-distro update: warning: vanilla update skipped: bundle not fully cached yet (would build uncached-agents)")
-    events.append("skipped: bundle not fully cached yet (would build uncached-agents)")
+    journal_has("agent-distro update: warning: update skipped: package not fully cached yet (would build uncached-agents)")
+    events.append("skipped: package not fully cached yet (would build uncached-agents)")
     check_history()
     assert machine.succeed("readlink -f " + state).strip() == before
     assert restarts() == restarted, restarts()
@@ -279,16 +277,16 @@ in
     check_history()
     # A cache the daemon would ignore: nix drops the updater's own substituter
     # for this user, so the run takes the revision's published
-    # content-addressed bundle instead — and this flake is a path, which names
-    # no revision for an index to key a bundle by, so it skips.
-    skipped = ("cache file:///not-configured not usable and no content-addressed bundle is published for "
+    # content-addressed package instead — and this flake is a path, which names
+    # no revision for an index to key a package by, so it skips.
+    skipped = ("cache file:///not-configured not usable and no content-addressed package is published for "
                "the revision this flake is on; add it to nix.settings substituters/trusted-public-keys")
     warning = machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${unusableCache}/activate 2>&1"))
     assert warning.count("agent-distro update: warning: cannot use cache file:///not-configured") == 1, warning
     machine.succeed(user("cp ${fixtureV2}/flake.nix ~/update-flake/flake.nix"))
     machine.succeed(systemctl("reset-failed agent-distro-update.service"))
     machine.succeed(systemctl("start agent-distro-update.service"))
-    journal_has("agent-distro update: warning: vanilla update skipped: " + skipped)
+    journal_has("agent-distro update: warning: update skipped: " + skipped)
     events.append("skipped: " + skipped)
     check_history()
     assert machine.succeed("readlink -f " + state).strip() == before
@@ -301,6 +299,6 @@ in
     trusted.succeed(user("cp -r ${fixture} ~/update-flake; chmod -R u+w ~/update-flake"))
     trusted.succeed(systemctl("start agent-distro-update.service"))
     lines = trusted.succeed("cat " + history).splitlines()
-    assert len(lines) == 1 and lines[0].endswith(" vanilla updated: Claude Code 2.0, Codex 1.0+abc123"), lines
+    assert len(lines) == 1 and lines[0].endswith(" updated: Claude Code 2.0, Codex 1.0+abc123"), lines
   '';
 }

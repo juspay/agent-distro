@@ -1,6 +1,6 @@
 # A session config composes with the user's global and project settings, and
 # carries the plugin that fills in the profile's provider.
-{ pkgs, plugins, info, package }:
+{ pkgs, nixpkgs, package }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText gum;
   opencode = package;
@@ -16,22 +16,21 @@ let
   config = runCommand "${name}-config" { } ''
     ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON (runtime.launcherInputs // {
       inherit plugin;
-      descriptions = map (p: "${runtime.readPlugin p}") plugins;
+      descriptions = [ ];
     }))}
   '';
-  launchPlugins = runtime.launchPlugins {
+  launchPlugins = runtime.launchPlugins (runtime.info nixpkgs // {
     harness = "opencode";
-    inherit name info;
+    inherit name;
     config = "${config}";
-    profile = map (p: { description = "${runtime.readPlugin p}"; }) plugins;
-  };
+  });
 in
 writeShellApplication {
   inherit name;
   derivationArgs.version = opencode.version;
   text = ''
-    # The profile in effect and its packages, and this config, less the
-    # plugins that profile or AGENT_DISTRO_PLUGINS replaces, plus their own.
+    # The profiles in effect and their packages, and this config, with their
+    # plugins merged into it.
     ${launchPlugins}
     config=$launched
     ${import ../../lib/prompt-secrets.nix { inherit gum; }}

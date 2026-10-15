@@ -2,8 +2,8 @@ from pi_support import *
 
 original, old_mcp = inventory()
 discover()
-updated, new_mcp = inventory('pi-updated')
-discover('pi-updated')
+updated, new_mcp = inventory('pi-changed')
+discover('pi-changed')
 assert original['skills'] and updated['skills']
 assert set(original['skills']).isdisjoint(updated['skills']), (original, updated)
 for name, server in old_mcp['mcpServers'].items():

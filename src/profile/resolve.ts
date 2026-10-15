@@ -5,18 +5,20 @@
  * `agent-distro.lib.mkProfile`: a store path holding
  * `share/agent-distro/profile.json`, its plugins under
  * `share/agent-distro/plugins/<index>/`, and its `packages` in `bin/`. The one
- * in effect is the picker's leading positional selector, exactly; else a
- * stack, bottom to top, of the launcher's own built-in profile, every entry of
- * AI_PROFILE and the `agent-distro.nix` found from the working directory up to
- * the git root, each composed over the one beneath (`merge`).
+ * in effect is the picker's leading positional selector, exactly; else the
+ * stack, bottom to top, of the `agent-distro.nix` found from the working
+ * directory up to the git root over every AI_PROFILE entry, each composed over
+ * the one beneath (`merge`). A launch with none — `AI_PROFILE` unset or empty,
+ * and no repository — has no profile at all, and nothing is added to the
+ * harnesses.
  *
  * AI_PROFILE is a stack: whitespace-separated entries composed left to right,
- * later entries winning where they overlap. `AI_PROFILE=` or unset adds none.
- * An entry, like a positional selector, is a reference: a path (absolute, or
- * starting with ./, ../ or ~/) to the file, its directory, or a built profile,
- * or else, containing `/` or `:`, a flake reference such as
- * `github:owner/repo?dir=sub`, fetched with `nix flake prefetch`. An entry
- * that is neither is an error naming it and its position in the stack.
+ * later entries winning where they overlap. An entry, like a positional selector, is
+ * a reference: a path (absolute, or starting with ./, ../ or ~/) to the file,
+ * its directory, or a built profile, or else, containing `/` or `:`, a flake
+ * reference such as `github:owner/repo?dir=sub`, fetched with
+ * `nix flake prefetch`. An entry that is neither is an error naming it and its
+ * position in the stack.
  *
  * Each file is evaluated once per content and agent-distro build by
  * evaluate.nix, and cached under
@@ -79,14 +81,8 @@ export type SettingsSection = Record<string, unknown>;
 /** Harness configuration a profile defaults, by harness name. */
 export type Settings = Record<string, SettingsSection>;
 
-/** A profile built into the launcher, as lib/runtime.nix passes it. */
-export type Builtin = { name: string; description: string; env: ProfileEnv; settings: Settings };
-
 /** What a launcher knows at build time, from lib/runtime.nix. */
 export type Info = {
-  /** The launcher's own profile: the one in effect when nothing chooses another. */
-  default: string;
-  builtins: Builtin[];
   /**
    * The nixpkgs `packages` are evaluated against: a locked flake reference,
    * fetched only for a profile with `packages`, or a store path the launcher
@@ -117,8 +113,6 @@ export type Described = { root: string; description: string };
 
 /** The profile in effect, resolved for this launch. */
 export type Resolved = InEffect & {
-  /** The launcher's own built-in profile is part of it, so the launcher's own plugins stay. */
-  keepsBuiltIn: boolean;
   /** Plugin directories. */
   plugins: string[];
   env: ProfileEnv;
@@ -204,7 +198,7 @@ const isDescriptions = (value: unknown): value is Described[] =>
   && value.every((entry) => isObject(entry) && isString(entry.root) && isString(entry.description));
 
 export function isResolved(value: unknown): value is Resolved {
-  return isInEffect(value) && typeof value.keepsBuiltIn === 'boolean' && isStrings(value.plugins)
+  return isInEffect(value) && isStrings(value.plugins)
     && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.paths)
     && (value.descriptions === undefined || isDescriptions(value.descriptions));
 }
@@ -251,14 +245,13 @@ function entries(value: string): string[] {
 
 /**
  * The profiles this launch is to use, bottom to top, before anything is read:
- * the positional selector alone, else the built-in default, then every
- * AI_PROFILE entry in order, then the repository's, those that are there.
- * `AI_PROFILE=` or unset adds none, so the built-in profile and the
- * repository's are the whole stack.
+ * the positional selector alone, else every AI_PROFILE entry in order and then
+ * the repository's, those that are there. `AI_PROFILE=` or unset and no
+ * repository is no profile.
  */
-export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv, info: Info): Selection[] {
+export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv): Selection[] {
   if (positional) return [{ source: 'positional', origin: positional }];
-  const stack: Selection[] = [{ source: 'builtin', origin: info.default }];
+  const stack: Selection[] = [];
   const variable = entries(env[VARIABLE] ?? '');
   variable.forEach((origin, i) => stack.push({
     source: 'variable', origin, entry: { position: i + 1, count: variable.length },
@@ -268,7 +261,7 @@ export function select(positional: string | undefined, cwd: string | undefined, 
   return stack;
 }
 
-type Kind = { builtin: Builtin } | { path: string } | { flake: string };
+type Kind = { path: string } | { flake: string };
 
 function classify(reference: string, env: NodeJS.ProcessEnv): Kind | null {
   if (reference.startsWith('/')) return { path: reference };
@@ -281,12 +274,7 @@ function classify(reference: string, env: NodeJS.ProcessEnv): Kind | null {
 }
 
 /** What a selection names, or null when it names nothing. */
-function kindOf(selection: Selection, info: Info, env: NodeJS.ProcessEnv): Kind | null {
-  // The launcher's own profile is data it was built with, not a reference.
-  if (selection.source === 'builtin') {
-    const builtin = info.builtins.find((builtin) => builtin.name === selection.origin);
-    return builtin === undefined ? null : { builtin };
-  }
+function kindOf(selection: Selection, env: NodeJS.ProcessEnv): Kind | null {
   if (selection.source === 'repository') return { path: selection.origin };
   return classify(selection.origin, env);
 }
@@ -569,37 +557,28 @@ function merge(lower: Resolved, upper: Resolved): Resolved {
   return {
     name: upper.name, description: upper.description, source: upper.source, origin: upper.origin,
     // The whole chain beneath, so a stack of three names all three.
-    ...(source === 'builtin' ? {} : { over: { name, description, source, origin, ...(over ? { over } : {}) } }),
-    keepsBuiltIn: lower.keepsBuiltIn, plugins: [...lower.plugins, ...upper.plugins],
+    over: { name, description, source, origin, ...(over ? { over } : {}) },
+    plugins: [...lower.plugins, ...upper.plugins],
     env: { ...lower.env, ...upper.env }, settings: { ...lower.settings, ...upper.settings },
     paths: [...lower.paths, ...upper.paths],
     ...(descriptions.length ? { descriptions } : {}),
   };
 }
 
-/** The profile in effect: each of `stack` (from `select`) resolved, and composed bottom to top. */
-export function resolveProfile(info: Info, stack: Selection[], env: NodeJS.ProcessEnv): Resolved {
-  return stack.map((selection) => resolveOne(info, selection, env)).reduce(merge);
+/** The profile in effect: each of `stack` (from `select`) resolved, and composed bottom to top; null when there is none. */
+export function resolveProfile(info: Info, stack: Selection[], env: NodeJS.ProcessEnv): Resolved | null {
+  const resolved = stack.map((selection) => resolveOne(info, selection, env));
+  return resolved.length ? resolved.reduce(merge) : null;
 }
 
 function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): Resolved {
   const what = printable(label(selection));
-  const kind = kindOf(selection, info, env);
+  const kind = kindOf(selection, env);
   if (kind === null) {
     throw new LaunchError(`${what}: not a reference: a path starting with /, ./ or ../, or a flake `
       + 'reference such as github:owner/repo');
   }
   const { source, origin } = selection;
-  if ('builtin' in kind) {
-    // The launcher's own profile is data it was built with, not a file to
-    // evaluate: same rules, named for what it is.
-    const { name, description, env: builtinEnv, settings } = kind.builtin;
-    validate(`built-in profile ${name}`, kind.builtin);
-    return {
-      name, description, env: builtinEnv, settings, source, origin,
-      keepsBuiltIn: name === info.default, plugins: [], paths: [],
-    };
-  }
   // A built profile is read where it lies; a repository's is evaluated.
   const built = 'path' in kind ? builtProfile(kind.path) : null;
   if (built) {
@@ -608,7 +587,7 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
     // launch-time profile's do.
     const bin = join(built.dir, 'bin');
     return {
-      name: built.name, description: built.description, source, origin, keepsBuiltIn: false,
+      name: built.name, description: built.description, source, origin,
       plugins: built.plugins.map((plugin) => plugin.root), env: built.env, settings: built.settings,
       paths: isDirectory(bin) ? [bin] : [],
       ...(matching ? { descriptions: built.plugins } : {}),
@@ -630,6 +609,6 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
   const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, what, cache)));
   return {
     name: profile.name, description: profile.description, source, origin,
-    keepsBuiltIn: false, plugins, env: profile.env, settings: profile.settings, paths,
+    plugins, env: profile.env, settings: profile.settings, paths,
   };
 }
