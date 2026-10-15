@@ -42,8 +42,15 @@ def with_plugins(plugins):
 
 
 def run(*args, launcher='codex', plugins=None, **kwargs):
-    return subprocess.run([launcher, *args], env=with_plugins(plugins), text=True,
-                          capture_output=True, timeout=60, **kwargs)
+    """One Codex run. A caller's `check=True` still raises, but with the
+    command's own words: `subprocess`'s own error throws the stderr away, and
+    that is the evidence a failing check needs."""
+    check = kwargs.pop('check', False)
+    result = subprocess.run([launcher, *args], env=with_plugins(plugins), text=True,
+                            capture_output=True, timeout=60, **kwargs)
+    if check:
+        assert result.returncode == 0, (result.stdout, result.stderr)
+    return result
 
 
 def assert_kolu_server(servers):

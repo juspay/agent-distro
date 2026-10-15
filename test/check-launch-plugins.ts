@@ -229,12 +229,12 @@ test("a profile's plugins lead the variable's, which still wins by name", () => 
   assert.deepEqual(resolve(extra, cache, [own]).plugins.map((p: any) => p.name), ['own', 'extra']);
   const same = plugin('own', 'other');
   assert.equal(resolve(same, cache, [own]).plugins[0].description.root, same);
-  // A launch with anything to translate and nowhere to cache fails, named for
-  // the profile when the profile is what brought a plugin.
-  const homeless = (value: string, roots: string[]) => () =>
+  // A launch with anything to translate and nowhere to cache starts without
+  // them, saying so on stderr, rather than not starting at all.
+  const homeless = (value: string, roots: string[]) =>
     launch.resolve('claude', claude, claudeArgs(), value, {}, () => {}, roots);
-  assert.throws(homeless('', [own]), /profile: cannot cache translations/);
-  assert.throws(homeless(extra, []), /AGENT_DISTRO_PLUGINS: cannot cache/);
+  assert.deepEqual(homeless('', [own]).plugins, []);
+  assert.deepEqual(homeless(extra, []).plugins, []);
 });
 
 test('a description a built profile holds is used instead of reading the root', () => {
@@ -379,8 +379,10 @@ test('the cache directory must be absolute and writable', () => {
   assert.equal(unwritable.status, 1, unwritable.stderr);
   assert.match(unwritable.stderr, /^agent-distro plugin: error: .*ENOTDIR/);
   const homeless = run(plugin('homeless'), { XDG_CACHE_HOME: undefined, HOME: undefined });
-  assert.equal(homeless.status, 1, homeless.stderr);
-  assert.match(homeless.stderr, /XDG_CACHE_HOME and HOME are unset/);
+  // Nowhere to cache is not an error: the plugins that need translating are
+  // skipped, said so, and the launch carries on.
+  assert.equal(homeless.status, 0, homeless.stderr);
+  assert.match(homeless.stderr, /XDG_CACHE_HOME and HOME are unset; skipping plugins that need translating/);
   const cwd = temporary();
   const relativeCache = spawnSync(process.execPath, [CLI, argsFile()], {
     encoding: 'utf8', cwd, env: { PATH: process.env.PATH, XDG_CACHE_HOME: 'rel', AGENT_DISTRO_PLUGINS: plugin('relative') },

@@ -55,7 +55,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, utimesSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
-import { cacheRoot, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
+import { cacheRootIfAny, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
 import { log, slow, SITE } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists, realpath } from '../util.ts';
@@ -387,7 +387,9 @@ function remembered(memory: string): string {
  * most likely fresh in nix's own cache, so only one that is not says it is
  * being fetched.
  */
-function fetched(reference: string, what: string, cache: string): string {
+function fetched(reference: string, what: string, cache: string | null): string {
+  // No cache: fetched once per launch, which is all a launch needs.
+  if (cache === null) return prefetch(reference, what);
   const memory = join(cache, 'references', sha256(reference));
   const last = remembered(memory);
   const stored = isAbsolute(last) && existsSync(last);
@@ -415,7 +417,7 @@ const EVALUATE = join(import.meta.dirname, 'evaluate.nix');
  * profile with packages evaluates them to null: only then is nixpkgs fetched
  * and the file evaluated again.
  */
-export function evaluate(file: string, info: Info, cache: string, what: string): Evaluated {
+export function evaluate(file: string, info: Info, cache: string | null, what: string): Evaluated {
   const run = (nixpkgs: string | null): unknown => JSON.parse(nix(['eval', '--json', '--impure',
     '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
     ...[dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])].flatMap((path) => ['-I', path]),
@@ -441,8 +443,8 @@ export function evaluate(file: string, info: Info, cache: string, what: string):
  * depends on: the system, and the nixpkgs a profile with `packages` was
  * evaluated against.
  */
-function evaluated(file: string, info: Info, cache: string, what: string, again: boolean): Evaluated {
-  const profiles = join(cache, 'profiles');
+function evaluated(file: string, info: Info, cache: string | null, what: string, again: boolean): Evaluated {
+  const profiles = cache === null ? null : join(cache, 'profiles');
   // `runtime: import.meta.dirname` here would re-evaluate every profile in
   // every repository on every commit that touches src/ — which a scheduled
   // update makes a daily event, for a value only evaluate.nix shapes.
@@ -450,8 +452,8 @@ function evaluated(file: string, info: Info, cache: string, what: string, again:
     file, content: sha256(readFileSync(file)), evaluator: sha256(readFileSync(EVALUATE)),
     nixpkgs: info.nixpkgs, system: info.system,
   }));
-  const path = join(profiles, key, 'profile.json');
-  if (!again && existsSync(path)) {
+  const path = profiles === null ? null : join(profiles, key, 'profile.json');
+  if (path !== null && !again && existsSync(path)) {
     try {
       const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
       if (isEvaluated(value)) {
@@ -464,10 +466,12 @@ function evaluated(file: string, info: Info, cache: string, what: string, again:
       if (!(error instanceof SyntaxError)) throw error;
     }
   }
-  log.profile.debug(`cache ${again ? 'bypassed' : 'miss'}: ${path}`);
+  log.profile.debug(path === null ? 'no cache: evaluating' : `cache ${again ? 'bypassed' : 'miss'}: ${path}`);
   const value = slow(log.profile, `evaluating ${file}`, () => evaluate(file, info, cache, what));
-  writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
-  sweep(profiles, (name) => name !== key);
+  if (path !== null && profiles !== null) {
+    writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
+    sweep(profiles, (name) => name !== key);
+  }
   return value;
 }
 
@@ -607,7 +611,10 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
       ...(matching ? { descriptions: built.plugins } : {}),
     };
   }
-  const cache = cacheRoot(env, what);
+  const cache = cacheRootIfAny(env, what);
+  if (cache === null) {
+    log.profile.warn(`${what}: XDG_CACHE_HOME and HOME are unset; profiles are evaluated without a cache`);
+  }
   const file = fileAt('path' in kind ? kind.path : fetched(kind.flake, what, cache), what);
   let profile = evaluated(file, info, cache, what, false);
   // A package's derivation can be collected with its output; evaluate afresh to get it back.

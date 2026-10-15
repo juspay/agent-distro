@@ -65,19 +65,19 @@ export const adapter: Adapter<LaunchArgs, Inputs> = {
     const override = (value: string) => words.push('-c', shellQuote(value));
     const home = codexHome();
     for (const plugin of plugins) {
+      // `-c` splits its key at every ".", and quoting the key — which Codex
+      // accepts for the marketplace below — does not enable a plugin: a
+      // registered-but-unenabled plugin contributes no skills, and leaves its
+      // marketplace installed for nothing. So a name carrying "." is skipped
+      // whole, with a word about why, rather than half-registered.
+      if (plugin.name.includes('.')) {
+        report(`cannot load plugin ${JSON.stringify(plugin.name)} for one launch: its name contains "."`);
+        continue;
+      }
       const marketplace = marketplaceName(plugin.key);
       const source = `marketplaces.${marketplace}={source_type="local",source=${tomlString(plugin.translation)}}`;
       ensureInstalled(home, args.codex, source, marketplace, plugin.name);
       override(source);
-      // `-c` splits its key at every ".", and quoting the key — which Codex
-      // accepts for the marketplace above — does not enable a plugin: a
-      // registered-but-unenabled plugin contributes no skills. So the key stays
-      // unquoted, and a name carrying "." is reported and left unenabled rather
-      // than silently registered without its skills.
-      if (plugin.name.includes('.')) {
-        report(`cannot enable plugin ${JSON.stringify(plugin.name)} for one launch: its name contains "."`);
-        continue;
-      }
       override(`plugins.${plugin.name}@${marketplace}.enabled=true`);
     }
     return words.join(' ');

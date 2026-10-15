@@ -105,6 +105,16 @@ export class LaunchError extends Error {}
 
 export const VARIABLE = 'AGENT_DISTRO_PLUGINS';
 
+/**
+ * The cache root, or null when there is nowhere to keep one: XDG_CACHE_HOME and
+ * HOME are both unset, so a launch without a home still starts — what needs
+ * caching is skipped, and each caller says so — instead of not starting at all.
+ * A cache that is *given* and unusable is still an error (`cacheRoot`).
+ */
+export function cacheRootIfAny(env: NodeJS.ProcessEnv = process.env, label = VARIABLE): string | null {
+  return env.XDG_CACHE_HOME || env.HOME ? cacheRoot(env, label) : null;
+}
+
 /** Unused this long, a translation or a launch file may be removed. */
 export const STALE_DAYS = 14;
 const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000;
@@ -472,9 +482,17 @@ export function resolve<A>(
       log.plugin.debug(`cannot read ${path}: ${(error as Error).message}`);
     }
   }
-  const names = [...own, ...entries(value)];
+  let names = [...own, ...entries(value)];
   // Nothing to load needs no cache, so it cannot fail for want of one.
-  const cache = names.length > 0 ? cacheRoot(env, own.length > 0 ? 'profile' : VARIABLE) : null;
+  const label = own.length > 0 ? 'profile' : VARIABLE;
+  let cache = names.length > 0 ? cacheRootIfAny(env, label) : null;
+  if (names.length > 0 && cache === null) {
+    // No cache to translate into: the launch starts without the plugins rather
+    // than not starting at all, and says so (as a launch without a home does).
+    log.plugin.warn(`${label}: XDG_CACHE_HOME and HOME are unset; skipping plugins that need translating`);
+    names = [];
+    cache = null;
+  }
   const byName = new Map<string, LaunchPlugin>();
   for (const [i, entry] of names.entries()) {
     const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? 'profile' : VARIABLE,
