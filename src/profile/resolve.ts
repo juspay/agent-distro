@@ -10,9 +10,9 @@
  * AI_PROFILE and the `agent-distro.nix` found from the working directory up to
  * the git root, each composed over the one beneath (`merge`).
  *
- * AI_PROFILE is a stack: `:`-separated entries composed left to right, later
- * entries winning where they overlap. `AI_PROFILE=` or unset adds none. An
- * entry, like a positional selector, is a reference: a path (absolute, or
+ * AI_PROFILE is a stack: whitespace-separated entries composed left to right,
+ * later entries winning where they overlap. `AI_PROFILE=` or unset adds none.
+ * An entry, like a positional selector, is a reference: a path (absolute, or
  * starting with ./, ../ or ~/) to the file, its directory, or a built profile,
  * or else, containing `/` or `:`, a flake reference such as
  * `github:owner/repo?dir=sub`, fetched with `nix flake prefetch`. An entry
@@ -59,7 +59,7 @@ import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists, realpath } from '../util.ts';
 
 export const FILE = 'agent-distro.nix';
-/** The variable a profile reference falls back to: a `:`-separated stack. */
+/** The variable a profile reference falls back to: a whitespace-separated stack. */
 export const VARIABLE = 'AI_PROFILE';
 
 /**
@@ -185,16 +185,13 @@ function settingsProblem(value: unknown): string | null {
  * Fail on what `value` is not: a profile's `env` and `settings`. `what` names
  * the profile, as its other errors do.
  */
-function validate(what: string, value: { env?: unknown; settings?: unknown }): void {
+function validate(what: string, value: unknown): asserts value is { env: ProfileEnv; settings: Settings } {
+  if (!isObject(value)) throw new LaunchError(`${what}: must be an object`);
   const env = envProblem(value.env);
   if (env) throw new LaunchError(`${what}: \`env\` ${env}`);
   const settings = settingsProblem(value.settings);
   if (settings) throw new LaunchError(`${what}: \`settings\` ${settings}`);
 }
-
-/** `value` as a profile's `env` or `settings`, once `validate` has passed it. */
-const isEnv = (value: unknown): value is ProfileEnv => envProblem(value) === null;
-const isSettings = (value: unknown): value is Settings => settingsProblem(value) === null;
 
 function isInEffect(value: unknown): value is InEffect {
   return isObject(value) && isName(value.name) && isString(value.description)
@@ -243,24 +240,13 @@ export function workingDirectory(): string | undefined {
 }
 
 /**
- * The entries of an AI_PROFILE stack. `:` separates them, but a flake
- * reference holds one too, so a fragment that is a scheme is half of one and
- * is joined to the fragment after it: `github:juspay/skills:github:ekala/x`
- * is two entries, and `git+file:///a:git+file:///b` is two more.
+ * The entries of an AI_PROFILE stack: whitespace-separated, as nix's own lists
+ * are (`substituters`, `trusted-public-keys`). No reference, store path or
+ * entry holds whitespace, so splitting needs no other rule — and `:` is left
+ * to the references that carry one (`github:owner/repo?dir=sub`).
  */
 function entries(value: string): string[] {
-  const entries: string[] = [];
-  let entry = '';
-  for (const fragment of value.split(':').filter((part) => part !== '')) {
-    entry = entry === '' ? fragment : `${entry}:${fragment}`;
-    // A scheme on its own: `github` of `github:owner/repo`.
-    if (!/^[A-Za-z][A-Za-z0-9+.-]*$/.test(fragment)) {
-      entries.push(entry);
-      entry = '';
-    }
-  }
-  if (entry !== '') entries.push(entry);
-  return entries;
+  return value.trim().split(/\s+/).filter((entry) => entry !== '');
 }
 
 /**
@@ -540,8 +526,10 @@ function builtProfile(directory: string): Built | null {
     throw new LaunchError(`${at} is not valid JSON: ${error.message}`);
   }
   if (!isObject(value)) throw new LaunchError(`${at} must hold an object`);
-  if (!isName(value.name)) throw new LaunchError(`${at}: \`name\` must be one word without /`);
-  if (!isString(value.reader) || value.reader === '') throw new LaunchError(`${at}: \`reader\` must be a nonempty string`);
+  const name = value.name;
+  const reader = value.reader;
+  if (!isName(name)) throw new LaunchError(`${at}: \`name\` must be one word without /`);
+  if (!isString(reader) || reader === '') throw new LaunchError(`${at}: \`reader\` must be a nonempty string`);
   validate(at, value);
   const base = join(directory, 'share/agent-distro/plugins');
   let indexes: string[];
@@ -559,9 +547,9 @@ function builtProfile(directory: string): Built | null {
     return { root: realpath(join(base, index, 'root')), description };
   });
   return {
-    dir: directory, name: value.name,
-    description: isString(value.description) ? value.description : '', reader: value.reader, plugins,
-    env: isEnv(value.env) ? value.env : {}, settings: isSettings(value.settings) ? value.settings : {},
+    dir: directory, name, reader, plugins,
+    description: isString(value.description) ? value.description : '',
+    env: value.env, settings: value.settings,
   };
 }
 

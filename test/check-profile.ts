@@ -191,13 +191,23 @@ test('the stack: a positional profile alone, else the built-in one, every AI_PRO
   assert.deepEqual(select('./mine', repo, { AI_PROFILE: 'github:a/b' }), [{ source: 'positional', origin: './mine' }]);
   assert.deepEqual(select(undefined, repo, { AI_PROFILE: 'github:a/b' }), [builtIn, entry('github:a/b'), repository]);
   // AI_PROFILE is a stack, left to right, each entry named with its position.
-  assert.deepEqual(select(undefined, repo, { AI_PROFILE: 'github:a/b:./c' }),
+  assert.deepEqual(select(undefined, repo, { AI_PROFILE: 'github:a/b ./c' }),
     [builtIn, entry('github:a/b', 1, 2), entry('./c', 2, 2), repository]);
-  // Empty entries are none: `:` separates.
-  assert.deepEqual(select(undefined, repo, { AI_PROFILE: ':github:a/b::' }), [builtIn, entry('github:a/b'), repository]);
+  // Two references with a `:` each, and one that is a path: whitespace
+  // separates, and nothing else does.
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'github:a/b github:c/d' }),
+    [builtIn, entry('github:a/b', 1, 2), entry('github:c/d', 2, 2)]);
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'git+ssh://git@host:2222/team/profile ./y' }),
+    [builtIn, entry('git+ssh://git@host:2222/team/profile', 1, 2), entry('./y', 2, 2)]);
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'https://host:8080/team/profile' }),
+    [builtIn, entry('https://host:8080/team/profile')]);
+  // Runs of whitespace, and leading or trailing ones, are one separator.
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: '  github:a/b\t\t.' }),
+    [builtIn, entry('github:a/b', 1, 2), entry('.', 2, 2)]);
   assert.deepEqual(select(undefined, repo), [builtIn, repository]);
   assert.deepEqual(select(undefined, outside, { AI_PROFILE: 'github:a/b' }), [builtIn, entry('github:a/b')]);
   assert.deepEqual(select(undefined, outside, { AI_PROFILE: '' }), [builtIn]);
+  assert.deepEqual(select(undefined, outside, { AI_PROFILE: '   ' }), [builtIn]);
   assert.deepEqual(select(undefined, undefined), [builtIn]);
 });
 
@@ -251,7 +261,7 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
     env: { LITELLM_BASE_URL: 'https://gateway.test', ONLY_HERE: 'yes' },
     settings: { omp: { modelRoles: { default: 'litellm/xl' } } },
   });
-  const stacked = inEffect(undefined, temporary(), { XDG_CACHE_HOME: env.XDG_CACHE_HOME, AI_PROFILE: `${elsewhere}:${gateway}` });
+  const stacked = inEffect(undefined, temporary(), { XDG_CACHE_HOME: env.XDG_CACHE_HOME, AI_PROFILE: `${elsewhere} ${gateway}` });
   assert.deepEqual(stacked, {
     name: 'gateway', description: 'Gateway', source: 'variable', origin: gateway,
     over: { name: 'elsewhere', description: 'Team', source: 'variable', origin: elsewhere },
@@ -261,10 +271,10 @@ test('a repository\'s profile composes over AI_PROFILE, which composes over the 
   assert.equal(listing.nameText(stacked), 'elsewhere + gateway');
   assert.equal(listing.sourceText(stacked),
     `from AI_PROFILE=${gateway} over AI_PROFILE=${elsewhere}`);
-  // The middle one is named in between: three entries, `a:b:repo`.
+  // The middle one is named in between: three entries, `a b repo`.
   const middle = temporary();
   profileFile(middle, { name: 'middle', description: 'Middle' });
-  const triple = inEffect(undefined, repo, { XDG_CACHE_HOME: env.XDG_CACHE_HOME, AI_PROFILE: `${elsewhere}:${middle}` });
+  const triple = inEffect(undefined, repo, { XDG_CACHE_HOME: env.XDG_CACHE_HOME, AI_PROFILE: `${elsewhere} ${middle}` });
   assert.equal(listing.nameText(triple), 'elsewhere + middle + repo');
   assert.equal(listing.sourceText(triple),
     `from ${file} over AI_PROFILE=${middle} over AI_PROFILE=${elsewhere}`);
@@ -370,7 +380,7 @@ test('a profile of the stack that cannot be read is named as the user gave it', 
     /^Error: AI_PROFILE=github:no\/team \(entry 1 of 1\): cannot fetch github:no\/team:/);
   // In a stack, the entry that failed and its place are both named.
   const good = profileFile(temporary(), { name: 'good' });
-  assert.throws(() => inEffect(repo, { AI_PROFILE: `${good}:github:no/team` }),
+  assert.throws(() => inEffect(repo, { AI_PROFILE: `${good} github:no/team` }),
     /^Error: AI_PROFILE=github:no\/team \(entry 2 of 2\): cannot fetch github:no\/team:/);
   const broken = temporary();
   mkdirSync(join(broken, '.git'));

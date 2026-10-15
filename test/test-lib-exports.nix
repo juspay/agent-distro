@@ -47,14 +47,20 @@ let
   withName = homeOf { enable = true; profile = default; };
   withPath = homeOf { enable = true; profiles = [ ./fixtures/profile ]; };
   builtFixture = agent-distro.lib.mkProfile { system = pkgs.system; profile = ./fixtures/profile; };
+  # A path is not the only thing built: a flake input is a source whose
+  # `outPath` is a store path, and it is built the same way.
+  fixtureSource = { outPath = "${./fixtures/profile}"; };
+  withSource = homeOf { enable = true; profiles = [ fixtureSource ]; };
+  builtSource = agent-distro.lib.mkProfile { system = pkgs.system; profile = fixtureSource; };
   # The line a shim exports an AI_PROFILE with, quoted as mk-shims quotes it.
   exported = value: "export AI_PROFILE=${lib.escapeShellArg value}";
 
   # The exports, reached by plain import with this test flake's pkgs.
   stateDirectory = import "${agent-distro}/lib/state-directory.nix" {
     inherit (svc) flake;
-    # No `profiles`, so the module passes none.
-    profile = "";
+    # No `profiles`: the module passes the default profile's name, so an
+    # install that predates the option keeps the state directory it has.
+    profile = default;
     xdgStateHome = configuration.xdg.stateHome;
   };
   shims = import "${agent-distro}/lib/mk-shims.nix" {
@@ -227,6 +233,9 @@ assert !lib.hasInfix "AI_PROFILE" (shimOf withName);
 # A path is built by mkProfile, whose store path is the fallback. The path
 # carries context, which a regular-expression argument cannot.
 assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtFixture)) (shimOf withPath);
+# A flake input (`inputs.skills`, `flake = false`) is built too, from its
+# `outPath`, and the same derivation comes out either way.
+assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtSource)) (shimOf withSource);
 # The index the updater reads comes from lib/ca-index.nix, through the module
 # and the library; a distribution's own index reaches the config the same way.
 assert config.caIndex == agent-distro.lib.caIndex.rawBase;

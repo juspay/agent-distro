@@ -45,14 +45,14 @@ Here the terminal is in a repository whose `agent-distro.nix` is the Juspay prof
 | Variable[^var-names] | Values | Effect |
 | --- | --- | --- |
 | `AI_HARNESS` | a directory under `harnesses/` | Launches that harness without the list[^non-interactive] |
-| `AI_PROFILE` | `:`-separated profile [references](#profiles) | Your profiles, under the repository's own[^profile-fallback] |
+| `AI_PROFILE` | whitespace-separated profile [references](#profiles) | Your profiles, under the repository's own[^profile-fallback] |
 | `AGENT_DISTRO_SETTINGS` | `0` | Keeps the plugins; leaves out the profile's `env` and `settings` |
 | `AGENT_DISTRO_PLUGINS` | `:`-separated plugin directories | Loads more plugins for that launch; see [Plugins at launch](#plugins-at-launch) |
 | `AGENT_DISTRO_LOG` | `silent`, `error`, `warn`, `info` (default), `debug`, `trace` | How much agent-distro says on stderr; see [Diagnostics](#diagnostics) |
 
 [^var-names]: Names unchanged for script compatibility.
 [^non-interactive]: Also usable in scripts and non-interactive shells.
-[^profile-fallback]: Read by every command, `agent-distro`, `claude`, `omp` and the rest alike: it is the profiles an environment such as Kolu sets. Composed left to right, later entries winning. See [Profiles](#profiles) for how that composes.
+[^profile-fallback]: Read by every command, `agent-distro`, `claude`, `omp` and the rest alike: it is the profiles an environment such as Kolu sets. Whitespace-separated, composed left to right, later entries winning — as nix's own lists are (`substituters`). See [Profiles](#profiles) for how that composes.
 
 ### By name
 
@@ -228,7 +228,7 @@ The Home Manager module puts every harness on your `PATH` and keeps them on the 
 }
 ```
 
-Home Manager creates the state directory and schedules the updates for you.[^hm-prune] One package is installed — the harnesses — and `profiles` is what every command it installs exports as `AI_PROFILE`: a [reference](#profiles), read when a harness starts, or a path, which is built by `agent-distro.lib.mkProfile` and read from the store, pinned and offline.[^hm-reference]
+Home Manager creates the state directory and schedules the updates for you.[^hm-prune] One package is installed — the harnesses — and `profiles` is what every command it installs exports as `AI_PROFILE`, whitespace-separated: a [reference](#profiles), read when a harness starts, or anything else — a path, or a flake input — which is built by `agent-distro.lib.mkProfile` and read from the store, pinned and offline.[^hm-reference]
 
 ```nix
 inputs.skills = { url = "github:juspay/skills"; flake = false; };
@@ -236,7 +236,7 @@ inputs.skills = { url = "github:juspay/skills"; flake = false; };
 services.agent-distro.profiles = [ inputs.skills "github:ekala-project/ekala-ai-skills" ];
 ```
 
-[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` is composed over either. Every entry is a profile reference or a path; one that is not stops the launch, naming it. `profile`, the one-profile spelling of this option, is deprecated for one release: a reference becomes `profiles = [ it ]`, and a built-in name installs the package with no `AI_PROFILE`.
+[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` is composed over either. Every entry is a profile reference or something built from one; a string that is neither stops the launch, naming it. `profile`, the one-profile spelling of this option, is deprecated for one release: a reference becomes `profiles = [ it ]`, and a built-in name installs the package with no `AI_PROFILE`.
 
 [^hm-prune]: At activation its prune stage deletes sibling state directories left from an earlier flake/profile choice.
 
@@ -502,11 +502,12 @@ starts its agents with that repository's profile on top of yours.
 
 ### Run with several
 
-`AI_PROFILE` is a stack, `:`-separated, composed left to right — later entries win where they
-overlap, plugins and packages accumulate:
+`AI_PROFILE` is a stack, whitespace-separated — as nix's own lists are — composed left to
+right: later entries win where they overlap, plugins and packages accumulate. No reference or
+store path holds whitespace, so a flake reference keeps the `:` in it.
 
 ```sh
-AI_PROFILE=github:juspay/skills:github:ekala-project/ekala-ai-skills agent-distro omp
+AI_PROFILE="github:juspay/skills github:ekala-project/ekala-ai-skills" agent-distro omp
 ```
 
 So in `~/code/kolu`, with the variable above, OMP starts with Juspay's skills, Ekala's skills, and

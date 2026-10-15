@@ -221,7 +221,7 @@ in
     with subtest("AI_PROFILE is a stack: every entry, composed left to right"):
         # Two entries, both at the fixture: `elsewhere`'s plugin, then
         # `fetched`'s own and the one it names by reference.
-        stack = "AI_PROFILE=/home/testuser/elsewhere:/home/testuser/fetched"
+        stack = 'AI_PROFILE="/home/testuser/elsewhere /home/testuser/fetched"'
         assert launched(f"{stack} probe-claude")[0] == ["beta", "gamma", "delta"]
         assert in_effect(env=stack) == {
             "name": "fetched", "description": "", "source": "variable", "origin": "/home/testuser/fetched",
@@ -235,7 +235,7 @@ in
         output = refused(f"{stack} probe-omp")
         assert "ELSEWHERE_KEY is not set" in output and "Ask the team for a key" in output, output
         # An entry that is not a reference is refused, naming it and its place.
-        output = refused("AI_PROFILE=/home/testuser/elsewhere:nonesuch probe-claude")
+        output = refused('AI_PROFILE="/home/testuser/elsewhere nonesuch" probe-claude')
         assert "AI_PROFILE=nonesuch (entry 2 of 2): not a reference" in output, output
         assert "STUB-STARTED" not in output, output
 

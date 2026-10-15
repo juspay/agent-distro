@@ -8,9 +8,10 @@ let
   cfg = config.services.agent-distro;
   available = bundles.${pkgs.stdenv.hostPlatform.system};
   # What `profiles` means: a string is a reference read at launch
-  # (src/profile/resolve.ts); a path is built by mkProfile, whose store path is
-  # a reference too. One package is installed either way — the harnesses — and
-  # `profiles` is what each command exports as AI_PROFILE, `:`-separated.
+  # (src/profile/resolve.ts); anything else — a path, a flake input, a built
+  # profile — is built again by mkProfile, whose store path is a reference too.
+  # One package is installed either way — the harnesses — and `profiles` is what
+  # each command exports as AI_PROFILE, whitespace-separated.
   # `profile` was the one-profile spelling of this; it is deprecated.
   named = cfg.profile != null
     && builtins.hasAttr (builtins.unsafeDiscardStringContext cfg.profile) available;
@@ -21,18 +22,21 @@ let
      else cfg.profile);
   built = map
     (entry:
-      if builtins.isPath entry
-      then mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = entry; }
-      else entry)
+      if builtins.isString entry
+      then entry
+      else mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = entry; })
     profiles;
-  aiProfile = lib.concatStringsSep ":" (map toString built);
+  aiProfile = lib.concatStringsSep " " (map toString built);
   # The one package: the default profile's build, whatever `profiles` names.
   bundleName = defaultProfile;
   bundle = available.${bundleName};
   schedule = import ../lib/schedule.nix lib;
   stateDirectory = import ../lib/state-directory.nix {
     inherit (cfg) flake;
-    profile = aiProfile;
+    # The AI_PROFILE value, and the default profile's name where none is
+    # listed, so an install that predates `profiles` keeps its state directory
+    # (and the update it holds) rather than having it pruned as superseded.
+    profile = if aiProfile == "" then defaultProfile else aiProfile;
     xdgStateHome = config.xdg.stateHome;
   };
   shims = import ../lib/mk-shims.nix {
@@ -57,15 +61,17 @@ in
   options.services.agent-distro = {
     enable = lib.mkEnableOption "scheduled updates of every harness";
     profiles = lib.mkOption {
-      type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
+      type = lib.types.listOf (lib.types.oneOf [ lib.types.str lib.types.path lib.types.package ]);
       default = [ ];
       example = [ "github:juspay/skills" ];
       description = ''
-        The profiles every installed command exports as AI_PROFILE, composed
-        left to right, later entries winning. A string is a profile reference,
-        read when a harness starts: a flake reference such as the example, or
-        an absolute path to a repository with an agent-distro.nix. A path is
-        built (lib.mkProfile) and read from the store, pinned and offline.
+        The profiles every installed command exports as AI_PROFILE,
+        whitespace-separated and composed left to right, later entries winning.
+        A string is a profile reference, read when a harness starts: a flake
+        reference such as the example, or an absolute path to a repository with
+        an agent-distro.nix. Anything else — a path, or a flake input
+        (`inputs.skills`, with `flake = false`) — is built by lib.mkProfile and
+        read from the store, pinned and offline.
 
         A repository's own agent-distro.nix composes over them where a harness
         starts inside one, and is the only profile in effect where none is
