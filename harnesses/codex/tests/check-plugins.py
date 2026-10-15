@@ -1,12 +1,6 @@
 from codex_support import *
 import tempfile
 
-# A plugin whose name contains "." cannot be enabled with Codex's `-c`: its key
-# splits at every dot and a quoted key does not take, so the adapter registers
-# its marketplace and leaves the plugin disabled, saying so. Everything below
-# is about the plugins a launch does enable.
-expected = {name: names for name, names in expected.items() if '.' not in name}
-
 launcher = 'codex'
 # The plugin this check removes, which stays removed for the unchanged
 # profile: never the spec fixture, whose install the stdio-server checks below

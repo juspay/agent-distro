@@ -7,6 +7,11 @@ import sys
 import tomllib
 
 expected = json.loads(sys.argv[1])
+# A plugin whose name contains "." cannot be enabled with Codex's `-c` — its
+# key splits at every dot, and a quoted key does not take — so the adapter
+# registers its marketplace and leaves the plugin disabled, saying so. Every
+# check over this support is about the plugins a launch does enable.
+expected = {name: names for name, names in expected.items() if '.' not in name}
 # A plugin gets a marketplace of its own, named after its cache key
 # (src/harness/codex.ts), so all argv[2] can carry is the prefix they share;
 # a check that needs a marketplace derives it from `codex plugin list --json`.

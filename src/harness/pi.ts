@@ -189,7 +189,7 @@ export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) =>
     writeFileSync(join(out, 'fragment.json'), JSON.stringify(pluginFragment(description, out, inputs, report))),
-  launch: ({ args, plugins }) => {
+  launch: ({ args, plugins, cache }) => {
     if (!plugins.length) return join(args.config, 'config.json');
     // Pi reads plugins only from its agent directory, which needs a home: with
     // neither HOME nor PI_CODING_AGENT_DIR there is nothing to merge into, so
