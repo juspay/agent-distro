@@ -160,5 +160,8 @@ if 'acme.spec-fixture' in expected:
 
 invalid = 'model = [\n'
 config.write_text(invalid)
-assert run('--version', launcher=launcher).returncode != 0
+# Codex accepts an unparseable config.toml for `--version` on this build, with
+# or without the launch's `-c` overrides, so what is asserted here is ours: the
+# launch leaves the user's broken file exactly as they wrote it.
+run('--version', launcher=launcher)
 assert config.read_text() == invalid
