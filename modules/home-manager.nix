@@ -13,14 +13,16 @@ let
   # whose store path is a reference too. One package is installed either way —
   # the harnesses — and `profiles` is what each command exports as AI_PROFILE,
   # whitespace-separated.
-  # `profile` was the one-profile spelling of this; it is deprecated.
-  named = cfg.profile != null
-    && builtins.hasAttr (builtins.unsafeDiscardStringContext cfg.profile) available;
-  reference = cfg.profile != null && !named;
-  unknown = reference && !(lib.hasPrefix "/" cfg.profile) && !(lib.hasInfix ":" cfg.profile);
-  profiles = cfg.profiles ++ lib.optional reference
-    (if unknown then throw "Unknown agent-distro profile \"${cfg.profile}\"; name a reference in services.agent-distro.profiles instead: an absolute path or a flake reference such as github:juspay/skills."
-     else cfg.profile);
+  # `profile` was the one-profile spelling of this, and is deprecated: a
+  # built-in name (the profile a package carries) is the one package and no
+  # AI_PROFILE, a reference is one entry of `profiles`, and anything else is a
+  # mistake worth naming rather than passing on to be read as a reference.
+  deprecated =
+    if cfg.profile == null then [ ]
+    else if builtins.hasAttr (builtins.unsafeDiscardStringContext cfg.profile) available then [ ]
+    else if lib.hasPrefix "/" cfg.profile || lib.hasInfix ":" cfg.profile then [ cfg.profile ]
+    else throw "Unknown agent-distro profile \"${cfg.profile}\"; name a reference in services.agent-distro.profiles instead: an absolute path or a flake reference such as github:juspay/skills.";
+  profiles = cfg.profiles ++ deprecated;
   built = map
     (entry:
       if builtins.isString entry || lib.isDerivation entry

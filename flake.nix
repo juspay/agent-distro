@@ -14,14 +14,15 @@
     let
       inherit (nixpkgs) lib;
       discovered = import ./lib/discover-harnesses.nix;
-      # Launchers name this nixpkgs by reference rather than hold its source.
-      mkLaunchers = args: import ./lib/mk-launchers.nix ({ inherit nixpkgs; } // args);
       mkFlake = import ./lib/mk-flake.nix { inherit nixpkgs; };
       cache = import ./lib/cache.nix;
       caIndex = import ./lib/ca-index.nix;
-      # The library every consumer reaches as agent-distro.lib; the Home Manager
-      # module builds a `profiles` path with `mkProfile` from it.
-      api = import ./lib/api.nix { inherit nixpkgs mkLaunchers mkFlake cache caIndex; };
+      # The library every consumer reaches as agent-distro.lib, and the two
+      # builders both it and this flake use: `mkLaunchers` names this nixpkgs by
+      # reference rather than hold its source, and the Home Manager module
+      # builds a `profiles` path with `mkProfile`.
+      api = import ./lib/api.nix { inherit nixpkgs mkFlake cache caIndex; };
+      mkLaunchers = api.mkLaunchers;
       systems = import ./lib/systems.nix;
       # Unfree so harness recipes (lib/harness-pkgs.nix) share this one instance.
       packageSets = lib.genAttrs systems (system: import nixpkgs { inherit system; config.allowUnfree = true; });

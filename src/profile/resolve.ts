@@ -540,11 +540,14 @@ function builtProfile(directory: string): Built | null {
     indexes = [];
   }
   const plugins = indexes.sort((a, b) => Number(a) - Number(b)).map((index) => {
-    const description = join(base, index, 'description.json');
-    // A symlink to the plugin's store path at build time; its target now.
-    if (!lexists(join(base, index, 'root'))) throw new LaunchError(`${base}/${index}: no root`);
-    if (!isFile(description)) throw new LaunchError(`${base}/${index}: no description.json`);
-    return { root: realpath(join(base, index, 'root')), description };
+    // One plugin: the reader's own output for it, and `root` — a symlink to
+    // the plugin's store path at build time, whose target is the root now.
+    const at = join(base, index);
+    const root = join(at, 'root');
+    const description = join(at, 'description.json');
+    if (!lexists(root)) throw new LaunchError(`${at}: no root`);
+    if (!isFile(description)) throw new LaunchError(`${at}: no description.json`);
+    return { root: realpath(root), description };
   });
   return {
     dir: directory, name, reader, plugins,

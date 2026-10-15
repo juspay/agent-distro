@@ -27,42 +27,44 @@ let
   pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
   inherit (pkgs) lib;
   runtime = import ./runtime.nix pkgs;
-  # The attribute set the file holds, or the file a path-like `profile` names.
-  # A source (a flake input) is one whose `outPath` is a store path; its
-  # context rides the path, so the build depends on the input either way.
-  attrs =
-    if builtins.isAttrs profile && !(profile ? outPath) then profile
-    else
-      import (
-        let
-          at =
-            if builtins.isPath profile then profile
-            else
-              /. + builtins.unsafeDiscardStringContext
-                (if builtins.isAttrs profile then profile.outPath else toString profile);
-        in
-        if builtins.pathExists (at + "/agent-distro.nix") then at + "/agent-distro.nix" else at
-      );
+  # The `agent-distro.nix` a path-like `profile` names: the file itself, or
+  # the one in that directory. A flake input is a source whose `outPath` is a
+  # store path, and its context rides the path, so the build depends on the
+  # input either way.
+  file =
+    let
+      at =
+        if builtins.isPath profile then profile
+        else
+          /. + builtins.unsafeDiscardStringContext
+            (if builtins.isAttrs profile then profile.outPath else toString profile);
+    in
+    if builtins.pathExists (at + "/agent-distro.nix") then at + "/agent-distro.nix" else at;
+  # The file's attribute set, or the one `profile` holds itself.
+  attrs = if builtins.isAttrs profile && !(profile ? outPath) then profile else import file;
   # A profile written for an older agent-distro is warned about here, as one
   # read at launch is (src/profile/resolve.ts).
-  warned = lib.warnIf (attrs ? gateway)
-    "mkProfile: profile ${attrs.name}: `gateway` is no longer read; see https://agent-distro.nixos.asia/#profiles" attrs;
-  name = warned.name;
+  name = lib.warnIf (attrs ? gateway)
+    "mkProfile: profile ${attrs.name}: `gateway` is no longer read; see https://agent-distro.nixos.asia/#profiles"
+    attrs.name;
   plugins = map
     (entry:
       if builtins.isString entry && !(lib.hasPrefix "/" entry) then
         throw "mkProfile: profile \"${name}\" names plugin \"${entry}\": a flake reference is read at launch, not built in; pin it as a flake input and pass that path."
       else entry)
-    (warned.plugins or [ ]);
-  packages = (warned.packages or (_: [ ])) pkgs;
-  described = pkgs.runCommand "agent-distro-profile-plugins" { } (''mkdir -p "$out/share/agent-distro/plugins"'' + lib.concatMapStrings
-    (index:
-      let plugin = builtins.elemAt plugins index; in ''
-        mkdir -p "$out/share/agent-distro/plugins/${toString index}"
-        cp ${runtime.readPlugin plugin} "$out/share/agent-distro/plugins/${toString index}/description.json"
-        ln -s ${plugin} "$out/share/agent-distro/plugins/${toString index}/root"
+    (attrs.plugins or [ ]);
+  packages = (attrs.packages or (_: [ ])) pkgs;
+  # The directory first, so a profile that names no plugins still has one to
+  # read; then one directory per plugin, in order, each with the reader's own
+  # output for the plugin and a symlink to it.
+  described = pkgs.runCommand "agent-distro-profile-plugins" { } (''mkdir -p "$out/share/agent-distro/plugins"'' + lib.concatStrings (lib.imap0
+    (index: plugin:
+      let at = "share/agent-distro/plugins/${toString index}"; in ''
+        mkdir -p "$out/${at}"
+        cp ${runtime.readPlugin plugin} "$out/${at}/description.json"
+        ln -s ${plugin} "$out/${at}/root"
       '')
-    (lib.range 0 (builtins.length plugins - 1)));
+    plugins));
   # Only the packages' `bin/`: those commands are what a launch puts on PATH,
   # and nothing else of a package's output belongs in a profile. Two packages
   # offering one command name is an error, which buildEnv reports.
@@ -73,9 +75,9 @@ let
   };
   json = pkgs.writeTextDir "share/agent-distro/profile.json" (builtins.toJSON {
     inherit name;
-    description = warned.description or "";
-    env = warned.env or { };
-    settings = warned.settings or { };
+    description = attrs.description or "";
+    env = attrs.env or { };
+    settings = attrs.settings or { };
     # What the descriptions above were written by: a launch uses them only when
     # its own runtime tree has this name (src/profile/resolve.ts `runtimeReader`).
     reader = builtins.baseNameOf (toString runtime.tree);
