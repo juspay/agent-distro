@@ -36,7 +36,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { log, type Logger } from '../log.ts';
 import { realpath, writeTemporary } from '../util.ts';
 import { checkCaches } from './cache.ts';
-import { updateDue } from './due.ts';
+import { parseStamp, SCHEDULED_ATTEMPTS, SCHEDULED_RETRY_SECONDS, updateDue } from './due.ts';
+import { historyLine } from './history.ts';
+import { changes, parseVersions, VERSIONS_FILE, type Version } from './versions.ts';
 import { ATTRIBUTE, indexEntryUrl, takesContentAddressed } from './ca-index.ts';
 import { NixLog, nixErrorDetail } from './progress.ts';
 
@@ -83,40 +85,10 @@ const LOCK_RETRY_MS = 50;
  */
 const INDEX_TIMEOUT_MS = 30_000;
 
-const pad = (n: number) => String(n).padStart(2, '0');
-
-/** Local time as `date +%Y-%m-%dT%H:%M:%S%:z` writes it. */
-function timestamp(date = new Date()): string {
-  const offset = -date.getTimezoneOffset();
-  const zone = (offset < 0 ? '-' : '+') + pad(Math.floor(Math.abs(offset) / 60)) + ':' + pad(Math.abs(offset) % 60);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-    + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${zone}`;
-}
-
-/** name → [title, version], from an installed package's share/agent-distro/versions. */
-function versions(installed: string): Map<string, [string, string]> | null {
-  const path = join(installed, 'share/agent-distro/versions');
-  if (!existsSync(path)) return null;
-  return new Map(readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => {
-    const [name, title, ...version] = line.split('\t');
-    return [name, [title, version.join('\t')]];
-  }));
-}
-
-/** What changed between two packages, as the history log reports it. */
-function changes(previous: Map<string, [string, string]> | null, next: Map<string, [string, string]> | null): string {
-  if (next === null) return 'versions not recorded by this package';
-  const result: string[] = [];
-  for (const [name, [title, version]] of next) {
-    const old = previous?.get(name);
-    if (previous === null) result.push(`${title} ${version}`);
-    else if (old === undefined) result.push(`${title} added ${version}`);
-    else if (old[1] !== version) result.push(`${title} ${old[1]} → ${version}`);
-  }
-  for (const [name, [title]] of previous ?? []) {
-    if (!next.has(name)) result.push(`${title} removed`);
-  }
-  return result.join(', ') || 'no harness version changed';
+/** The harnesses an installed package carries, from its versions file; null when it has none. */
+function versions(installed: string): Version[] | null {
+  const path = join(installed, VERSIONS_FILE);
+  return existsSync(path) ? parseVersions(readFileSync(path, 'utf8')) : null;
 }
 
 /** What a build would do: compile `names` (empty: nothing), or `unknown` and why. */
@@ -472,7 +444,7 @@ export async function update(config: Config, report: Report = plain, nixLog?: Ni
   const current = join(state, 'current');
   // Empty before the first run.
   const old = lstatSync(current, { throwIfNoEntry: false }) ? realpath(current) : '';
-  const record = (event: string) => appendHistory(history, `${timestamp()} ${event}\n`);
+  const record = (event: string) => appendHistory(history, historyLine(event));
   // A skipped update is not a failure: exiting 0 avoids the pointless restart
   // loop, and last-success stays untouched so launchd tries again next hour.
   // Repeats of the same reason are logged once.
@@ -572,7 +544,7 @@ export async function update(config: Config, report: Report = plain, nixLog?: Ni
   return 0;
 }
 
-/** When due, up to three attempts five minutes apart: launchd has no restart limit. */
+/** When due, up to SCHEDULED_ATTEMPTS attempts, SCHEDULED_RETRY_SECONDS apart (src/update/due.ts). */
 async function scheduled(config: Config): Promise<number> {
   try {
     truncateLog(join(config.state, 'update.log'));
@@ -581,9 +553,7 @@ async function scheduled(config: Config): Promise<number> {
   }
   let stamp: number | null = null;
   try {
-    const text = readFileSync(join(config.state, 'last-success'), 'utf8').trim();
-    // An unreadable stamp counts as no successful update, so it is replaced.
-    stamp = /^[0-9]+$/.test(text) ? Number(text) : null;
+    stamp = parseStamp(readFileSync(join(config.state, 'last-success'), 'utf8'));
   } catch {
     stamp = null;
   }
@@ -598,9 +568,9 @@ async function scheduled(config: Config): Promise<number> {
       status = 1;
     }
     if (status === 0) return 0;
-    if (attempt === 3) return 1;
-    log.update.warn(`attempt ${attempt} of 3 failed; retrying in 5 minutes`);
-    await sleep(300_000);
+    if (attempt === SCHEDULED_ATTEMPTS) return 1;
+    log.update.warn(`attempt ${attempt} of ${SCHEDULED_ATTEMPTS} failed; retrying in ${SCHEDULED_RETRY_SECONDS / 60} minutes`);
+    await sleep(SCHEDULED_RETRY_SECONDS * 1000);
   }
 }
 

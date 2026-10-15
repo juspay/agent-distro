@@ -18,10 +18,15 @@
 #
 # `profile` is a path to an `agent-distro.nix` or to the directory holding one —
 # a Nix path, a store path in a string, or the flake input itself, whose
-# `outPath` is one — or the attribute set the file holds. Its plugins must be
-# paths: a flake input's, or a checkout's. A flake reference is read at launch
-# and has no place in a build, so it is refused here — pin it as a flake input
-# of your own configuration and pass that path.
+# `outPath` is one — or the attribute set the file holds. Its plugins are paths
+# — a flake input's, or a checkout's — or flake references
+# (`github:owner/repo?dir=sub`), which are locked here, once: fetched with
+# `builtins.fetchTree` as lib/flake-source.nix fetches its sources, and built
+# in as the store path they are at that moment, so the built profile follows no
+# branch. Locking reads the network, which only an impure evaluation may do
+# (`nix build --impure`); a pure one — a flake's own outputs, a Home Manager
+# configuration — is refused with that said, and pins the reference as a flake
+# input of its own instead, passing that path.
 { nixpkgs, system, profile }:
 let
   pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
@@ -47,11 +52,22 @@ let
   name = lib.warnIf (attrs ? gateway)
     "mkProfile: profile ${attrs.name}: `gateway` is no longer read; see https://agent-distro.nixos.asia/#profiles"
     attrs.name;
+  # A flake reference's directory, locked now: the fetched tree, and its `dir`
+  # within it (src/profile/resolve.ts `prefetch` reads a reference at launch
+  # the same way). `currentSystem` is what a pure evaluation lacks, and
+  # `fetchTree` would refuse the unlocked reference there in words that do not
+  # say what to do.
+  locked = entry:
+    if !(builtins ? currentSystem) then
+      throw "mkProfile: profile \"${name}\" names plugin \"${entry}\": a flake reference is locked when the profile is built, which needs an impure evaluation (--impure); in a pure one, pin it as a flake input and pass that path."
+    else
+      let
+        reference = builtins.parseFlakeRef entry;
+        tree = builtins.fetchTree (removeAttrs reference [ "dir" ]);
+      in
+      if reference ? dir then "${tree.outPath}/${reference.dir}" else tree.outPath;
   plugins = map
-    (entry:
-      if builtins.isString entry && !(lib.hasPrefix "/" entry) then
-        throw "mkProfile: profile \"${name}\" names plugin \"${entry}\": a flake reference is read at launch, not built in; pin it as a flake input and pass that path."
-      else entry)
+    (entry: if builtins.isString entry && !(lib.hasPrefix "/" entry) then locked entry else entry)
     (attrs.plugins or [ ]);
   packages = (attrs.packages or (_: [ ])) pkgs;
   # The directory first, so a profile that names no plugins still has one to
