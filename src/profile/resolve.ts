@@ -428,12 +428,18 @@ export function evaluate(file: string, info: Info, cache: string, what: string):
 /**
  * The cached evaluation of `file`, evaluating it first when absent or when
  * `again`. Keyed by the file's path (its relative paths are relative to it),
- * its contents, and this agent-distro build.
+ * its contents, the evaluator that shapes the value, and what the value
+ * depends on: the system, and the nixpkgs a profile with `packages` was
+ * evaluated against.
  */
 function evaluated(file: string, info: Info, cache: string, what: string, again: boolean): Evaluated {
   const profiles = join(cache, 'profiles');
+  // `runtime: import.meta.dirname` here would re-evaluate every profile in
+  // every repository on every commit that touches src/ — which a scheduled
+  // update makes a daily event, for a value only evaluate.nix shapes.
   const key = sha256(JSON.stringify({
-    file, content: sha256(readFileSync(file)), runtime: import.meta.dirname, nixpkgs: info.nixpkgs, system: info.system,
+    file, content: sha256(readFileSync(file)), evaluator: sha256(readFileSync(EVALUATE)),
+    nixpkgs: info.nixpkgs, system: info.system,
   }));
   const path = join(profiles, key, 'profile.json');
   if (!again && existsSync(path)) {
@@ -546,10 +552,9 @@ function builtProfile(directory: string): Built | null {
 
 /**
  * `upper` composed over `lower`: plugins and packages are both, lower's first;
- * `env` and `settings` are key-wise, upper's winning; the rest is upper's,
- * `over` naming lower unless it is the launcher's built-in default. Every stack
- * entry is over the one below it, and that chain is the whole composition, so
- * `lower` always names what it is over.
+ * `env` and `settings` are key-wise, upper's winning; the rest is upper's, and
+ * `over` names lower. Every stack entry is over the one below it, and that
+ * chain is the whole composition.
  */
 function merge(lower: Resolved, upper: Resolved): Resolved {
   const { name, description, source, origin, over } = lower;

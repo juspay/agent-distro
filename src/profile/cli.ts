@@ -14,7 +14,7 @@
  * harness.
  */
 import { readFileSync } from 'node:fs';
-import { nameText, sourceText, type Listing } from '../listing.ts';
+import { nameText, sourceText, type InEffect, type Listing } from '../listing.ts';
 import { log } from '../log.ts';
 import { LaunchError, printable } from '../plugin/launch.ts';
 import { isSystemError } from '../util.ts';
@@ -23,6 +23,14 @@ import { resolveProfile, select, workingDirectory, type Info, type Resolved } fr
 /** The profile in effect here, or null when nothing chose one. */
 function inEffect(info: Info, positional: string | undefined): Resolved | null {
   return resolveProfile(info, select(positional, workingDirectory(), process.env), process.env);
+}
+
+/**
+ * A resolved profile as the listing carries it: `InEffect`'s fields, without
+ * the plugins, env, settings and paths only a launch needs.
+ */
+function listingProfile({ name, description, source, origin, over }: Resolved): InEffect {
+  return { name, description, source, origin, ...(over && { over }) };
 }
 
 function run(argv: string[]): number {
@@ -40,10 +48,9 @@ function run(argv: string[]): number {
   const listing: Listing = JSON.parse(menu);
   const profile = inEffect(info, undefined);
   if (format === '--json') {
-    const { name, description, source, origin, over } = profile ?? { name: '', description: '', source: undefined, origin: '', over: undefined };
     process.stdout.write(JSON.stringify({
       ...listing,
-      ...(profile ? { profile: { name, description, source, origin, ...(over && { over }) } } : {}),
+      ...(profile ? { profile: listingProfile(profile) } : {}),
     }) + '\n');
     return 0;
   }

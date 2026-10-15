@@ -12,7 +12,7 @@
 # content changed is installed again. `koluPlugin` is kolu's Agent Plugin
 # directory, for the `koluLaunch` checks: they load it through
 # AGENT_DISTRO_PLUGINS rather than from the profile.
-{ pkgs, nixpkgs ? null, profiles ? [ ], updated ? null, features ? [ ], koluPlugin ? null }:
+{ pkgs, nixpkgs ? null, profiles ? [ ], updated ? profiles, features ? [ ], koluPlugin ? null }:
 let
   inherit (pkgs) lib;
   common = import ./common.nix;
@@ -43,7 +43,9 @@ let
   expected = builtins.foldl' (all: one: all // one.expected) { } each;
   env = builtins.foldl' (all: one: all // one.env) { } each;
   settings = builtins.foldl' (all: one: all // one.settings) { } each;
-  aiProfile = lib.concatStringsSep " " (map toString profiles);
+  # The stack as one AI_PROFILE value, whitespace-separated, as a launch reads
+  # it (src/profile/resolve.ts `entries`).
+  aiProfileOf = list: lib.concatStringsSep " " (map toString list);
   # The prefix every one-launch Codex marketplace is named with
   # (src/harness/codex.ts); a check that needs the marketplaces derives the rest.
   marketplace = "agent-distro-";
@@ -53,7 +55,7 @@ let
     (lib.filterAttrs (_: value: lib.isAttrs value && (value.secret or false)) env);
   fixtures = harness: {
     changed = pkgs.writeShellScriptBin "${harness}-changed" ''
-      AI_PROFILE=${lib.escapeShellArg (lib.concatStringsSep " " (map toString (if updated == null then profiles else updated)))} \
+      AI_PROFILE=${lib.escapeShellArg (aiProfileOf updated)} \
         exec ${lib.getExe launchers.${harness}} "$@"
     '';
     upstream = pkgs.writeShellScriptBin "${harness}-upstream" ''
@@ -78,7 +80,7 @@ let
         environment.systemPackages = [ launchers.${harness} pkgs.python3 ] ++ map (key: (fixtures harness).${key}) packages;
         # The profiles these checks launch with, and the plugins a check may put
         # on AGENT_DISTRO_PLUGINS; that variable is never set globally.
-        environment.variables = lib.optionalAttrs (aiProfile != "") { AI_PROFILE = aiProfile; }
+        environment.variables = lib.optionalAttrs (profiles != [ ]) { AI_PROFILE = aiProfileOf profiles; }
           // lib.optionalAttrs gateway secrets
           // { AGENT_DISTRO_TEST_PLUGIN = "${./fixtures/launch-plugin}"; }
           // { AGENT_DISTRO_TEST_SPEC = "${./fixtures/spec-plugin}"; }

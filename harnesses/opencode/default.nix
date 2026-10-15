@@ -1,11 +1,10 @@
 # A session config composes with the user's global and project settings, and
 # carries the plugin that fills in the profile's provider.
-{ pkgs, nixpkgs, package }:
+{ pkgs, name, package, launchPlugins }:
 let
   inherit (pkgs) lib writeShellApplication runCommand writeText gum;
   opencode = package;
 
-  name = "opencode";
   # The vendored opencode-plugin-litellm, in the session config of every
   # launch. It discovers the models a LiteLLM server serves and reads
   # LITELLM_API_KEY. OpenCode takes a local plugin as a directory it finds
@@ -14,15 +13,10 @@ let
   plugin = "${(import ./npins).opencode-plugin-litellm { inherit pkgs; }}/src";
   runtime = import ../../lib/runtime.nix pkgs;
   config = runCommand "${name}-config" { } ''
-    ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON (runtime.launcherInputs // {
+    ${runtime.script "harness/opencode.ts"} "$out" ${writeText "${name}-args.json" (builtins.toJSON {
       inherit plugin;
-    }))}
+    })}
   '';
-  launchPlugins = runtime.launchPlugins (runtime.info nixpkgs // {
-    harness = "opencode";
-    inherit name;
-    config = "${config}";
-  });
 in
 writeShellApplication {
   inherit name;
@@ -30,7 +24,7 @@ writeShellApplication {
   text = ''
     # The profiles in effect and their packages, and this config, with their
     # plugins merged into it.
-    ${launchPlugins}
+    ${launchPlugins { config = "${config}"; }}
     config=$launched
     ${import ../../lib/prompt-secrets.nix { inherit gum; }}
     # The profile's `settings.opencode`, over the session config: a provider

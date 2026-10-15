@@ -8,17 +8,22 @@
 # build is the nixpkgs its profiles' `packages` are evaluated against, and the
 # picker's menu.
 #
-# `nixpkgs`, the flake input `pkgs` was imported from, lets the launchers name
-# it by a locked reference rather than hold its source
-# (lib/nixpkgs-reference.nix); flake.nix passes its own.
+# `nixpkgs`, the flake input `pkgs` was imported from, lets the launch
+# arguments name it by a locked reference rather than hold its source
+# (lib/nixpkgs-reference.nix); flake.nix passes its own. Every recipe gets that
+# `Info` already built — as `launchPlugins`, seeded with its own `harness` and
+# its `name` — so no adapter spells either, and no adapter sees nixpkgs.
 { pkgs, sources ? (name: pkgs: import (../harnesses + "/${name}/source.nix") { inherit pkgs; }), nixpkgs ? null }:
 let
   inherit (pkgs) lib;
   discovery = import ./discover-harnesses.nix;
   harnesses = discovery.ordered;
+  runtime = import ./runtime.nix pkgs;
+  info = runtime.info nixpkgs;
   commands = lib.genAttrs harnesses (name: import (../harnesses + "/${name}/default.nix") {
-    inherit pkgs nixpkgs;
+    inherit pkgs name;
     package = sources name pkgs;
+    launchPlugins = args: runtime.launchPlugins (info // { harness = name; } // args);
   });
   # What the package carries: one line per harness, in menu order. The picker's
   # menu (lib/picker.nix), the launchers beside it and this file are one list,

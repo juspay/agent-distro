@@ -4,8 +4,8 @@
  * base without credentials, query or fragment may become a request, and the
  * revision and system must not be able to move it — and which systems take a
  * content-addressed package at all (not macOS, where the rewrite leaves a
- * Mach-O that arm64 kills). The entry's name is the one attribute the index
- * publishes, `default`.
+ * Mach-O that arm64 kills). The entry's name is the attribute the updater's
+ * config names, `default` unless it says otherwise.
  *
  * Usage: node check-index-url.ts SRC
  *
@@ -20,8 +20,8 @@ const [src] = process.argv.slice(2);
 const { indexEntryUrl, takesContentAddressed, ATTRIBUTE } = await import(join(src, 'update/ca-index.ts'));
 
 const revision = 'a'.repeat(40);
-const href = (base: string, over: { revision?: string; system?: string } = {}) =>
-  indexEntryUrl(base, over.revision ?? revision, over.system ?? 'x86_64-linux')?.href ?? null;
+const href = (base: string, over: { revision?: string; system?: string; attribute?: string } = {}) =>
+  indexEntryUrl(base, over.revision ?? revision, over.system ?? 'x86_64-linux', over.attribute ?? ATTRIBUTE)?.href ?? null;
 assert.equal(ATTRIBUTE, 'default', 'the index names one attribute, the one package');
 
 // The base lib/ca-index.nix states, as mkUpdater writes it into the config.
@@ -36,6 +36,13 @@ assert.equal(href('https://distro.example/some/where'),
 // not the host, is the trust boundary.
 assert.equal(href('https://other.example/index'),
   `https://other.example/index/${revision}/x86_64-linux/default.json`);
+// A config naming another attribute (lib/mk-updater.nix's `attribute`) fetches
+// that entry, not the constant: the alias the transition window publishes, or
+// a distribution's own name for its package.
+assert.equal(href('https://distro.example/i', { attribute: 'other' }),
+  `https://distro.example/i/${revision}/x86_64-linux/other.json`);
+assert.equal(href('https://distro.example/i', { attribute: 'vanilla' }),
+  `https://distro.example/i/${revision}/x86_64-linux/vanilla.json`);
 
 // Refused: no other scheme, no credentials, no query, no fragment, no relative
 // path, nothing unparseable. Each of these must not be fetched at all.

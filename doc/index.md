@@ -706,7 +706,7 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 
 ### Test library
 
-Consumers can import `test/lib.nix { pkgs; nixpkgs ? null; profiles ? [ ]; updated ? null; features ? [ ]; koluPlugin ? null; }`, where `nixpkgs` is the flake input `pkgs` came from, so the guest launchers name it by a locked reference rather than hold its source. `profiles` are `mkProfile` derivations, whose store paths are the `AI_PROFILE` the checks launch with; `updated` is the same profiles with their plugins rebuilt to new store paths, for the `changed` fixture. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
+Consumers can import `test/lib.nix { pkgs; nixpkgs ? null; profiles ? [ ]; updated ? profiles; features ? [ ]; koluPlugin ? null; }`, where `nixpkgs` is the flake input `pkgs` came from, so the guest launchers name it by a locked reference rather than hold its source. `profiles` are `mkProfile` derivations, whose store paths are the `AI_PROFILE` the checks launch with; `updated` defaults to `profiles`, and a caller passes the same profiles with their plugins rebuilt to new store paths, for the `changed` fixture. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
 
 - **Plugin rebuilds.** Select plugin rebuild checks only for nonempty skill plugins.
 - **Coverage.** The test flake covers the package with no profile (with kolu's plugin loaded at launch), the Juspay profile built with `mkProfile`, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a repository's `agent-distro.nix` reaching OMP, Codex and Claude Code as the same profile built by `mkProfile` does; and `ca-update`: the update that takes the published content-addressed path as an untrusted user, and the skip where the index publishes none.
@@ -726,7 +726,7 @@ Create `harnesses/<name>/` with four files:
 | File | Holds |
 | --- | --- |
 | `meta.nix` | title, order, `auth`,[^auth-values] `releaseNotes = version: URL`, and checks |
-| `default.nix` | the adapter, accepting `{ pkgs, nixpkgs, nixpkgsPath, system, package }` and starting with `runtime.launchPlugins`[^launch-json] |
+| `default.nix` | the adapter, accepting `{ pkgs, name, package, launchPlugins }` — `name` is its own harness name, `launchPlugins` is `runtime.launchPlugins` seeded with it — and starting with `launchPlugins { … }`[^launch-json] |
 | `source.nix` | `{ pkgs }` to package |
 | `README.md` | design notes |
 

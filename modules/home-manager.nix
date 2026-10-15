@@ -8,7 +8,9 @@ let
   cfg = config.services.agent-distro;
   # The one package, for this system: every harness launcher and the picker.
   package = packages.${pkgs.stdenv.hostPlatform.system};
-  # The attribute it is published and updated under (mkUpdater's own default).
+  # The attribute the package is published and updated under: one decision, so
+  # the updater's config, the index entry it reads and the state directory it
+  # holds cannot disagree (lib/mk-updater.nix defaults to the same name).
   attribute = "default";
   # What `profiles` means: a string is a reference read at launch
   # (src/profile/resolve.ts); a derivation is already a built profile and is
@@ -52,7 +54,7 @@ let
   updater = import ../lib/mk-updater.nix {
     inherit pkgs package nix;
     history = "${config.xdg.stateHome}/agent-distro/history.log";
-    inherit stateDirectory;
+    inherit stateDirectory attribute;
     inherit (cfg) flake substituters caIndex;
   };
   # Discover commands from the package, keeping shims and collision checks together.

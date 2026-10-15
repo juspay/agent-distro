@@ -17,11 +17,13 @@
  * harness as JSON (empty for none), and the profile's packages go first on
  * PATH. `AGENT_DISTRO_SETTINGS=0` leaves all three empty: plugins only.
  *
- * Every entry of AI_PROFILE composes over the one before it, left to right, on
- * top of the launcher's own profile; a positional selector is that profile
- * alone, over nothing. Plugins accumulate bottom first, and `env`, `settings`
- * and packages are the topmost entry's. Each directory is read exactly as the
- * launcher's own is, then translated once per content into
+ * Every entry of AI_PROFILE composes over the one before it, left to right; the
+ * launcher's own profile is the base of that stack — the one beneath the first
+ * entry and named by no entry — and a positional selector is a stack of one.
+ * Plugins and paths accumulate bottom first; `env` and `settings` merge
+ * key-wise, the topmost entry winning (src/profile/resolve.ts `merge`). Each
+ * directory is read exactly as the launcher's own is, then translated once per
+ * content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
  * already content-addressed; otherwise it hashes the directory's NAR

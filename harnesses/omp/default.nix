@@ -1,5 +1,5 @@
 # OMP loads Agent Plugins directories itself.
-{ pkgs, nixpkgs, package }:
+{ pkgs, name, package, launchPlugins }:
 let
   inherit (pkgs) lib writeShellApplication formats gum;
   omp = package;
@@ -17,12 +17,11 @@ let
     hideThinkingBlock = true;
     task.showResolvedModelBadge = true;
   };
-  launchPlugins = runtime.launchPlugins (runtime.info nixpkgs // { harness = "omp"; });
 
   initialization = ''
     # The profiles in effect, their env and settings, their packages and every
     # plugin's root.
-    ${launchPlugins}
+    ${launchPlugins { }}
     agent_dir="''${PI_CODING_AGENT_DIR:-''${HOME:-}/.omp/agent}"
     default_layers=("${alwaysDefaults}")
     # The profile's `settings.omp`, one layer more than the wrapper's own
@@ -43,7 +42,7 @@ let
   '';
 in
 writeShellApplication {
-  name = "omp";
+  inherit name;
   derivationArgs.version = omp.version;
   text = ''
     ${initialization}

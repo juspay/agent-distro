@@ -57,11 +57,9 @@ rec {
   # and their packages, the environment and settings they carry for this
   # harness, and the plugins of those profiles and of AGENT_DISTRO_PLUGINS, as
   # `launched`, `profile_env_*` and `profile_settings`. `args` is what the
-  # launcher knows of the build — `harness` names the adapter, and
-  # `runtime.info nixpkgs` the nixpkgs a profile's `packages` are evaluated
-  # against (src/profile/resolve.ts `Info`) — plus whatever else the adapter
-  # needs; the launcher inputs ride along, so no adapter spells them. See
-  # src/plugin/launch.ts.
+  # adapter needs beyond that; `harness` and the build's own `Info`
+  # (`runtime.info nixpkgs`) are seeded by lib/mk-launchers.nix, so no adapter
+  # spells them. See src/plugin/launch.ts.
   # Captured before eval, so a failed launch stops the launcher; the variables
   # are declared first, for shellcheck to see what the eval assigns.
   launchPlugins = args: ''

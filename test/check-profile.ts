@@ -436,7 +436,7 @@ test('flake references are fetched: the profile and its plugin references, every
     /AI_PROFILE=silent:x \(entry 1 of 1\): cannot fetch silent:x: nix exited with code 3 and printed no error; its last output: halfway$/);
 });
 
-test('the evaluation is cached per content and agent-distro build, and swept when unused', () => {
+test('the evaluation is cached per content and evaluator, and swept when unused', async () => {
   const directory = temporary();
   const file = profileFile(directory, { name: 'cached' });
   const cache = temporary();
@@ -469,15 +469,23 @@ test('the evaluation is cached per content and agent-distro build, and swept whe
   profile.resolveProfile(info, [selection], env);
   assert.ok(!readdirSync(profiles).includes(first), 'the stale entry is removed');
   assert.equal(readdirSync(profiles).length, 2);
-  // Another agent-distro build evaluates afresh.
+  // Another agent-distro build — the same evaluator tree, elsewhere — reuses
+  // the entry: nothing of a launch's own build shapes the value, so a commit
+  // touching src/ does not re-evaluate every profile.
   const copy = join(temporary(), 'src');
   cpSync(src, copy, { recursive: true });
   // Its dependencies, beside it as in the runtime tree.
   symlinkSync(join(src, '../node_modules'), join(copy, '../node_modules'));
-  return import(join(copy, 'profile/resolve.ts')).then((other) => {
-    other.resolveProfile(info, [selection], env);
-    assert.equal(evaluations() - start, 5);
-  });
+  const other = await import(join(copy, 'profile/resolve.ts'));
+  other.resolveProfile(info, [selection], env);
+  assert.equal(evaluations() - start, 4, 'the same evaluator is the same key');
+  // A changed evaluator is not the same key: the shape it produces may differ.
+  // The copy came from the store, so it is read-only until asked otherwise.
+  const evaluator = join(copy, 'profile/evaluate.nix');
+  chmodSync(evaluator, 0o644);
+  writeFileSync(evaluator, readFileSync(evaluator, 'utf8') + '\n# changed\n');
+  other.resolveProfile(info, [selection], env);
+  assert.equal(evaluations() - start, 5, 'a new evaluate.nix evaluates afresh');
 });
 
 test('a file that is not a profile names what is wrong', () => {

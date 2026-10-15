@@ -23,7 +23,7 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
   { pkgs }: pkgs.writeShellScriptBin "discovery-stub" "echo stub"
   SOURCE
   cat > source/harnesses/discovery-stub/default.nix <<'ADAPTER'
-  { pkgs, nixpkgs, package }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
+  { pkgs, name, package, launchPlugins }: pkgs.writeShellScriptBin "discovery-stub" "exec ''${package}/bin/discovery-stub"
   ADAPTER
   hash=$(nix-hash --type sha256 --base32 source)
   tar -cf source.tar source

@@ -45,7 +45,7 @@ let
   # entry has it — the signed package alone.
   indexServer = status: port: entry: pkgs.writeShellScript "ca-index-${toString port}" ''
     exec ${pkgs.python3}/bin/python ${./support/ca-index-fixture.py} \
-      ${toString status} ${toString port} ${cert}/cert.pem ${cert}/key.pem ${entry}
+      ${toString status} ${toString port} ${cert}/cert.pem ${cert}/key.pem ${entry} /tmp/ca-requests.log
   '';
   indexUrl = port: "https://127.0.0.1:${toString port}";
   # What a `*-darwin` entry looks like: the signed package, nothing rewritten.
@@ -57,17 +57,21 @@ let
     ia = published;
     ca = "/nix/store/00000000000000000000000000000000-agent-distro-default";
   });
-  config = caIndex: pkgs.writeText "ca-update-config.json" (builtins.toJSON {
+  # What a config names: the index it reads and the attribute it builds and
+  # looks up. `config` is the one package; `configFor` names another, for the
+  # case that proves the updater reads it rather than the constant.
+  configFor = caIndex: attribute: pkgs.writeText "ca-update-config.json" (builtins.toJSON {
     # A revision (git+file:), which is what the index is keyed by.
     flake = "git+file:///home/testuser/update-flake";
     state = "/home/testuser/state";
     history = "/home/testuser/state/history.log";
     nix = lib.getExe pkgs.nix;
     substituters = { ${cacheUrl} = cacheKey; };
-    inherit caIndex;
+    inherit caIndex attribute;
     periodSeconds = 21600;
     offsetSeconds = 0;
   });
+  config = caIndex: configFor caIndex "default";
 in
 {
   name = "ca-update";
@@ -204,5 +208,15 @@ in
         assert "could not be copied" not in last, last
         update("${config "${indexUrl missingPort}"}")
         assert len(history().splitlines()) == before + 1, history()
+
+    with subtest("the config's own attribute is the entry the index is asked for"):
+        # `attribute` is read, not the constant: a config naming another asks
+        # for `<rev>/<system>/other.json` and builds `#other`, whatever the
+        # package is called. The fixture records every path it served.
+        machine.succeed("rm -f /tmp/ca-requests.log")
+        update("${configFor "${indexUrl okPort}" "other"}")
+        requested = machine.succeed("cat /tmp/ca-requests.log").splitlines()
+        assert requested, requested
+        assert requested[-1].endswith("/x86_64-linux/other.json"), requested
   '';
 }

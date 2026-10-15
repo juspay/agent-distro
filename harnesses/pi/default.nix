@@ -1,5 +1,5 @@
 # Pi's subcommands require resources in settings, not prepended CLI flags.
-{ pkgs, nixpkgs, package }:
+{ pkgs, name, package, launchPlugins }:
 let
   inherit (pkgs) lib writeShellApplication runCommand gum;
   pi = package;
@@ -8,19 +8,15 @@ let
   config = runCommand "pi-config" { } ''
     ${runtime.script "harness/pi.ts"} write-config "$out"
   '';
-  launchPlugins = runtime.launchPlugins (runtime.info nixpkgs // {
-    harness = "pi";
-    config = "${config}";
-  });
 in
 writeShellApplication {
-  name = "pi";
+  inherit name;
   derivationArgs.version = pi.version;
   text = ''
     # The profiles in effect, their env and packages, and its fragment, with
     # the plugins they and AGENT_DISTRO_PLUGINS name merged in; loading plugins
     # other than the profile's fails without a home to merge them into.
-    ${launchPlugins}
+    ${launchPlugins { config = "${config}"; }}
     fragment=$launched
     ${import ../../lib/prompt-secrets.nix { inherit gum; }}
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then

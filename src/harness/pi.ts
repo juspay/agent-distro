@@ -72,7 +72,7 @@ const isFragment = (value: unknown): value is Fragment => isObject(value)
   && Array.isArray(value.skills) && value.skills.every((s: unknown) => typeof s === 'string') && isObject(value.mcpServers);
 
 /** Fail on a server name two plugins declare. */
-function claim(owners: Record<string, string>, description: Description, Failure: new (message: string) => Error = Invalid) {
+function claim(owners: Record<string, string>, description: Description, Failure: new (message: string) => Error) {
   const plugin = description.manifest.name;
   for (const name of Object.keys(description.mcpServers)) {
     if (Object.hasOwn(owners, name)) {

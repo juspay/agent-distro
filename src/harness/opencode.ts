@@ -18,7 +18,7 @@ import { LaunchError, readCached, writeAddressed, type Adapter, type Report } fr
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 
-type Args = { bash: string; env: string; plugin: string };
+type Args = { plugin: string };
 type Server = { type: 'remote'; url: string; headers: Record<string, string> } | { type: 'local'; command: string[] };
 type Fragment = { skills: string | null; servers: Record<string, Server> };
 type Inputs = { bash: string; env: string };

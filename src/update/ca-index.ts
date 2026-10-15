@@ -17,6 +17,8 @@ export function takesContentAddressed(system: string): boolean {
  * (`packages.<system>.default`). CI publishes each entry under the attribute
  * it published (`.github/workflows/cache.yml`), so the file is this name;
  * `mkUpdater`'s `attribute` is that same name for a build that names another.
+ * The callers resolve a config's `attribute` against this once
+ * (src/update/update.ts), and hand `indexEntryUrl` the result.
  */
 export const ATTRIBUTE = 'default';
 
@@ -39,7 +41,7 @@ export const ATTRIBUTE = 'default';
  * Null is "do not fetch": the caller warns and the update takes its ordinary
  * skip.
  */
-export function indexEntryUrl(base: string, revision: string, system: string, attribute: string = ATTRIBUTE): URL | null {
+export function indexEntryUrl(base: string, revision: string, system: string, attribute: string): URL | null {
   let url: URL;
   try {
     url = new URL(base);

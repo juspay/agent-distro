@@ -25,18 +25,6 @@ const snapshot = (path: string) => {
   }
 };
 
-function captureStderr(action: () => void): string {
-  let stderr = '';
-  const write = process.stderr.write;
-  process.stderr.write = ((chunk: string) => (stderr += chunk, true)) as typeof process.stderr.write;
-  try {
-    action();
-  } finally {
-    process.stderr.write = write;
-  }
-  return stderr;
-}
-
 test('translation and skipped transports', () => {
   const root = temporary();
   mkdirSync(join(root, 'skills/guide'), { recursive: true });
