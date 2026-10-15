@@ -23,7 +23,7 @@ let
   commands = lib.genAttrs harnesses (name: import (../harnesses + "/${name}/default.nix") {
     inherit pkgs name;
     package = sources name pkgs;
-    launchPlugins = args: runtime.launchPlugins (info // { harness = name; } // args);
+    launchPlugins = args: runtime.launchPlugins (info // { harness = name; name = name; } // args);
   });
   # What the package carries: one line per harness, in menu order. The picker's
   # menu (lib/picker.nix), the launchers beside it and this file are one list,
