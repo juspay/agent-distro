@@ -37,8 +37,10 @@ environ = omp_support.discover(env=dict(os.environ, AGENT_DISTRO_SETTINGS='0'), 
 path = next(v for v in environ if v.startswith(b'PATH=')).decode().removeprefix('PATH=').split(':')
 assert mcp_nixos in path, path
 # With it: the profile's roles in the config, and its key required before
-# anything starts.
-env = dict(os.environ, **{name: value for name, value in profile_env.items() if isinstance(value, str)})
+# anything starts. The key is the check's to provide — the VM has none — as a
+# user who has one would.
+plain = {name: value for name, value in profile_env.items() if isinstance(value, str)}
+env = dict(os.environ, **plain, **{key: 'test-api-key'})
 roles = json.loads(subprocess.run(['omp', 'config', 'get', 'modelRoles', '--json'], env=env, check=True,
                                   capture_output=True, text=True, timeout=120).stdout)['value']
 assert roles == profile_settings['omp']['modelRoles'], roles
