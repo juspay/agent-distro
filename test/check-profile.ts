@@ -630,8 +630,8 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   // secrets it prompts for, the settings of this harness, the environment
   // itself, and the profile hand-over it unsets.
   const handedOver = [
-    '"$launched"', '"${profile_env_names[*]}"', '"${profile_env_hints[*]}"',
-    '"$profile_settings"', '"${LITELLM_BASE_URL-}"', '"${TEAM_URL-}"', '"${AGENT_DISTRO_PROFILE-unset}"',
+    '"$launched"', '"${profile_env_secrets[*]}"', '"$profile_settings"',
+    '"${LITELLM_BASE_URL-}"', '"${TEAM_URL-}"', '"${AGENT_DISTRO_PROFILE-unset}"',
   ].join(' ');
   const launch = (cwd: string, environment: NodeJS.ProcessEnv = {}) => {
     const result = spawnSync(process.execPath, [join(src, 'plugin/launch-cli.mjs'), args],
@@ -645,17 +645,16 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   };
   // Outside the repository: the built-in profile, as the launcher was built,
   // and nothing said about it.
-  assert.deepEqual(launch(temporary()), ['--plugin-dir /built-in/kept', '', '', '', '', '', 'unset', '']);
+  assert.deepEqual(launch(temporary()), ['--plugin-dir /built-in/kept', '', '', '', '', 'unset', '']);
   assert.equal(noticed, '');
   // Inside it: the repository's plugin over the built-in one, its environment
-  // exported — the value here, the secret named for the launcher to prompt —
-  // and no settings, which the profile keeps for OMP. The one line a plain
-  // launch prints names the profile and the website.
-  const [launched, names, hints, settings, value, team_, handed] = launch(join(repo));
+  // exported — the value here, the secret named with its hint for the launcher
+  // to prompt — and no settings, which the profile keeps for OMP. The one line
+  // a plain launch prints names the profile and the website.
+  const [launched, secrets, settings, value, team_, handed] = launch(join(repo));
   assert.match(noticed, /^agent-distro profile: using repo \(from .*agent-distro\.nix\) · https:\/\/agent-distro\.nixos\.asia$/m);
   assert.match(launched, /^--plugin-dir \/built-in\/kept --plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out$/);
-  assert.equal(names, 'LITELLM_API_KEY');
-  assert.equal(hints, "it's here");
+  assert.equal(secrets, "LITELLM_API_KEY=it's here");
   assert.equal(settings, '', 'settings are the harness\'s own: this one has none');
   assert.equal(value, 'https://gateway.test');
   assert.equal(handed, 'unset', 'the hand-over never reaches the harness');
@@ -668,13 +667,13 @@ test('a launch uses the profile in effect: its plugins over the built-in ones, w
   const settingsOf = spawnSync(BASH, ['-euc', `${run.stdout} printf '%s' "$profile_settings"`], { encoding: 'utf8' });
   assert.deepEqual(JSON.parse(settingsOf.stdout), { modelRoles: { default: 'litellm/large' } });
   // `AGENT_DISTRO_SETTINGS=0`: plugins only — no export, no secret, no settings.
-  const [optedLaunched, optedNames, optedHints, optedSettings, optedValue] =
+  const [optedLaunched, optedSecrets, optedSettings, optedValue] =
     launch(join(repo), { AGENT_DISTRO_SETTINGS: '0' });
   assert.match(optedLaunched, /^--plugin-dir \/built-in\/kept --plugin-dir /);
-  assert.deepEqual([optedNames, optedHints, optedSettings, optedValue], ['', '', '', '']);
+  assert.deepEqual([optedSecrets, optedSettings, optedValue], ['', '', '']);
   // Over AI_PROFILE: the built-in plugin, the team's, then the repository's,
   // and the team's environment, which the repository does not replace.
-  const [stacked, , , , , stackedTeam] = launch(bare, { AI_PROFILE: elsewhere });
+  const [stacked, , , , stackedTeam] = launch(bare, { AI_PROFILE: elsewhere });
   assert.match(noticed, new RegExp(`^agent-distro profile: using bare \\+ elsewhere \\(from \\S+/agent-distro\\.nix over AI_PROFILE=${elsewhere}\\) · `, 'm'));
   const translated = stacked.match(/^--plugin-dir \/built-in\/kept --plugin-dir (\S+\/sha256-\S+\/out) --plugin-dir (\S+\/sha256-\S+\/out)$/);
   assert.ok(translated, stacked);

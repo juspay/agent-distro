@@ -262,22 +262,21 @@ test('the shell a launcher evaluates', () => {
     LITELLM_API_KEY: { secret: true, hint: "it's here" },
     SECOND_KEY: { secret: true },
   };
-  const text = launchModule.shell("-e '/a b'", env, '{"modelRoles":{"default":"litellm/large"}}', ['/nix/store/x/bin', '/nix/store/y/bin']);
+  const text = launchModule.shell("-e '/a b'", env, { modelRoles: { default: 'litellm/large' } },
+    ['/nix/store/x/bin', '/nix/store/y/bin']);
   const output = spawnSync(BASH, ['-euc',
-    `PATH=/usr/bin; ${text} printf '%s\\n' "$launched" "\${#profile_env_names[@]}" "\${profile_env_names[1]}"`
-    + ' "\${profile_env_names[0]}" "$profile_settings" "$LITELLM_BASE_URL" "$OMP_SKIP_SETUP" "$PATH"'],
+    `PATH=/usr/bin; ${text} printf '%s\\n' "$launched" "\${#profile_env_secrets[@]}" "\${profile_env_secrets[1]}"`
+    + ' "\${profile_env_secrets[0]}" "$profile_settings" "$LITELLM_BASE_URL" "$OMP_SKIP_SETUP" "$PATH"'],
   { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}' } });
   assert.equal(output.status, 0, output.stderr);
+  // A secret is named with its hint, so the launcher is handed one array
+  // rather than two it must keep in lockstep.
   assert.deepEqual(output.stdout.split('\n').slice(0, 8), [
-    "-e '/a b'", '2', 'SECOND_KEY', 'LITELLM_API_KEY', '{"modelRoles":{"default":"litellm/large"}}',
+    "-e '/a b'", '2', 'SECOND_KEY=', "LITELLM_API_KEY=it's here", '{"modelRoles":{"default":"litellm/large"}}',
     'https://gateway.example', '1', '/nix/store/x/bin:/nix/store/y/bin:/usr/bin',
   ]);
-  // The hints ride beside them, and a secret's value is never in the shell.
-  const hints = spawnSync(BASH, ['-euc', `${text} printf '%s|%s' "\${profile_env_hints[0]}" "\${profile_env_hints[1]}"`],
-    { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}', PATH: process.env.PATH } });
-  assert.equal(hints.stdout, "it's here|", hints.stderr);
   const none = spawnSync(BASH, ['-euc',
-    `${launchModule.shell('', {}, '', [])} printf '%s|%s|%s' "\${profile_env_names[*]}" "$profile_settings" "\${AGENT_DISTRO_PROFILE-unset}"`],
+    `${launchModule.shell('', {}, undefined, [])} printf '%s|%s|%s' "\${profile_env_secrets[*]}" "$profile_settings" "\${AGENT_DISTRO_PROFILE-unset}"`],
   { encoding: 'utf8', env: { AGENT_DISTRO_PROFILE: '{}', PATH: process.env.PATH } });
   assert.equal(none.stdout, '||unset', none.stderr);
 });
@@ -289,7 +288,7 @@ test('a launcher asks for a secret the environment does not set, and refuses wit
   const fragment = source.slice(source.indexOf("''\n") + 3, source.lastIndexOf("''"))
     .replaceAll("''${", '${').replace('${gum}/bin/gum', 'gum');
   const shell = (env: Parameters<typeof launchModule.shell>[1], tail: string, extra: NodeJS.ProcessEnv = {}) =>
-    spawnSync(BASH, ['-euc', `${launchModule.shell('', env, '', [])}${fragment}${tail}`],
+    spawnSync(BASH, ['-euc', `${launchModule.shell('', env, undefined, [])}${fragment}${tail}`],
       { encoding: 'utf8', env: { PATH: process.env.PATH, ...extra } });
   const secret = { LITELLM_API_KEY: { secret: true, hint: 'ask the team' } };
   // Not set, no terminal: the variable and its hint are named, and the launch stops.

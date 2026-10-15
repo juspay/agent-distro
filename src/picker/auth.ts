@@ -26,10 +26,10 @@ export type Scheme = 'anthropic' | 'openai' | 'secrets';
 
 /** One harness's probe spec, for the profile in effect. */
 export type Spec = {
-  scheme: 'anthropic' | 'openai' | 'secrets' | 'provider';
+  scheme: Scheme;
   /** secrets: the profile's `secret` variables, in the order the profile declares them. */
   secrets?: string[];
-  /** secrets (when `AGENT_DISTRO_SETTINGS=0`) and provider: the harness whose own store to read. */
+  /** secrets: the harness whose own store to read, beside them or alone. */
   provider?: string;
 };
 
@@ -286,9 +286,6 @@ export function probe(spec: Spec, env: Env, io: Io): Status | undefined {
         break;
       case 'secrets':
         status = secrets(spec, env, io);
-        break;
-      case 'provider':
-        status = spec.provider ? provider(spec.provider, env, io) : undefined;
         break;
     }
   } catch (error) {

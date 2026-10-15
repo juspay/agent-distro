@@ -52,8 +52,10 @@ export const VARIABLE = 'AI_PROFILE';
 export type EnvValue = string | { secret: true; hint?: string };
 /** Environment variables a profile exports, by name. */
 export type ProfileEnv = Record<string, EnvValue>;
-/** Harness configuration a profile defaults, by harness name; opaque to the resolver. */
-export type Settings = Record<string, Record<string, unknown>>;
+/** One harness's section of a profile's `settings`; opaque to the resolver. */
+export type SettingsSection = Record<string, unknown>;
+/** Harness configuration a profile defaults, by harness name. */
+export type Settings = Record<string, SettingsSection>;
 
 /** A profile built into the launcher, as lib/runtime.nix passes it. */
 export type Builtin = { name: string; description: string; env: ProfileEnv; settings: Settings };
@@ -113,7 +115,7 @@ const isString = (value: unknown): value is string => typeof value === 'string';
 const isVariableName = (value: unknown) => isString(value) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 
 /** The harnesses a profile's `settings` is read for. */
-export const SETTINGS_HARNESSES: Record<string, true> = { omp: true, opencode: true };
+const SETTINGS_HARNESSES: Record<string, true> = { omp: true, opencode: true };
 
 /** Why `value` is not a profile's `env`, or null when it is one. */
 function envProblem(value: unknown): string | null {
@@ -140,6 +142,17 @@ function settingsProblem(value: unknown): string | null {
     if (!isObject(section)) return `\`${name}\` must be an attribute set`;
   }
   return null;
+}
+
+/**
+ * Fail on what `value` is not: a profile's `env` and `settings`. `what` names
+ * the profile, as its other errors do.
+ */
+function validate(what: string, value: { env?: unknown; settings?: unknown }): void {
+  const env = envProblem(value.env);
+  if (env) throw new LaunchError(`${what}: \`env\` ${env}`);
+  const settings = settingsProblem(value.settings);
+  if (settings) throw new LaunchError(`${what}: \`settings\` ${settings}`);
 }
 
 function isInEffect(value: unknown): value is InEffect {
@@ -352,10 +365,7 @@ export function evaluate(file: string, info: Info, cache: string, what: string):
   }
   if (isObject(value)) {
     if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
-    const env = envProblem(value.env);
-    if (env) throw new LaunchError(`${what}: ${file}: \`env\` ${env}`);
-    const settings = settingsProblem(value.settings);
-    if (settings) throw new LaunchError(`${what}: ${file}: \`settings\` ${settings}`);
+    validate(`${what}: ${file}`, value);
   }
   if (!isEvaluated(value)) throw new LaunchError(`${what}: ${file} is not a profile`);
   return value;
@@ -456,10 +466,7 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
     // The launcher's own profile is data it was built with, not a file to
     // evaluate: same rules, named for what it is.
     const { name, description, env, settings } = kind.builtin;
-    const envFault = envProblem(env);
-    if (envFault) throw new LaunchError(`built-in profile ${name}: \`env\` ${envFault}`);
-    const settingsFault = settingsProblem(settings);
-    if (settingsFault) throw new LaunchError(`built-in profile ${name}: \`settings\` ${settingsFault}`);
+    validate(`built-in profile ${name}`, kind.builtin);
     return {
       name, description, env, settings, source, origin,
       keepsBuiltIn: name === info.default, plugins: [], paths: [],

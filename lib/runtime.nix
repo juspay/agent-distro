@@ -84,7 +84,7 @@ rec {
   # Captured before eval, so a failed launch stops the launcher; the variables
   # are declared first, for shellcheck to see what the eval assigns.
   launchPlugins = args: ''
-    : "''${launched=}" "''${profile_env_names=}" "''${profile_env_hints=}" "''${profile_settings=}"
+    : "''${launched=}" "''${profile_env_secrets=}" "''${profile_settings=}"
     launch=$(${script "plugin/launch-cli.mjs"} ${pkgs.writeText "agent-distro-launch.json" (builtins.toJSON (launcherInputs // args))})
     eval "$launch"'';
 }

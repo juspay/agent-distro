@@ -155,61 +155,61 @@ assert.deepEqual(read(secrets, home({ AGENT_DISTRO_SETTINGS: '0', LITELLM_API_KE
 // or XDG_DATA_HOME.
 reset();
 databases.set('/home/u/.omp/agent/agent.db', ['openai', 'anthropic']);
-assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }), signed('anthropic', 'openai'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'omp' }), signed('anthropic', 'openai'));
 reset();
 databases.set('/agent/agent.db', ['xai']);
-assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }, home({ PI_CODING_AGENT_DIR: '/agent' })), signed('xai'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'omp' }, home({ PI_CODING_AGENT_DIR: '/agent' })), signed('xai'));
 reset();
 databases.set('/data/omp/agent.db', ['google']);
-assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }, home({ XDG_DATA_HOME: '/data' })), signed('google'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'omp' }, home({ XDG_DATA_HOME: '/data' })), signed('google'));
 // An empty store, a missing one, and an unreadable one.
 reset();
 databases.set('/home/u/.omp/agent/agent.db', []);
-assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }), out);
-assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }, home({ HOME: '/elsewhere' })), out);
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'omp' }), out);
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'omp' }, home({ HOME: '/elsewhere' })), out);
 reset();
 unreadable.add('/home/u/.omp/agent/agent.db');
-assert.equal(read({ scheme: 'provider', provider: 'omp' }), undefined);
+assert.equal(read({ scheme: 'secrets', secrets: [], provider: 'omp' }), undefined);
 // A store with no credential table yet is "not signed in", not blank.
 reset();
 tableless.add('/home/u/.omp/agent/agent.db');
-assert.deepEqual(read({ scheme: 'provider', provider: 'omp' }), out);
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'omp' }), out);
 
 // Pi and OpenCode: a JSON object of provider id to credential.
 reset();
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ anthropic: { type: 'api_key', key: 'k' }, openai: { type: 'oauth', access: 'a' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }), signed('anthropic', 'openai'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'pi' }), signed('anthropic', 'openai'));
 reset();
 files.set('/pi/auth.json', JSON.stringify({ xai: { type: 'api_key', key: 'k' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ PI_CODING_AGENT_DIR: '/pi' })), signed('xai'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'pi' }, home({ PI_CODING_AGENT_DIR: '/pi' })), signed('xai'));
 reset();
 files.set('/data/opencode/auth.json', JSON.stringify({ google: { type: 'api' }, openai: { type: 'wellknown' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'opencode' }, home({ XDG_DATA_HOME: '/data' })), signed('google', 'openai'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'opencode' }, home({ XDG_DATA_HOME: '/data' })), signed('google', 'openai'));
 reset();
 files.set('/home/u/.local/share/opencode/auth.json', JSON.stringify({ anthropic: { type: 'api' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'opencode' }), signed('anthropic'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'opencode' }), signed('anthropic'));
 // An empty file, an entry that is not a credential, and a corrupt file.
 reset();
 files.set('/home/u/.pi/agent/auth.json', '{}');
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }), out);
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'pi' }), out);
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ anthropic: null }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }), out);
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'pi' }), out);
 files.set('/home/u/.pi/agent/auth.json', 'not json');
-assert.equal(read({ scheme: 'provider', provider: 'pi' }), undefined);
+assert.equal(read({ scheme: 'secrets', secrets: [], provider: 'pi' }), undefined);
 
 // Providers kept only in the environment, merged with the file's, deduped and
 // sorted; the environment still counts when the file is unreadable.
 reset();
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ openai: { type: 'api_key' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ ANTHROPIC_API_KEY: 'k', GEMINI_API_KEY: 'k' })),
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'pi' }, home({ ANTHROPIC_API_KEY: 'k', GEMINI_API_KEY: 'k' })),
   signed('anthropic', 'google', 'openai'));
 reset();
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ anthropic: { type: 'api_key' } }));
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ ANTHROPIC_API_KEY: 'k' })), signed('anthropic'));
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'pi' }, home({ ANTHROPIC_API_KEY: 'k' })), signed('anthropic'));
 reset();
 unreadable.add('/home/u/.pi/agent/auth.json');
-assert.equal(read({ scheme: 'provider', provider: 'pi' }), undefined);
-assert.deepEqual(read({ scheme: 'provider', provider: 'pi' }, home({ XAI_API_KEY: 'k' })), signed('xai'));
+assert.equal(read({ scheme: 'secrets', secrets: [], provider: 'pi' }), undefined);
+assert.deepEqual(read({ scheme: 'secrets', secrets: [], provider: 'pi' }, home({ XAI_API_KEY: 'k' })), signed('xai'));
 
 // Status text is drawn on the terminal as is: control and format characters
 // are replaced and whitespace collapsed, once, for every scheme.
@@ -220,13 +220,12 @@ assert.deepEqual(escaped, signed('me [31m@example.com'));
 assert.doesNotMatch(escaped.text, /[\p{Cc}\p{Cf}]/u);
 reset();
 files.set('/home/u/.pi/agent/auth.json', JSON.stringify({ 'an\u0000thropic': { type: 'api_key' } }));
-const controlled = read({ scheme: 'provider', provider: 'pi' })!;
+const controlled = read({ scheme: 'secrets', secrets: [], provider: 'pi' })!;
 assert.deepEqual(controlled, signed('an thropic'));
 assert.doesNotMatch(controlled.text, /[\p{Cc}\p{Cf}]/u);
 
 // A spec that names no harness, or an unknown scheme, is unknown — never a throw.
 reset();
-assert.equal(read({ scheme: 'provider' }), undefined);
 assert.equal(read({ scheme: 'secrets' }), undefined);
 assert.equal(read({ scheme: 'nonesuch' as Spec['scheme'] }), undefined);
 
