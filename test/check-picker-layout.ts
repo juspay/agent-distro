@@ -70,8 +70,9 @@ const IN_EFFECT = [
   { name: 'repo', description: 'The repository\'s own tools', source: 'repository', origin: '/home/someone/src/repo/agent-distro.nix',
     over: { name: 'juspay', description: 'Juspay skills + Kolu', source: 'variable', origin: 'github:juspay/skills' } },
 ] as const;
-// What the header names, and what the profile row says it came from.
-const HEADER = ['vanilla', 'juspay', 'ekala', 'repo + juspay'];
+// What the header names, and what the profile row says it came from. The
+// header names the stack from the bottom up.
+const HEADER = ['vanilla', 'juspay', 'ekala', 'juspay + repo'];
 const FROM = ['built in', `from ${IN_EFFECT[1].origin}`, `chosen as ${IN_EFFECT[2].origin}`,
   `from ${IN_EFFECT[3].origin} over AI_PROFILE=github:juspay/skills`];
 

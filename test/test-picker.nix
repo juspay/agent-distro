@@ -24,18 +24,16 @@ in
         status, output = machine.execute(f"su - testuser -c '{override} agent-distro --version </dev/null 2>&1'")
         assert status == 1 and "agent-distro picker: error: invalid AI_HARNESS; valid values:" in output, output
 
-    # A profile that is neither built in nor a reference stops before any harness.
+    # A profile that is neither a reference nor there stops before any harness.
     status, output = machine.execute("su - testuser -c 'AI_PROFILE=nonesuch AI_HARNESS=claude agent-distro --version </dev/null 2>&1'")
     assert status == 1, output
-    assert "agent-distro profile: error: AI_PROFILE=nonesuch: not a built-in profile (${profile.name}" in output, output
+    assert "agent-distro profile: error: AI_PROFILE=nonesuch (entry 1 of 1): not a reference" in output, output
 
-    # The built-in profile reaches every harness with no list in the way, by
-    # name or by default.
-    for selector in ["", "${profile.name}"]:
-        for harness in ${builtins.toJSON harnesses}:
-            machine.succeed(
-                f"su - testuser -c 'AGENT_DISTRO_SETTINGS=0 AI_HARNESS={harness} agent-distro {selector} --version </dev/null'"
-            )
+    # The one package reaches every harness with no list in the way.
+    for harness in ${builtins.toJSON harnesses}:
+        machine.succeed(
+            f"su - testuser -c 'AGENT_DISTRO_SETTINGS=0 AI_HARNESS={harness} agent-distro --version </dev/null'"
+        )
 
     # The listing as Nix computed it; the check compares `--list --json` to it.
     machine.succeed(

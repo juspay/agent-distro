@@ -15,25 +15,55 @@
 { pkgs, nixpkgs, agent-distro, home-manager }:
 let
   inherit (nixpkgs) lib;
-  configuration = (home-manager.lib.homeManagerConfiguration {
+  # The one package the module installs, and the name its updater keys the
+  # index by: the registry's default profile.
+  default = (import "${agent-distro}/profiles/registry.nix").default;
+  # A configuration from one `services.agent-distro` value, the module's own
+  # options beside it.
+  homeOf = service: (home-manager.lib.homeManagerConfiguration {
     inherit pkgs;
     modules = [
       agent-distro.homeManagerModules.default
       {
         home = { username = "testuser"; homeDirectory = "/home/testuser"; stateVersion = "24.05"; };
         xdg.stateHome = "/home/testuser/custom-state";
-        services.agent-distro = { enable = true; };
+        services.agent-distro = service;
       }
     ];
   }).config;
+  configuration = homeOf { enable = true; };
   svc = configuration.services.agent-distro;
   # The profile bundle the module resolves; a real one, so bundle.* is defined.
-  bundle = agent-distro.packages.${pkgs.system}.${svc.profile};
+  bundle = agent-distro.packages.${pkgs.system}.${default};
   name = builtins.head bundle.commands;
+  # The shims the module installs, and one of their commands: what each
+  # configuration gives its commands as AI_PROFILE is written there.
+  shimsOf = config: lib.findFirst (p: p.name == "agent-distro-shims") null config.home.packages;
+  shimOf = config: builtins.readFile "${shimsOf config}/bin/${name}";
+  # `profiles` as the module reads them, and `profile` as the one-release
+  # spelling of it: a reference is [ it ], a built-in name is none.
+  withProfiles = homeOf { enable = true; profiles = [ "github:juspay/skills" ]; };
+  withReference = homeOf { enable = true; profile = "github:juspay/skills"; };
+  withName = homeOf { enable = true; profile = default; };
+  withPath = homeOf { enable = true; profiles = [ ./fixtures/profile ]; };
+  builtFixture = agent-distro.lib.mkProfile { system = pkgs.system; profile = ./fixtures/profile; };
+  # A path is not the only thing built: a flake input is a source whose
+  # `outPath` is a store path, and it is built the same way.
+  fixtureSource = { outPath = "${./fixtures/profile}"; };
+  withSource = homeOf { enable = true; profiles = [ fixtureSource ]; };
+  builtSource = agent-distro.lib.mkProfile { system = pkgs.system; profile = fixtureSource; };
+  # A profile that is already built is used as it is: passing the derivation
+  # must not build it again (which could not evaluate at all).
+  withBuilt = homeOf { enable = true; profiles = [ builtFixture ]; };
+  # The line a shim exports an AI_PROFILE with, quoted as mk-shims quotes it.
+  exported = value: "export AI_PROFILE=${lib.escapeShellArg value}";
 
   # The exports, reached by plain import with this test flake's pkgs.
   stateDirectory = import "${agent-distro}/lib/state-directory.nix" {
-    inherit (svc) flake profile;
+    inherit (svc) flake;
+    # No `profiles`: the module passes the default profile's name, so an
+    # install that predates the option keeps the state directory it has.
+    profile = default;
     xdgStateHome = configuration.xdg.stateHome;
   };
   shims = import "${agent-distro}/lib/mk-shims.nix" {
@@ -42,7 +72,8 @@ let
   };
   updater = import "${agent-distro}/lib/mk-updater.nix" {
     inherit pkgs bundle;
-    inherit (svc) flake profile substituters;
+    inherit (svc) flake substituters;
+    profile = default;
     inherit stateDirectory;
     history = "${configuration.xdg.stateHome}/agent-distro/history.log";
     nix = lib.getExe (if configuration.nix.package == null then pkgs.nix else configuration.nix.package);
@@ -61,7 +92,8 @@ let
   otherUpdater = import "${agent-distro}/lib/mk-updater.nix" {
     pkgs = otherPkgs;
     inherit bundle;
-    inherit (svc) flake profile substituters;
+    inherit (svc) flake substituters;
+    profile = default;
     inherit stateDirectory;
     history = "${configuration.xdg.stateHome}/agent-distro/history.log";
     nix = lib.getExe pkgs.nix;
@@ -81,7 +113,8 @@ let
   ownIndex = "https://example.invalid/own-distro/ca-index";
   ownIndexUpdater = import "${agent-distro}/lib/mk-updater.nix" {
     inherit pkgs bundle;
-    inherit (svc) flake profile substituters;
+    inherit (svc) flake substituters;
+    profile = default;
     inherit stateDirectory;
     history = "${configuration.xdg.stateHome}/agent-distro/history.log";
     nix = lib.getExe pkgs.nix;
@@ -112,12 +145,12 @@ let
   # real profile and force its package names and lib attribute names. This is
   # what would have caught the lib/mk-flake.nix parse regression.
   mkFlakeOut = agent-distro.lib.mkFlake {
-    profile = agent-distro.profiles.${svc.profile};
+    profile = agent-distro.profiles.${default};
     cache = agent-distro.lib.cache;
   };
   # mkFlake reads an agent-distro.nix by path just as the attribute set it holds.
   mkFlakeFromFile = agent-distro.lib.mkFlake {
-    profile = "${agent-distro}/profiles/${svc.profile}/agent-distro.nix";
+    profile = "${agent-distro}/profiles/${default}/agent-distro.nix";
   };
   # A built-in profile names its plugins by path: a flake reference is read at launch.
   referenced = builtins.tryEval (agent-distro.lib.mkLaunchers {
@@ -126,7 +159,7 @@ let
   }).omp.drvPath;
   mkFlakeLibNames = builtins.attrNames mkFlakeOut.lib;
   mkFlakePackageNames = builtins.attrNames mkFlakeOut.packages.${pkgs.system};
-  expectedLibNames = [ "caIndex" "cache" "mkFlake" "mkLaunchers" "mkPicker" "mkShims"
+  expectedLibNames = [ "caIndex" "cache" "mkFlake" "mkLaunchers" "mkPicker" "mkProfile" "mkShims"
     "mkUpdater" "schedule" "stateDirectory" ];
 
   # --- missing-required-argument checks, executed in the builder below ---
@@ -140,6 +173,7 @@ let
     { file = "mk-updater.nix"; required = [ "pkgs" "bundle" "flake" "profile" "stateDirectory" "history" "nix" "substituters" ]; }
     { file = "state-directory.nix"; required = [ "xdgStateHome" "flake" "profile" ]; }
     { file = "mk-picker.nix"; required = [ "pkgs" "profile" "launchers" ]; }
+    { file = "mk-profile.nix"; required = [ "nixpkgs" "system" "profile" ]; }
   ];
   # mkFlake's file imports with `{ nixpkgs }` and returns the builder, whose
   # one required argument is `profile` — checked by applying the built builder.
@@ -184,9 +218,30 @@ assert stateDirectory == moduleState;
 assert myShim == moduleShim;
 assert config.state == moduleState;
 assert config.history == "${configuration.xdg.stateHome}/agent-distro/history.log";
-assert config.profile == svc.profile;
+# The updater keys the index by the bundle's profile, whatever `profiles` names.
+assert config.profile == default;
 assert config.flake == svc.flake;
 assert config.substituters == svc.substituters;
+# `profiles`: the option the module reads, and what it gives every command it
+# installs as AI_PROFILE. A reference is exported as it was given; a built-in
+# name is the one package and no AI_PROFILE at all.
+assert configuration.services.agent-distro.profiles == [ ];
+assert withProfiles.services.agent-distro.profiles == [ "github:juspay/skills" ];
+assert !lib.hasInfix "AI_PROFILE" (shimOf configuration);
+assert lib.hasInfix (exported "github:juspay/skills") (shimOf withProfiles);
+# The deprecated `profile`: a reference becomes `profiles = [ it ]`; a built-in
+# name keeps the package and sets none.
+assert lib.hasInfix (exported "github:juspay/skills") (shimOf withReference);
+assert !lib.hasInfix "AI_PROFILE" (shimOf withName);
+# A path is built by mkProfile, whose store path is the fallback. The path
+# carries context, which a regular-expression argument cannot.
+assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtFixture)) (shimOf withPath);
+# A flake input (`inputs.skills`, `flake = false`) is built too, from its
+# `outPath`, and the same derivation comes out either way.
+assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtSource)) (shimOf withSource);
+# A `mkProfile` derivation on `profiles` is used as it is: this evaluation is
+# the assertion, since building it again cannot evaluate.
+assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtFixture)) (shimOf withBuilt);
 # The index the updater reads comes from lib/ca-index.nix, through the module
 # and the library; a distribution's own index reaches the config the same way.
 assert config.caIndex == agent-distro.lib.caIndex.rawBase;
@@ -204,9 +259,9 @@ assert otherShims.passthru.stateDirectory == stateDirectory;
 # returns (Home Manager normalises a single command line to a one-element list).
 assert lib.escapeShellArgs updater.command ==
   builtins.head configuration.systemd.user.services.agent-distro-update.Service.ExecStart;
-# mkFlake evaluates: exactly the same nine-name lib, packages include the bundle + picker.
+# mkFlake evaluates: exactly the same ten-name lib, packages include the bundle + picker.
 assert mkFlakeLibNames == expectedLibNames;
-assert lib.elem svc.profile mkFlakePackageNames;
+assert lib.elem default mkFlakePackageNames;
 assert lib.elem "default" mkFlakePackageNames;
 assert builtins.attrNames mkFlakeFromFile.packages.${pkgs.system} == mkFlakePackageNames;
 assert !referenced.success;

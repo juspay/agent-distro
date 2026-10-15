@@ -59,7 +59,7 @@ import { nameText, sourceText } from '../listing.ts';
 import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
 import {
   resolveProfile, select, workingDirectory, isResolved,
-  type Info, type ProfileEnv, type Resolved, type SettingsSection,
+  type Described, type Info, type ProfileEnv, type Resolved, type SettingsSection,
 } from '../profile/resolve.ts';
 
 export type Report = (message: string) => void;
@@ -341,10 +341,13 @@ function removeIfEmpty(directory: string) {
 /**
  * The cached translation of the plugin at `entry` for one adapter, writing it
  * first when absent. Reports are replayed from the cache, so a cached launch
- * says what the first one did.
+ * says what the first one did. `known` is a description the plugin's writer
+ * already holds (a built profile's, whose `reader` is this runtime), used in
+ * place of reading `entry` again.
  */
 export function translate(
   entry: string, harness: string, adapter: Adapter, args: unknown, cache: string, report: Report, label = VARIABLE,
+  known?: Description,
 ): LaunchPlugin {
   const root = realpath(entry);
   let isDirectory: boolean;
@@ -378,11 +381,15 @@ export function translate(
 
     const reports: string[] = [];
     let description: Description;
-    try {
-      description = readPlugin(root, (message) => reports.push(message));
-    } catch (error) {
-      if (error instanceof Fatal) throw new LaunchError(`${label}: ${entry}: invalid Agent Plugin: ${error.message}`);
-      throw error;
+    if (known) {
+      description = known;
+    } else {
+      try {
+        description = readPlugin(root, (message) => reports.push(message));
+      } catch (error) {
+        if (error instanceof Fatal) throw new LaunchError(`${label}: ${entry}: invalid Agent Plugin: ${error.message}`);
+        throw error;
+      }
     }
     mkdirSync(parent, { recursive: true });
     // A directory that never moves, since translations embed their own paths;
@@ -394,7 +401,8 @@ export function translate(
       writeFileSync(join(directory, 'description.json'), JSON.stringify(description, null, 2));
       adapter.translate(description, join(directory, 'out'), inputs, (message) => reports.push(message), key);
       writeFileSync(join(directory, 'reports.json'), JSON.stringify(reports));
-      if (cacheKey(root) !== key) {
+      // A checkout can change while it is read; a store path cannot.
+      if (!known && cacheKey(root) !== key) {
         rmSync(directory, { recursive: true, force: true });
         if (attempt === 3) throw new LaunchError(`${label}: ${entry} kept changing while it was translated`);
         continue;
@@ -456,19 +464,35 @@ export function sweep(directory: string, which: (name: string) => boolean = () =
  * Resolve the variable against the profile: who stays, who is replaced, who
  * is added. `own`, the plugin directories of the profile in effect, come
  * before the variable's; with `replace`, for a profile that does not include
- * the built-in one, they replace every built-in plugin.
+ * the built-in one, they replace every built-in plugin. `described` are the
+ * descriptions a built profile of the stack already holds, by root
+ * (src/profile/resolve.ts `Described`): a plugin whose root they cover is not
+ * read again.
  */
 export function resolve<A extends { profile: E[] }, E extends ProfileEntry>(
   harness: string, adapter: Adapter<A, E>, args: A, value: string | undefined, env: NodeJS.ProcessEnv, report: Report,
-  own: string[] = [], replace = false,
+  own: string[] = [], replace = false, described: Described[] = [],
 ): Launch<A, E> {
+  const known = new Map<string, Description>();
+  for (const { root, description: path } of described) {
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+      if (isDescription(value)) known.set(root, value);
+    } catch (error) {
+      // A description that cannot be read is this profile's to do without:
+      // the plugin's root is read instead.
+      if (!(error instanceof SyntaxError) && !isSystemError(error)) throw error;
+      log.plugin.debug(`cannot read ${path}: ${(error as Error).message}`);
+    }
+  }
   const names = [...own, ...entries(value)];
   // Nothing to load or take away needs no cache, so it cannot fail for want of one.
   const changes = names.length > 0 || (replace && args.profile.length > 0);
   const cache = changes ? cacheRoot(env, replace || own.length > 0 ? 'profile' : VARIABLE) : null;
   const byName = new Map<string, LaunchPlugin>();
   for (const [i, entry] of names.entries()) {
-    const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? 'profile' : VARIABLE);
+    const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? 'profile' : VARIABLE,
+      known.get(realpath(entry)));
     // The last of a name wins, in its own position.
     byName.delete(plugin.name);
     byName.set(plugin.name, plugin);
@@ -588,7 +612,7 @@ export async function main(argsPath: string): Promise<number> {
     // The built-in profile, the one this launcher was built with, keeps its
     // plugins under any composed over it.
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
-      profile.plugins, !profile.keepsBuiltIn);
+      profile.plugins, !profile.keepsBuiltIn, profile.descriptions ?? []);
     logger = log.harness(args.harness);
     const launched = adapter.launch(launch);
     // `AGENT_DISTRO_SETTINGS=0` is plugins only: the profile sets nothing, and

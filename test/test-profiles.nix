@@ -187,11 +187,11 @@ in
         positional = stderr_of("probe-agent-distro /home/testuser/elsewhere claude")
         assert "agent-distro profile: using" not in positional, positional
 
-    with subtest("the repository's profile composes over AI_PROFILE; a positional one is exact"):
+    with subtest("a repository's profile composes over AI_PROFILE; a positional one is exact"):
         other = "AI_PROFILE=/home/testuser/elsewhere"
         # Named positionally: that profile alone.
         assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/fetched claude")[0] == ["gamma", "delta"]
-        assert launched(f"cd ~/repo && {other} probe-agent-distro vanilla claude")[0] == []
+        assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/elsewhere claude")[0] == ["beta"]
         # The user's plugins, then the repository's.
         assert launched(f"cd ~/repo && {other} probe-claude")[0] == ["beta", "alpha"]
         assert in_effect("~/repo", other) == {
@@ -199,10 +199,10 @@ in
             "origin": "/home/testuser/repo/agent-distro.nix",
             "over": {"name": "elsewhere", "description": "", "source": "variable", "origin": "/home/testuser/elsewhere"}}
         listed = user(f"cd ~/repo && {other} probe-agent-distro --list")
-        assert ("repo + elsewhere · The repository · from /home/testuser/repo/agent-distro.nix"
+        assert ("elsewhere + repo · The repository · from /home/testuser/repo/agent-distro.nix"
                 " over AI_PROFILE=/home/testuser/elsewhere") in listed, listed
         noticed = stderr_of(f"cd ~/repo && {other} probe-claude")
-        assert ("agent-distro profile: using repo + elsewhere (from /home/testuser/repo/agent-distro.nix"
+        assert ("agent-distro profile: using elsewhere + repo (from /home/testuser/repo/agent-distro.nix"
                 " over AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n") in noticed, noticed
         # The repository declares no `env`: AI_PROFILE's is in effect, and its
         # secret variable is what a launch without a terminal refuses.
@@ -217,6 +217,27 @@ in
         assert launched(f"cd ~/repo && {other} AGENT_DISTRO_PLUGINS=${plugins.gamma} probe-claude")[0] == ["beta", "alpha", "gamma"]
         # The positional selector is the picker's own: it never reaches the harness.
         assert "/home/testuser/fetched" not in user("probe-agent-distro /home/testuser/fetched claude")
+
+    with subtest("AI_PROFILE is a stack: every entry, composed left to right"):
+        # Two entries, both at the fixture: `elsewhere`'s plugin, then
+        # `fetched`'s own and the one it names by reference.
+        stack = 'AI_PROFILE="/home/testuser/elsewhere /home/testuser/fetched"'
+        assert launched(f"{stack} probe-claude")[0] == ["beta", "gamma", "delta"]
+        assert in_effect(env=stack) == {
+            "name": "fetched", "description": "", "source": "variable", "origin": "/home/testuser/fetched",
+            "over": {"name": "elsewhere", "description": "", "source": "variable", "origin": "/home/testuser/elsewhere"}}
+        # Named from the bottom up, each entry where it came from.
+        listed = user(f"{stack} probe-agent-distro --list")
+        assert ("elsewhere + fetched ·  · from AI_PROFILE=/home/testuser/fetched"
+                " over AI_PROFILE=/home/testuser/elsewhere") in listed, listed
+        # The earlier entry's `env` is in effect, and its secret variable is
+        # what a launch without a terminal refuses.
+        output = refused(f"{stack} probe-omp")
+        assert "ELSEWHERE_KEY is not set" in output and "Ask the team for a key" in output, output
+        # An entry that is not a reference is refused, naming it and its place.
+        output = refused('AI_PROFILE="/home/testuser/elsewhere nonesuch" probe-claude')
+        assert "AI_PROFILE=nonesuch (entry 2 of 2): not a reference" in output, output
+        assert "STUB-STARTED" not in output, output
 
     with subtest("a profile is evaluated without the user's environment or the network"):
         write("~/nosy/agent-distro.nix", '{ name = "nosy"; description = "[" + builtins.getEnv "SECRET" + "]"; }')

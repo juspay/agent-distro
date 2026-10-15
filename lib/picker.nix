@@ -36,7 +36,6 @@ let
   auth = builtins.toJSON (lib.genAttrs harnesses (harness: discovered.metadata.${harness}.auth or "secrets"));
   block = indent: lines: lib.concatMapStrings (line: "\n${indent}${line}") lines;
   arms = block "    " (map (harness: "${harness}) exec ${lib.getExe launchers.${harness}} \"$@\" ;;") harnesses);
-  builtinNames = map (b: b.name) info.builtins;
   quote = lib.escapeShellArg;
   noTty = [ "agent-distro picker: error: set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init harnesses)}, or ${lib.last harnesses}, use agent-distro <harness>, or run this from a terminal." ];
 in
@@ -63,15 +62,16 @@ writeShellApplication {
       esac
     fi
 
-    # A leading harness is the harness; otherwise a built-in profile name, or
-    # anything with / or : (a path or flake reference), is the profile.
-    # Options are the harness's, and -- ends selection.
+    # A leading harness is the harness; otherwise anything with / or : (a path
+    # or a flake reference) is the profile — a built-in name resolves to
+    # nothing and is not a selector (src/profile/resolve.ts). Options are the
+    # harness's, and -- ends selection.
     selected_profile=""
     selected_harness=""
     case "''${1-}" in
       ${lib.concatStringsSep "|" harnesses}) selected_harness=$1; shift ;;
       -*) ;;
-      ${lib.concatStringsSep "|" (map quote builtinNames)}|*/*|*:*) selected_profile=$1; shift ;;
+      */*|*:*) selected_profile=$1; shift ;;
     esac
     if [ -n "$selected_profile" ]; then
       case "''${1-}" in

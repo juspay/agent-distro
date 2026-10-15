@@ -1,16 +1,22 @@
 /**
  * The profile in effect for one launch.
  *
- * A profile is an `agent-distro.nix` in any git repository. The one in effect
- * is the picker's leading positional selector, exactly; else a stack, bottom
- * to top, of the launcher's built-in default, AI_PROFILE when set, and the
- * `agent-distro.nix` found from the working directory up to the git root,
- * each composed over the one beneath (`merge`); a built-in name in AI_PROFILE
- * starts the stack itself. A selector or AI_PROFILE is a built-in name
- * (`vanilla`, or the launcher's own) or a reference: a path
- * (absolute, or starting with ./, ../ or ~/) to the file or its directory, or
- * else, containing `/` or `:`, a flake reference such as
- * `github:owner/repo?dir=sub`, fetched with `nix flake prefetch`.
+ * A profile is an `agent-distro.nix` in any git repository, or one built by
+ * `agent-distro.lib.mkProfile`: a store path holding
+ * `share/agent-distro/profile.json`, its plugins under
+ * `share/agent-distro/plugins/<index>/`, and its `packages` in `bin/`. The one
+ * in effect is the picker's leading positional selector, exactly; else a
+ * stack, bottom to top, of the launcher's own built-in profile, every entry of
+ * AI_PROFILE and the `agent-distro.nix` found from the working directory up to
+ * the git root, each composed over the one beneath (`merge`).
+ *
+ * AI_PROFILE is a stack: whitespace-separated entries composed left to right,
+ * later entries winning where they overlap. `AI_PROFILE=` or unset adds none.
+ * An entry, like a positional selector, is a reference: a path (absolute, or
+ * starting with ./, ../ or ~/) to the file, its directory, or a built profile,
+ * or else, containing `/` or `:`, a flake reference such as
+ * `github:owner/repo?dir=sub`, fetched with `nix flake prefetch`. An entry
+ * that is neither is an error naming it and its position in the stack.
  *
  * Each file is evaluated once per content and agent-distro build by
  * evaluate.nix, and cached under
@@ -20,6 +26,14 @@
  * since neither is pinned by the file: a reference follows its branch (Nix's
  * tarball TTL bounds the cost), and a package that is gone is fetched again,
  * from the binary cache only, as the updater does.
+ *
+ * A built profile is read, not evaluated: its `profile.json` names it and
+ * carries its `env` and `settings`, its `plugins/<index>/root` symlinks name
+ * the plugins, and its `bin/` joins PATH as a launch-time profile's `packages`
+ * do. Its `plugins/<index>/description.json` is the reader's own output, so a
+ * launch uses it — rather than reading the plugin root again — exactly when
+ * its `reader` is this launcher's runtime tree (`runtimeReader`); otherwise
+ * the roots are read as any launch-time profile's are.
  *
  * A repository's Nix is untrusted: opening a terminal in a clone evaluates
  * it. Nix evaluates it restricted (no network, no files beyond its own
@@ -36,17 +50,25 @@
  * hit or miss, is logged at debug.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, utimesSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, utimesSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
 import { cacheRoot, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
 import { log, slow, SITE } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
-import { isFile, isDirectory, lexists } from '../util.ts';
+import { isFile, isDirectory, lexists, realpath } from '../util.ts';
 
 export const FILE = 'agent-distro.nix';
-/** The variable a profile reference falls back to. */
+/** The variable a profile reference falls back to: a whitespace-separated stack. */
 export const VARIABLE = 'AI_PROFILE';
+
+/**
+ * The runtime tree this launcher runs from, as a built profile's `reader`
+ * names the tree that read its plugins (lib/runtime.nix's, whose name is its
+ * store hash). A copy of the runtime elsewhere names itself, so the
+ * descriptions it wrote are not taken for this one's.
+ */
+export const runtimeReader: string = basename(dirname(dirname(import.meta.dirname)));
 
 /** One `env` entry: a value exported before the harness starts, or a secret it prompts for. */
 export type EnvValue = string | { secret: true; hint?: string };
@@ -82,7 +104,16 @@ export type Info = {
 };
 
 /** Which profile, and from where. */
-export type Selection = Pick<InEffect, 'source' | 'origin'>;
+export type Selection = Pick<InEffect, 'source' | 'origin'> & {
+  /** For an AI_PROFILE entry: its position in the stack, 1-based, and the stack's length. */
+  entry?: { position: number; count: number };
+};
+
+/**
+ * A plugin description a built profile already holds, by the plugin's root:
+ * `description` is its `description.json` (lib/mk-profile.nix).
+ */
+export type Described = { root: string; description: string };
 
 /** The profile in effect, resolved for this launch. */
 export type Resolved = InEffect & {
@@ -94,6 +125,12 @@ export type Resolved = InEffect & {
   settings: Settings;
   /** Directories of the profile's packages' commands, for PATH. */
   paths: string[];
+  /**
+   * Descriptions held by a built profile of the stack, used instead of reading
+   * those plugins' roots again: only when that profile's `reader` is
+   * `runtimeReader`, so the output is this runtime's.
+   */
+  descriptions?: Described[];
 };
 
 /** A cached evaluation of one file: references unresolved, packages unbuilt. */
@@ -148,7 +185,8 @@ function settingsProblem(value: unknown): string | null {
  * Fail on what `value` is not: a profile's `env` and `settings`. `what` names
  * the profile, as its other errors do.
  */
-function validate(what: string, value: { env?: unknown; settings?: unknown }): void {
+function validate(what: string, value: unknown): asserts value is { env: ProfileEnv; settings: Settings } {
+  if (!isObject(value)) throw new LaunchError(`${what}: must be an object`);
   const env = envProblem(value.env);
   if (env) throw new LaunchError(`${what}: \`env\` ${env}`);
   const settings = settingsProblem(value.settings);
@@ -161,9 +199,14 @@ function isInEffect(value: unknown): value is InEffect {
     && (value.over === undefined || isInEffect(value.over));
 }
 
+const isDescriptions = (value: unknown): value is Described[] =>
+  Array.isArray(value)
+  && value.every((entry) => isObject(entry) && isString(entry.root) && isString(entry.description));
+
 export function isResolved(value: unknown): value is Resolved {
   return isInEffect(value) && typeof value.keepsBuiltIn === 'boolean' && isStrings(value.plugins)
-    && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.paths);
+    && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.paths)
+    && (value.descriptions === undefined || isDescriptions(value.descriptions));
 }
 
 function isEvaluated(value: unknown): value is Evaluated {
@@ -197,17 +240,29 @@ export function workingDirectory(): string | undefined {
 }
 
 /**
+ * The entries of an AI_PROFILE stack: whitespace-separated, as nix's own lists
+ * are (`substituters`, `trusted-public-keys`). No reference, store path or
+ * entry holds whitespace, so splitting needs no other rule — and `:` is left
+ * to the references that carry one (`github:owner/repo?dir=sub`).
+ */
+function entries(value: string): string[] {
+  return value.trim().split(/\s+/).filter((entry) => entry !== '');
+}
+
+/**
  * The profiles this launch is to use, bottom to top, before anything is read:
- * the positional selector alone, else the built-in default, AI_PROFILE and the
- * repository's, those that are there. A built-in name in AI_PROFILE is one of
- * the launcher's own profiles, not an overlay: the stack starts there instead.
+ * the positional selector alone, else the built-in default, then every
+ * AI_PROFILE entry in order, then the repository's, those that are there.
+ * `AI_PROFILE=` or unset adds none, so the built-in profile and the
+ * repository's are the whole stack.
  */
 export function select(positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv, info: Info): Selection[] {
   if (positional) return [{ source: 'positional', origin: positional }];
-  const variable = env[VARIABLE];
-  const stack: Selection[] = [];
-  if (!variable || !info.builtins.some((b) => b.name === variable)) stack.push({ source: 'builtin', origin: info.default });
-  if (variable) stack.push({ source: 'variable', origin: variable });
+  const stack: Selection[] = [{ source: 'builtin', origin: info.default }];
+  const variable = entries(env[VARIABLE] ?? '');
+  variable.forEach((origin, i) => stack.push({
+    source: 'variable', origin, entry: { position: i + 1, count: variable.length },
+  }));
   const found = cwd === undefined ? null : discover(cwd);
   if (found) stack.push({ source: 'repository', origin: found });
   return stack;
@@ -215,9 +270,7 @@ export function select(positional: string | undefined, cwd: string | undefined, 
 
 type Kind = { builtin: Builtin } | { path: string } | { flake: string };
 
-function classify(reference: string, info: Info, env: NodeJS.ProcessEnv): Kind | null {
-  const builtin = info.builtins.find((b) => b.name === reference);
-  if (builtin) return { builtin };
+function classify(reference: string, env: NodeJS.ProcessEnv): Kind | null {
   if (reference.startsWith('/')) return { path: reference };
   if (reference === '.' || reference === '..' || reference.startsWith('./') || reference.startsWith('../')) {
     return { path: resolve(reference) };
@@ -227,9 +280,22 @@ function classify(reference: string, info: Info, env: NodeJS.ProcessEnv): Kind |
   return null;
 }
 
+/** What a selection names, or null when it names nothing. */
+function kindOf(selection: Selection, info: Info, env: NodeJS.ProcessEnv): Kind | null {
+  // The launcher's own profile is data it was built with, not a reference.
+  if (selection.source === 'builtin') {
+    const builtin = info.builtins.find((builtin) => builtin.name === selection.origin);
+    return builtin === undefined ? null : { builtin };
+  }
+  if (selection.source === 'repository') return { path: selection.origin };
+  return classify(selection.origin, env);
+}
+
 /** How errors name one profile of the selection: what the user typed, where. */
-export function label({ source, origin }: Selection): string {
-  if (source === 'variable') return `${VARIABLE}=${origin}`;
+export function label({ source, origin, entry }: Selection): string {
+  if (source === 'variable') {
+    return `${VARIABLE}=${origin}${entry ? ` (entry ${entry.position} of ${entry.count})` : ''}`;
+  }
   if (source === 'positional') return `profile ${origin}`;
   return origin;
 }
@@ -431,6 +497,65 @@ function fileAt(path: string, what: string): string {
   return file;
 }
 
+/** A profile built by `agent-distro.lib.mkProfile`, as its store path holds it. */
+type Built = {
+  /** The store path: its `profile.json`, its plugins and its `bin/`. */
+  dir: string;
+  name: string;
+  description: string;
+  env: ProfileEnv;
+  settings: Settings;
+  /** The runtime tree that read these plugins (lib/mk-profile.nix's `reader`). */
+  reader: string;
+  plugins: Described[];
+};
+
+/**
+ * `directory` as a built profile, or null when it holds no
+ * `share/agent-distro/profile.json` and is therefore a directory to evaluate.
+ */
+function builtProfile(directory: string): Built | null {
+  const file = join(directory, 'share/agent-distro/profile.json');
+  if (!isFile(file)) return null;
+  const at = `${directory}: ${file}`;
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    throw new LaunchError(`${at} is not valid JSON: ${error.message}`);
+  }
+  if (!isObject(value)) throw new LaunchError(`${at} must hold an object`);
+  const name = value.name;
+  const reader = value.reader;
+  if (!isName(name)) throw new LaunchError(`${at}: \`name\` must be one word without /`);
+  if (!isString(reader) || reader === '') throw new LaunchError(`${at}: \`reader\` must be a nonempty string`);
+  validate(at, value);
+  const base = join(directory, 'share/agent-distro/plugins');
+  let indexes: string[];
+  try {
+    indexes = readdirSync(base);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    indexes = [];
+  }
+  const plugins = indexes.sort((a, b) => Number(a) - Number(b)).map((index) => {
+    // One plugin: the reader's own output for it, and `root` — a symlink to
+    // the plugin's store path at build time, whose target is the root now.
+    const at = join(base, index);
+    const root = join(at, 'root');
+    const description = join(at, 'description.json');
+    if (!lexists(root)) throw new LaunchError(`${at}: no root`);
+    if (!isFile(description)) throw new LaunchError(`${at}: no description.json`);
+    return { root: realpath(root), description };
+  });
+  return {
+    dir: directory, name, reader, plugins,
+    description: isString(value.description) ? value.description : '',
+    env: value.env, settings: value.settings,
+  };
+}
+
 /**
  * `upper` composed over `lower`: plugins and packages are both, lower's first;
  * `env` and `settings` are key-wise, upper's winning; the rest is upper's,
@@ -439,13 +564,16 @@ function fileAt(path: string, what: string): string {
  * beneath it.
  */
 function merge(lower: Resolved, upper: Resolved): Resolved {
-  const { name, description, source, origin } = lower;
+  const { name, description, source, origin, over } = lower;
+  const descriptions = [...(lower.descriptions ?? []), ...(upper.descriptions ?? [])];
   return {
     name: upper.name, description: upper.description, source: upper.source, origin: upper.origin,
-    ...(source === 'builtin' ? {} : { over: { name, description, source, origin } }),
+    // The whole chain beneath, so a stack of three names all three.
+    ...(source === 'builtin' ? {} : { over: { name, description, source, origin, ...(over ? { over } : {}) } }),
     keepsBuiltIn: lower.keepsBuiltIn, plugins: [...lower.plugins, ...upper.plugins],
     env: { ...lower.env, ...upper.env }, settings: { ...lower.settings, ...upper.settings },
     paths: [...lower.paths, ...upper.paths],
+    ...(descriptions.length ? { descriptions } : {}),
   };
 }
 
@@ -456,20 +584,34 @@ export function resolveProfile(info: Info, stack: Selection[], env: NodeJS.Proce
 
 function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): Resolved {
   const what = printable(label(selection));
-  const kind = selection.source === 'repository' ? { path: selection.origin } : classify(selection.origin, info, env);
+  const kind = kindOf(selection, info, env);
   if (kind === null) {
-    throw new LaunchError(`${what}: not a built-in profile (${info.builtins.map((b) => b.name).join(', ')}) or a `
-      + 'reference: a path starting with /, ./ or ../, or a flake reference such as github:owner/repo');
+    throw new LaunchError(`${what}: not a reference: a path starting with /, ./ or ../, or a flake `
+      + 'reference such as github:owner/repo');
   }
   const { source, origin } = selection;
   if ('builtin' in kind) {
     // The launcher's own profile is data it was built with, not a file to
     // evaluate: same rules, named for what it is.
-    const { name, description, env, settings } = kind.builtin;
+    const { name, description, env: builtinEnv, settings } = kind.builtin;
     validate(`built-in profile ${name}`, kind.builtin);
     return {
-      name, description, env, settings, source, origin,
+      name, description, env: builtinEnv, settings, source, origin,
       keepsBuiltIn: name === info.default, plugins: [], paths: [],
+    };
+  }
+  // A built profile is read where it lies; a repository's is evaluated.
+  const built = 'path' in kind ? builtProfile(kind.path) : null;
+  if (built) {
+    const matching = built.reader === runtimeReader;
+    // Its `bin/` — the profile's `packages` — goes first on PATH, as a
+    // launch-time profile's do.
+    const bin = join(built.dir, 'bin');
+    return {
+      name: built.name, description: built.description, source, origin, keepsBuiltIn: false,
+      plugins: built.plugins.map((plugin) => plugin.root), env: built.env, settings: built.settings,
+      paths: isDirectory(bin) ? [bin] : [],
+      ...(matching ? { descriptions: built.plugins } : {}),
     };
   }
   const cache = cacheRoot(env, what);

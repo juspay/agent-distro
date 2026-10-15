@@ -255,6 +255,11 @@
             inherit pkgs;
             inherit mkLaunchers;
           };
+          # `mkProfile`'s output, without a VM or a launch.
+          mk-profile = import ./test-mk-profile.nix {
+            inherit pkgs agent-distro;
+            mkProfile = agent-distro.lib.mkProfile;
+          };
         };
     };
 }
