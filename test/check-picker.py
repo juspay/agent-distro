@@ -22,6 +22,14 @@ LISTING = json.loads(sys.argv[1])
 DEFAULT = BUILTIN['name']
 ROWS = BUILTIN['harnesses']
 NAMES = [row['name'] for row in ROWS]
+# A profile to name positionally or in AI_PROFILE: a directory holding an
+# `agent-distro.nix`, which is all a profile is. The built-in name is not one —
+# `resolve.ts` no longer accepts it — so nothing here gives it.
+PROFILES = tempfile.mkdtemp(prefix='picker-profiles-')
+OTHER = os.path.join(PROFILES, 'other')
+os.makedirs(OTHER)
+with open(os.path.join(OTHER, 'agent-distro.nix'), 'w') as handle:
+    handle.write('{ name = "chosen"; description = "Chosen on the command line"; plugins = [ ]; }\n')
 DOWN = b'\x1b[B'
 RIGHT = b'\x1b[C'
 ESCAPE = b'\x1b'
@@ -267,12 +275,12 @@ for row, harness in enumerate(ROWS):
     picked = run(flow(DOWN * row + b'\r'), expected)
     assert harness['version'].encode() in picked.drawn, picked.drawn
     assert picked.choice == harness['name'], picked.choice
-    run([], expected, args=[DEFAULT, harness['name'], '--version'])
+    run([], expected, args=[OTHER, harness['name'], '--version'])
     run([], expected, args=[harness['name'], '--version'])
-# The built-in name, positional or in AI_PROFILE, is the built-in profile.
-for narrowed in (run([(LAUNCH, b'\r')], version(NAMES[0]), {'AI_PROFILE': DEFAULT}),
-                 run([(LAUNCH, b'\r')], version(NAMES[0]), args=[DEFAULT, '--version'])):
-    assert f'agent-distro · {DEFAULT}'.encode() in narrowed.drawn, narrowed.drawn
+    # A profile in AI_PROFILE, alone: the header names it and where it came from.
+    narrowed = run([(LAUNCH, b'\r')], version(NAMES[0]), {'AI_PROFILE': OTHER})
+    assert b'agent-distro \xc2\xb7 chosen' in narrowed.drawn, narrowed.drawn
+    assert f'from AI_PROFILE={OTHER}'.encode() in narrowed.drawn, narrowed.drawn
 
 # A profile chosen by reference, or found in the repository: the header names
 # it and where it came from, and `--list` says the same.
@@ -302,10 +310,10 @@ with tempfile.TemporaryDirectory() as work:
 
 # Environment selectors win over consumed positional selectors.
 run([], version(NAMES[0]), {'AI_HARNESS': NAMES[0]}, args=[NAMES[-1], '--version'])
-run([], version(NAMES[0]), {'AI_HARNESS': NAMES[0]}, args=[DEFAULT, NAMES[-1], '--version'])
+run([], version(NAMES[0]), {'AI_HARNESS': NAMES[0]}, args=[OTHER, NAMES[-1], '--version'])
 run([], version(NAMES[0]), {'AI_HARNESS': NAMES[0]})
 run([], ('valid values: ' + ', '.join(NAMES)).encode(), {'AI_HARNESS': 'bad'}, status=1)
-run([], b'AI_PROFILE=nonesuch: not a built-in profile', {'AI_PROFILE': 'nonesuch'}, status=1)
+run([], b'AI_PROFILE=nonesuch (entry 1 of 1): not a reference', {'AI_PROFILE': 'nonesuch'}, status=1)
 
 # The filter shows the query and its match count; Enter takes the first match.
 target = max(ROWS, key=lambda row: len(row['title']))
@@ -412,9 +420,9 @@ with tempfile.TemporaryDirectory() as state:
 
     # Naming the profile still shows the chooser, so its selection is remembered.
     narrowed = run([(LAUNCH, b'/no-matches'), (b'no matches', ESCAPE + b'\r')],
-                   version(NAMES[0]), args=[DEFAULT, '--version'], state=state)
+                   version(NAMES[0]), args=[OTHER, '--version'], state=state)
     assert narrowed.choice == NAMES[0], narrowed.choice
-    for args, extra in [([DEFAULT, NAMES[-1], '--version'], {}),
+    for args, extra in [([OTHER, NAMES[-1], '--version'], {}),
                         (['--version'], {'AI_HARNESS': NAMES[-1]})]:
         direct = run([], version(NAMES[-1]), extra, args=args, state=state)
         assert direct.choice == NAMES[0], direct.choice

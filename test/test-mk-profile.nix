@@ -8,7 +8,14 @@
 let
   inherit (pkgs) lib;
   runtime = import "${agent-distro}/lib/runtime.nix" pkgs;
-  tool = pkgs.writeShellScriptBin "profile-tool" "echo tool";
+  # A package that is more than `bin/`, so the profile's own `bin/` can be told
+  # from its whole output.
+  tool = pkgs.runCommand "profile-tool" { } ''
+    mkdir -p "$out/bin" "$out/share"
+    printf '#!/bin/sh\necho tool\n' > "$out/bin/profile-tool"
+    chmod +x "$out/bin/profile-tool"
+    printf 'not a command\n' > "$out/share/profile-tool-data"
+  '';
   profile = {
     name = "mk-profile-check";
     description = "Built by mkProfile";
@@ -61,7 +68,11 @@ pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq ]; } ''
   test -d ${pluginless}/share/agent-distro/plugins
   test -z "$(ls -A ${pluginless}/share/agent-distro/plugins)"
   test "$(jq -r .env.PLAIN ${pluginless}/share/agent-distro/profile.json)" = 1
-  # `bin/` holds the packages' commands and nothing else of their outputs.
+  # `bin/` holds the packages' commands, and their other outputs are not here:
+  # the tool's own `share/` would be, if the profile linked a whole `lib.getBin`
+  # output rather than its `bin/`.
   test "$(ls ${build}/bin)" = profile-tool
+  test ! -e ${build}/share/profile-tool-data
+  test -d ${build}/share/agent-distro
   touch "$out"
 ''

@@ -52,6 +52,9 @@ let
   fixtureSource = { outPath = "${./fixtures/profile}"; };
   withSource = homeOf { enable = true; profiles = [ fixtureSource ]; };
   builtSource = agent-distro.lib.mkProfile { system = pkgs.system; profile = fixtureSource; };
+  # A profile that is already built is used as it is: passing the derivation
+  # must not build it again (which could not evaluate at all).
+  withBuilt = homeOf { enable = true; profiles = [ builtFixture ]; };
   # The line a shim exports an AI_PROFILE with, quoted as mk-shims quotes it.
   exported = value: "export AI_PROFILE=${lib.escapeShellArg value}";
 
@@ -236,6 +239,9 @@ assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtFixture)
 # A flake input (`inputs.skills`, `flake = false`) is built too, from its
 # `outPath`, and the same derivation comes out either way.
 assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtSource)) (shimOf withSource);
+# A `mkProfile` derivation on `profiles` is used as it is: this evaluation is
+# the assertion, since building it again cannot evaluate.
+assert lib.hasInfix (builtins.unsafeDiscardStringContext (exported builtFixture)) (shimOf withBuilt);
 # The index the updater reads comes from lib/ca-index.nix, through the module
 # and the library; a distribution's own index reaches the config the same way.
 assert config.caIndex == agent-distro.lib.caIndex.rawBase;

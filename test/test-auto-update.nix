@@ -37,6 +37,11 @@ let
     { name = "referenced"; description = "Referenced"; plugins = [ ]; }
   '';
   switchedProfile = switched { profile = "${referencedProfile}"; };
+  # Another profile, for the commands whose own AI_PROFILE must win over the
+  # shim's fallback.
+  ownProfile = pkgs.writeTextDir "agent-distro.nix" ''
+    { name = "own"; description = "The user's own"; plugins = [ ]; }
+  '';
   switchedFlake = switched { flake = "path:/home/testuser/other-flake"; };
   original = switched { };
   # A cache the system config does not list: the daemon would ignore it.
@@ -95,7 +100,7 @@ let
       trusted-users = pkgs.lib.optional trusted "testuser";
     };
     # Alternate generations must be registered in the VM store for activation's GC roots.
-    virtualisation.additionalPaths = [ fixture fixtureV2 fixtureSame fixtureAdded legacy broken uncached cacheDir unusableCache pkgs.bash pkgs.coreutils switchedProfile switchedFlake original ];
+    virtualisation.additionalPaths = [ fixture fixtureV2 fixtureSame fixtureAdded legacy broken uncached cacheDir unusableCache pkgs.bash pkgs.coreutils switchedProfile switchedFlake ownProfile original ];
     environment.loginShellInit = ''
       echo "Welcome: this greeting is not a PATH"
     '';
@@ -232,7 +237,7 @@ in
             for name in ${builtins.toJSON commands}:
                 traced = machine.succeed(user("unset XDG_STATE_HOME; AGENT_DISTRO_SETTINGS=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
                 assert "export AI_PROFILE=${referencedProfile}" in traced, traced
-                traced = machine.succeed(user("unset XDG_STATE_HOME; AI_PROFILE=vanilla AGENT_DISTRO_SETTINGS=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
+                traced = machine.succeed(user("unset XDG_STATE_HOME; AI_PROFILE=${ownProfile} AGENT_DISTRO_SETTINGS=0 bash -x \"$(command -v " + name + ")\" --version 2>&1"))
                 assert "export AI_PROFILE" not in traced, traced
             # And the launchers take it as the profile in effect.
             listed = machine.succeed(user("AI_PROFILE=${referencedProfile} ${agent-distro.packages.${pkgs.stdenv.hostPlatform.system}.vanilla}/bin/agent-distro --list --json"))

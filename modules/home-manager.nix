@@ -8,10 +8,11 @@ let
   cfg = config.services.agent-distro;
   available = bundles.${pkgs.stdenv.hostPlatform.system};
   # What `profiles` means: a string is a reference read at launch
-  # (src/profile/resolve.ts); anything else — a path, a flake input, a built
-  # profile — is built again by mkProfile, whose store path is a reference too.
-  # One package is installed either way — the harnesses — and `profiles` is what
-  # each command exports as AI_PROFILE, whitespace-separated.
+  # (src/profile/resolve.ts); a derivation is already a built profile and is
+  # used as it is; anything else — a path, a flake input — is built by mkProfile,
+  # whose store path is a reference too. One package is installed either way —
+  # the harnesses — and `profiles` is what each command exports as AI_PROFILE,
+  # whitespace-separated.
   # `profile` was the one-profile spelling of this; it is deprecated.
   named = cfg.profile != null
     && builtins.hasAttr (builtins.unsafeDiscardStringContext cfg.profile) available;
@@ -22,7 +23,7 @@ let
      else cfg.profile);
   built = map
     (entry:
-      if builtins.isString entry
+      if builtins.isString entry || lib.isDerivation entry
       then entry
       else mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = entry; })
     profiles;
@@ -33,10 +34,11 @@ let
   schedule = import ../lib/schedule.nix lib;
   stateDirectory = import ../lib/state-directory.nix {
     inherit (cfg) flake;
-    # The AI_PROFILE value, and the default profile's name where none is
-    # listed, so an install that predates `profiles` keeps its state directory
-    # (and the update it holds) rather than having it pruned as superseded.
-    profile = if aiProfile == "" then defaultProfile else aiProfile;
+    # What the updater builds, not the AI_PROFILE string: a profile's own store
+    # path changes whenever its input does, and keying the state by it would
+    # prune `current` and `last-success` on every `nix flake update`. This is
+    # also the name an install that predates `profiles` already hashed.
+    profile = defaultProfile;
     xdgStateHome = config.xdg.stateHome;
   };
   shims = import ../lib/mk-shims.nix {

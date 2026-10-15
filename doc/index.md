@@ -448,6 +448,15 @@ agent-distro.lib.mkUpdater { pkgs; bundle; flake; profile; stateDirectory; histo
 #   honour them it copies the revision's published content-addressed bundle
 #   from one of them instead ([The binary cache](#binary-cache)).
 
+agent-distro.lib.mkProfile { system; profile; }
+# → one profile built into a derivation: share/agent-distro/profile.json (its
+#   name, description, env, settings and the runtime tree that read its
+#   plugins), share/agent-distro/plugins/<index>/{description.json,root}, and
+#   bin/ from its `packages`. `profile` is a path to an agent-distro.nix or to
+#   the directory holding one — or the flake input itself — or the attribute
+#   set the file holds; its plugins must be paths, since a flake reference is
+#   read at launch. The store path is an AI_PROFILE entry like any other.
+
 agent-distro.lib.mkPicker { pkgs; profile; launchers; nixpkgs ? null; }
 # → lib/picker.nix's derivation: the interactive harness chooser over
 #   `launchers`, the `mkLaunchers` result for `profile`, its built-in profile.
