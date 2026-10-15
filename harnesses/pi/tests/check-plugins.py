@@ -30,13 +30,15 @@ assert inventory() == (original, old_mcp)
 assert not any(path.endswith('/skills/launch-fixture') for path in inventory()[0]['skills']), inventory()[0]
 discover()
 
-# Without a home for Pi's files the plugins could not load: the launch fails
-# instead of starting without them.
+# Without a home for Pi's files the plugins cannot be merged in: the launch
+# says so and starts without them, rather than not starting at all (the same
+# rule the launcher's own no-home branch follows).
 homeless = subprocess.run(['env', '-u', 'HOME', '-u', 'PI_CODING_AGENT_DIR', f'XDG_CACHE_HOME={Path.home()}/.cache',
                            f'AGENT_DISTRO_PLUGINS={fixture}', 'pi', '--version'],
                           env=env, capture_output=True, text=True, timeout=120)
-assert homeless.returncode != 0, homeless
+assert homeless.returncode == 0, homeless
 assert 'HOME and PI_CODING_AGENT_DIR are unset' in homeless.stderr, homeless.stderr
+assert 'skipping plugin merges' in homeless.stderr, homeless.stderr
 
 
 # A plugin's stdio MCP server runs in the launch directory (doc/index.md).
