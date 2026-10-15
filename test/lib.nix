@@ -21,15 +21,16 @@ let
   # by a locked reference instead of holding its source (lib/nixpkgs-reference.nix).
   launchers = import ../lib/mk-launchers.nix { inherit pkgs nixpkgs; };
   # What one built profile says: its `env` and `settings`, and its plugins, each
-  # with the skills the reader found in it.
+  # with the skills the reader found in it. The context is discarded as the
+  # files are read: `fromJSON` keeps the whole string it parsed as the context
+  # of every string it returns, and that context mentions the runtime store path
+  # (the `reader`), which a derivation argument may not carry textually.
   described = profile:
     let
-      json = builtins.fromJSON (builtins.readFile "${profile}/share/agent-distro/profile.json");
+      read = path: builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile path));
+      json = read "${profile}/share/agent-distro/profile.json";
       indexes = builtins.attrNames (builtins.readDir "${profile}/share/agent-distro/plugins");
-      plugins = map
-        (index: builtins.fromJSON
-          (builtins.readFile "${profile}/share/agent-distro/plugins/${index}/description.json"))
-        indexes;
+      plugins = map (index: read "${profile}/share/agent-distro/plugins/${index}/description.json") indexes;
     in
     {
       inherit (json) env settings;

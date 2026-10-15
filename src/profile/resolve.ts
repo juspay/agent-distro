@@ -263,12 +263,21 @@ export function select(positional: string | undefined, cwd: string | undefined, 
 
 type Kind = { path: string } | { flake: string };
 
+/**
+ * A path reference as it resolves now. The evaluation runs under
+ * `restrict-eval` with `-I` entries, and nix resolves those, so a reference
+ * that is not its own real path — macOS `/tmp` and `/var/folders` are symlinks
+ * — has to be the real one or nix refuses to read the file. A path that is not
+ * there is left as given, for the resolver to name what is missing.
+ */
+const canonical = (path: string): string => (existsSync(path) ? realpath(path) : path);
+
 function classify(reference: string, env: NodeJS.ProcessEnv): Kind | null {
-  if (reference.startsWith('/')) return { path: reference };
+  if (reference.startsWith('/')) return { path: canonical(reference) };
   if (reference === '.' || reference === '..' || reference.startsWith('./') || reference.startsWith('../')) {
-    return { path: resolve(reference) };
+    return { path: canonical(resolve(reference)) };
   }
-  if (reference.startsWith('~/') && env.HOME) return { path: join(env.HOME, reference.slice(2)) };
+  if (reference.startsWith('~/') && env.HOME) return { path: canonical(join(env.HOME, reference.slice(2))) };
   if (/[/:]/.test(reference)) return { flake: reference };
   return null;
 }
