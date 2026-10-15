@@ -223,13 +223,18 @@ in
     machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 ${original}/activate"))
     assert machine.succeed("readlink -f " + state).strip() == second
     check_history()
-    # Neither a changed profile nor a changed flake may reuse or keep rooting this update.
-    for activation in ["${switchedProfile}", "${switchedFlake}"]:
+    # A changed flake is a different source: its own state directory, and the
+    # previous one is pruned rather than left rooting this update. A changed
+    # profile is not: the installed package is the same one either way, so its
+    # state — and the update it holds — stays, and only what its commands
+    # export as AI_PROFILE changes.
+    for activation, source in [("${switchedProfile}", False), ("${switchedFlake}", True)]:
         machine.succeed(user("XDG_RUNTIME_DIR=/run/user/1000 " + activation + "/activate"))
         for name in ${builtins.toJSON commands}:
             output = machine.succeed(user("unset XDG_STATE_HOME; AGENT_DISTRO_SETTINGS=0 " + name + " --version"))
-            assert "updated-" not in output, output
-        machine.succeed("test ! -e " + shlex.quote(state.rsplit("/", 1)[0]))
+            assert ("updated-" in output) is not source, output
+        if source:
+            machine.succeed("test ! -e " + shlex.quote(state.rsplit("/", 1)[0]))
         check_history()
         if activation == "${switchedProfile}":
             # The reference is every command's AI_PROFILE fallback; the user's own wins.
