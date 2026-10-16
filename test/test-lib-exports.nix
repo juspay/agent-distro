@@ -134,7 +134,7 @@ let
 
   libNames = builtins.attrNames agent-distro.lib;
   packageNames = builtins.attrNames agent-distro.packages.${pkgs.system};
-  expectedLibNames = [ "caIndex" "cache" "mkLaunchers" "mkPicker" "mkProfile" "mkShims"
+  expectedLibNames = [ "caIndex" "cache" "historyFile" "mkLaunchers" "mkPicker" "mkProfile" "mkShims"
     "mkUpdater" "schedule" "stateDirectory" ];
 
   # --- missing-required-argument checks, executed in the builder below ---
@@ -217,9 +217,12 @@ assert otherShims.passthru.stateDirectory == stateDirectory;
 # returns (Home Manager normalises a single command line to a one-element list).
 assert lib.escapeShellArgs updater.command ==
   builtins.head configuration.systemd.user.services.agent-distro-update.Service.ExecStart;
-# Exactly the nine-name library, and the packages a consumer reaches: the one
+# Exactly the ten-name library, and the packages a consumer reaches: the one
 # package as `default`, one per harness, and the profile checker.
 assert libNames == expectedLibNames;
+# `lib.historyFile` names the log the updater above appends to — and the
+# module's, whose ExecStart is that updater's command.
+assert config.history == agent-distro.lib.historyFile configuration.xdg.stateHome;
 assert lib.elem "default" packageNames;
 assert lib.elem "check-profile" packageNames;
 assert builtins.all (harness: lib.elem harness packageNames) package.commands;

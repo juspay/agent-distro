@@ -1,4 +1,4 @@
-# One profile, built: `agent-distro.lib.mkProfile { system; profile; }`.
+# One profile, built: `agent-distro.lib.mkProfile { system; profile; hostSystem ? system; }`.
 #
 # A profile built this way is pinned and offline: nothing of it is evaluated,
 # fetched or compiled at launch, and its store path works anywhere a profile
@@ -27,7 +27,16 @@
 # (`nix build --impure`); a pure one — a flake's own outputs, a Home Manager
 # configuration — is refused with that said, and pins the reference as a flake
 # input of its own instead, passing that path.
-{ nixpkgs, system, profile }:
+#
+# `hostSystem` is the system the profile will be launched on, when it is not
+# the one building it (a program that builds profiles for other machines —
+# kolu — and ships them there). The profile is then built for `system`: its
+# plugins, `env` and `settings` mean the same on any system, and its `reader`
+# simply differs from the host's, so a launch there reads the plugins itself —
+# PROVIDED its `packages` are empty for `hostSystem`, since `system` cannot
+# build those. A profile with packages there is refused, naming it and both
+# systems: nothing drops them.
+{ nixpkgs, system, profile, hostSystem ? system }:
 let
   pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
   inherit (pkgs) lib;
@@ -69,7 +78,12 @@ let
   plugins = map
     (entry: if builtins.isString entry && !(lib.hasPrefix "/" entry) then locked entry else entry)
     (attrs.plugins or [ ]);
-  packages = (attrs.packages or (_: [ ])) pkgs;
+  packagesFor = (attrs.packages or (_: [ ]));
+  packages =
+    if hostSystem == system then packagesFor pkgs
+    else if packagesFor (import nixpkgs { system = hostSystem; config.allowUnfree = true; }) != [ ] then
+      throw "mkProfile: profile \"${name}\" has packages for ${hostSystem}, which ${system} cannot build"
+    else [ ];
   # The directory first, so a profile that names no plugins still has one to
   # read; then one directory per plugin, in order, each with the reader's own
   # output for the plugin and a symlink to it.

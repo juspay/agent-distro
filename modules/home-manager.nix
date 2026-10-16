@@ -53,7 +53,7 @@ let
   nix = lib.getExe (if config.nix.package != null then config.nix.package else pkgs.nix);
   updater = import ../lib/mk-updater.nix {
     inherit pkgs package nix;
-    history = "${config.xdg.stateHome}/agent-distro/history.log";
+    history = import ../lib/history-file.nix config.xdg.stateHome;
     inherit stateDirectory attribute;
     inherit (cfg) flake substituters caIndex;
   };

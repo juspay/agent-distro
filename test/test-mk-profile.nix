@@ -4,7 +4,9 @@
 # profile's `packages`. A flake reference among the plugins is locked only by
 # an impure evaluation, so this one — a flake check, pure — refuses it
 # (test/template.sh builds one impurely); the same profile as a directory, a
-# file and an attribute set is the one derivation.
+# file and an attribute set is the one derivation; and one built for a host of
+# another system is this system's build without its packages, or refused when
+# it has packages for that host.
 { pkgs, agent-distro, mkProfile }:
 let
   inherit (pkgs) lib;
@@ -45,8 +47,17 @@ let
   }).drvPath;
   reader = builtins.baseNameOf (toString runtime.tree);
   plugin = ./fixtures/profile;
+  # Built here for a host of another system: without packages it is this
+  # system's build; with packages for that system it is refused, naming both.
+  system = pkgs.stdenv.hostPlatform.system;
+  foreign = if system == "x86_64-linux" then "aarch64-darwin" else "x86_64-linux";
+  forForeign = mkProfile { inherit system; hostSystem = foreign; profile = removeAttrs profile [ "packages" ]; };
+  pluginsOnly = mkProfile { inherit system; profile = removeAttrs profile [ "packages" ]; };
+  foreignPackages = builtins.tryEval (mkProfile { inherit system; hostSystem = foreign; inherit profile; }).drvPath;
 in
 assert !referenced.success;
+assert !foreignPackages.success;
+assert forForeign.drvPath == pluginsOnly.drvPath;
 pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq ]; } ''
   built=${build}
   jq -e --arg reader ${lib.escapeShellArg reader} '
