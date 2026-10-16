@@ -54,11 +54,11 @@
     "kolu": {
       "flake": false,
       "locked": {
-        "lastModified": 1792155751,
-        "narHash": "sha256-IyJhftxLH50b6aBP6xIXiVym+xZ5zXKzTT4dCBeLMG8=",
+        "lastModified": 1792165359,
+        "narHash": "sha256-WYXkNtiEIpc1+qn42c1p6KoVvGEaueI0NF23X8qLMYQ=",
         "owner": "juspay",
         "repo": "kolu",
-        "rev": "3061124f677acf2ce5fc036ce8d8a753ae4c09eb",
+        "rev": "97d8c599b219ab13f371f010068b24aa36ff3e7d",
         "type": "github"
       },
       "original": {
