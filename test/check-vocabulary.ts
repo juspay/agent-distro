@@ -3,7 +3,10 @@
  * every export resolves through the package's own `exports` map, the history
  * line round-trips through its writer and reader, a malformed line or versions
  * row is refused, `changes` words what moved between two packages, and the
- * scheduled-run numbers and stamp reader are the ones `--scheduled` uses.
+ * scheduled-run numbers and stamp reader are the ones `--scheduled` uses, the
+ * state directory's files are where the updater keeps them, a profile
+ * reference classifies and prefetches as a launch reads it, and the history
+ * log's writer keeps it trimmed (test/check-would-compile.ts checks its lock).
  *
  * Usage: node check-vocabulary.ts SRC
  */
@@ -22,6 +25,9 @@ for (const [key, file] of Object.entries(manifest.exports as Record<string, stri
 const history = modules['./update/history'] as typeof import('../src/update/history.ts');
 const versions = modules['./update/versions'] as typeof import('../src/update/versions.ts');
 const due = modules['./update/due'] as typeof import('../src/update/due.ts');
+const state = modules['./update/state'] as typeof import('../src/update/state.ts');
+const reference = modules['./profile/reference'] as typeof import('../src/profile/reference.ts');
+const historyLog = modules['./update/history-log'] as typeof import('../src/update/history-log.ts');
 assert.ok(modules['./listing']?.parseListing, './listing exports parseListing');
 
 // The writer's line is what the reader reads back, newline and all.
@@ -65,3 +71,43 @@ assert.equal(due.SCHEDULED_RETRY_SECONDS, 300);
 assert.equal(due.parseStamp('1760000000\n'), 1760000000);
 assert.equal(due.parseStamp('soon'), null);
 assert.equal(due.parseStamp(''), null);
+
+// The state directory's files.
+assert.equal(state.currentLink('/s/agent-distro/abc'), '/s/agent-distro/abc/current');
+assert.equal(state.lastSuccessFile('/s/agent-distro/abc'), '/s/agent-distro/abc/last-success');
+
+// A profile reference: a path (absolute, `~/`, or relative to a cwd), a flake
+// reference (anything holding `/` or `:`), or nothing.
+const where = { home: '/home/u', cwd: '/work/repo' };
+assert.deepEqual(reference.classifyReference('/abs/p', where), { path: '/abs/p' });
+assert.deepEqual(reference.classifyReference('~/p', where), { path: '/home/u/p' });
+assert.deepEqual(reference.classifyReference('./p', where), { path: '/work/repo/./p' });
+assert.deepEqual(reference.classifyReference('..', where), { path: '/work/repo/..' });
+assert.deepEqual(reference.classifyReference('github:juspay/skills?dir=x', where), { flake: 'github:juspay/skills?dir=x' });
+assert.deepEqual(reference.classifyReference('nixpkgs/nixos-unstable', where), { flake: 'nixpkgs/nixos-unstable' });
+assert.equal(reference.classifyReference('juspay', where), null);
+assert.equal(reference.classifyReference('~/p', { cwd: '/w' }), null);
+assert.equal(reference.classifyReference('./p', { home: '/h' }), null);
+// Only an indirect reference consults the global registry.
+assert.deepEqual(reference.prefetchArgs('github:o/r'), ['flake', 'prefetch', '--option', 'flake-registry', '', '--json', 'github:o/r']);
+assert.deepEqual(reference.prefetchArgs('nixpkgs/x'), ['flake', 'prefetch', '--json', 'nixpkgs/x']);
+assert.deepEqual(reference.prefetchedTree({ storePath: '/nix/store/a-src', locked: { rev: 'r1', dir: 'sub' } }),
+  { path: '/nix/store/a-src/sub', rev: 'r1' });
+assert.deepEqual(reference.prefetchedTree({ storePath: '/nix/store/a-src', original: { dir: 'o' } }), { path: '/nix/store/a-src/o' });
+assert.equal(reference.prefetchedTree({ locked: {} }), null);
+assert.equal(reference.prefetchedTree(null), null);
+
+// The history log's writer: appends, and keeps the newest HISTORY_LINES lines.
+{
+  const { mkdtempSync, readFileSync: read, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const log = join(mkdtempSync(join(tmpdir(), 'vocab-')), 'history.log');
+  historyLog.appendHistory(log, history.historyLine('updated: a', at));
+  assert.equal(history.parseHistory(read(log, 'utf8')).length, 1);
+  const pad = 'x'.repeat(historyLog.HISTORY_LINE_BYTES);
+  writeFileSync(log, Array.from({ length: historyLog.HISTORY_LINES }, (_, i) => history.historyLine(`skipped: ${i} ${pad}`, at)).join(''));
+  historyLog.appendHistory(log, history.historyLine('updated: last', at));
+  const events = history.parseHistory(read(log, 'utf8'));
+  assert.equal(events.length, historyLog.HISTORY_LINES);
+  assert.equal(events.at(-1)?.words, 'last');
+}

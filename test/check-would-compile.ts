@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const { update, wouldCompile, appendHistory, truncateLog, HISTORY_LINES, HISTORY_LINE_BYTES, LOCK_WAIT_MS, LOCK_STALE_MS } = await import(join(process.argv[2], 'update/update.ts'));
+const { update, wouldCompile, truncateLog } = await import(join(process.argv[2], 'update/update.ts'));
+const { appendHistory, HISTORY_LINES, HISTORY_LINE_BYTES, LOCK_WAIT_MS, LOCK_STALE_MS } = await import(join(process.argv[2], 'update/history-log.ts'));
 const { NixLog } = await import(join(process.argv[2], 'update/progress.ts'));
 import type { Result } from '../src/update/update.ts';
 const work = mkdtempSync(join(tmpdir(), 'would-compile-'));

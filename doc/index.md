@@ -375,6 +375,11 @@ agent-distro.lib.mkProfile { system; profile; }
 #   profile is built — fetched once, and built in as that store path — which
 #   needs an impure evaluation (`nix build --impure`); a pure one refuses it,
 #   so there pin it as a flake input and pass that path.
+#   `hostSystem` (default `system`) is the system a profile built here is
+#   shipped to and launched on: when it differs, the profile is built for
+#   `system` without packages — plugins, `env` and `settings` mean the same on
+#   any system — and one with `packages` for `hostSystem` is refused, naming
+#   it and both systems, since `system` cannot build them.
 
 agent-distro.lib.stateDirectory { xdgStateHome; flake; profile; }
 # → the string "<xdgStateHome>/agent-distro/<sha256 of {flake, profile}>", with
@@ -386,6 +391,12 @@ agent-distro.lib.stateDirectory { xdgStateHome; flake; profile; }
 #   after the upgrade starts a new state directory and the prune hook removes
 #   the old one. One function, so a consumer and the updater can never
 #   disagree on where `current` lives.
+
+agent-distro.lib.historyFile xdgStateHome
+# → "<xdgStateHome>/agent-distro/history.log": the one history log the Home
+#   Manager module's updater appends to, and any consumer recording its own
+#   installs in it — appended through `./update/history-log` (below), which
+#   keeps it trimmed.
 
 agent-distro.lib.mkShims { pkgs; package; stateDirectory; profile ? null; }
 # → a derivation whose bin/ holds one shim per package.commands, each
@@ -416,7 +427,7 @@ agent-distro.lib.mkUpdater { pkgs; package; flake; attribute ? "default"; stateD
 
 The updater's schedule is one `lib/schedule.nix`, exposed as `agent-distro.lib.schedule`: `updateHoursUTC`, `defaultFrequency`, `updatePeriodSeconds` and `updateOffsetSeconds`. The module, `mkUpdater` and any consumer read the same numbers.
 
-The updater's words are a small TypeScript library a program can import rather than repeat: `src/package.json` names it `@juspay/agent-distro`, with no dependencies and no file I/O. `./update/due` is the due rule (`updateDue`), the scheduled run's `SCHEDULED_ATTEMPTS` and `SCHEDULED_RETRY_SECONDS`, and the `last-success` reader (`parseStamp`); `./update/history` writes and reads a history line (`historyLine`, `parseHistoryLine`, `parseHistory`); `./update/versions` reads a package's `share/agent-distro/versions` (`parseVersions`) and words what changed between two (`changes`); `./listing` is the `--list --json` value and its checker (`parseListing`). kolu, which delivers the package to hosts of its own and appends to the same history log, imports them from its pin of this repository.
+The updater's words are a small TypeScript library a program can import rather than repeat: `src/package.json` names it `@juspay/agent-distro`, with no dependencies. `./update/due` is the due rule (`updateDue`), the scheduled run's `SCHEDULED_ATTEMPTS` and `SCHEDULED_RETRY_SECONDS`, and the `last-success` reader (`parseStamp`); `./update/state` names a state directory's `current` link and `last-success` stamp (`currentLink`, `lastSuccessFile`); `./update/history` writes and reads a history line (`historyLine`, `parseHistoryLine`, `parseHistory`); `./update/history-log` is the log's one writer, `appendHistory`, which keeps its newest `HISTORY_LINES` under a lock every writer shares — the one module here that touches files; `./update/versions` reads a package's `share/agent-distro/versions` (`parseVersions`) and words what changed between two (`changes`); `./profile/reference` says what a profile reference names (`classifyReference`: a path, a flake reference, or nothing), the `nix` arguments that fetch a flake reference (`prefetchArgs`) and where its answer put it (`prefetchedTree`) — the launch's own rules, so a program that builds profiles ahead of a launch runs the fetch itself and reads it the same way; `./listing` is the `--list --json` value and its checker (`parseListing`). kolu, which builds profiles and delivers the package to hosts of its own and appends to the same history log, imports them from its pin of this repository.
 
 ## Profiles
 

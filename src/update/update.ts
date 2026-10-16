@@ -26,18 +26,20 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync,
-  renameSync, rmSync, statSync, writeFileSync, writeSync,
+  closeSync, existsSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync,
+  writeFileSync, writeSync,
 } from 'node:fs';
 import { constants } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { log, type Logger } from '../log.ts';
-import { realpath, writeTemporary } from '../util.ts';
+import { realpath } from '../util.ts';
 import { checkCaches } from './cache.ts';
 import { parseStamp, SCHEDULED_ATTEMPTS, SCHEDULED_RETRY_SECONDS, updateDue } from './due.ts';
+import { appendHistory } from './history-log.ts';
 import { historyLine } from './history.ts';
+import { currentLink, lastSuccessFile } from './state.ts';
 import { changes, parseVersions, VERSIONS_FILE, type Version } from './versions.ts';
 import { ATTRIBUTE, indexEntryUrl, takesContentAddressed } from './ca-index.ts';
 import { NixLog, nixErrorDetail } from './progress.ts';
@@ -63,20 +65,8 @@ type Config = {
   offsetSeconds: number;
 };
 
-/** The history log keeps this many lines, the newest. */
-export const HISTORY_LINES = 1000;
-/**
- * Trimming rewrites the whole file, so it waits until there is this much per
- * line to rewrite: a generous budget for one `<timestamp> <event>`.
- */
-export const HISTORY_LINE_BYTES = 200;
 /** A scheduled run cuts launchd's update.log to this many bytes, the newest. */
 export const UPDATE_LOG_BYTES = 1024 * 1024;
-/** How long an append waits for the history lock before writing without it. */
-export const LOCK_WAIT_MS = 2000;
-/** A history lock this old is from a run that was killed holding it. */
-export const LOCK_STALE_MS = 10 * 60 * 1000;
-const LOCK_RETRY_MS = 50;
 
 /**
  * The index is one request on the update's path; a hanging one must not become
@@ -334,78 +324,6 @@ async function contentAddressed(
 }
 
 /**
- * Take `lock`, waiting up to LOCK_WAIT_MS for whoever holds it, or null when
- * it is still held. A process killed while holding one leaves the file
- * behind, so a lock older than LOCK_STALE_MS is taken away from it.
- */
-function takeLock(lock: string): number | null {
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      return openSync(lock, 'wx');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    const held = statSync(lock, { throwIfNoEntry: false });
-    if (held && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
-      rmSync(lock, { force: true });
-      continue;
-    }
-    if (Date.now() >= deadline) return null;
-    // Nothing to await: the updater's callers are synchronous.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
-  }
-}
-
-/**
- * Cut the history log back to its last HISTORY_LINES lines, reading and
- * rewriting it whole, so only a file that has grown a margin past them is
- * worth it. The caller holds the lock.
- */
-function trimHistory(history: string) {
-  // One descriptor throughout: a size read from the path and a read of the
-  // path are two different files if the log is rotated between them.
-  const fd = openSync(history, 'r');
-  let text: string;
-  try {
-    if (fstatSync(fd).size <= HISTORY_LINES * HISTORY_LINE_BYTES) return;
-    text = readFileSync(fd, 'utf8');
-  } finally {
-    closeSync(fd);
-  }
-  const lines = text.split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  if (lines.length <= HISTORY_LINES) return;
-  const temporary = writeTemporary(dirname(history), '.history-', lines.slice(-HISTORY_LINES).join('\n') + '\n');
-  try {
-    renameSync(temporary, history);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-/**
- * Append `line` to the history log, keeping about its last HISTORY_LINES
- * lines. Both the append and the trim hold `<history>.trimming`, so a trim's
- * read-rewrite can never drop a line another run appended meanwhile. An
- * append that waits the lock out writes anyway, rather than lose the event,
- * and leaves the trimming to the next run.
- */
-export function appendHistory(history: string, line: string) {
-  const lock = history + '.trimming';
-  const held = takeLock(lock);
-  try {
-    appendFileSync(history, line);
-    if (held !== null) trimHistory(history);
-  } finally {
-    if (held !== null) {
-      closeSync(held);
-      rmSync(lock, { force: true });
-    }
-  }
-}
-
-/**
  * Cut `path` to its last `bytes`, from the first whole line in them, in place:
  * launchd holds it open for appending, so it cannot be replaced.
  */
@@ -441,7 +359,7 @@ export function truncateLog(path: string, bytes = UPDATE_LOG_BYTES) {
 export async function update(config: Config, report: Report = plain, nixLog?: NixLog): Promise<number> {
   const { state, history, nix } = config;
   mkdirSync(state, { recursive: true });
-  const current = join(state, 'current');
+  const current = currentLink(state);
   // Empty before the first run.
   const old = lstatSync(current, { throwIfNoEntry: false }) ? realpath(current) : '';
   const record = (event: string) => appendHistory(history, historyLine(event));
@@ -531,8 +449,8 @@ export async function update(config: Config, report: Report = plain, nixLog?: Ni
     return status;
   }
   const next = realpath(current);
-  writeFileSync(join(state, 'last-success.tmp'), `${Math.floor(Date.now() / 1000)}\n`);
-  renameSync(join(state, 'last-success.tmp'), join(state, 'last-success'));
+  writeFileSync(`${lastSuccessFile(state)}.tmp`, `${Math.floor(Date.now() / 1000)}\n`);
+  renameSync(`${lastSuccessFile(state)}.tmp`, lastSuccessFile(state));
   if (next === old) {
     report.summary(`unchanged (${next})`);
     report.result({ result: 'unchanged', package: next });
@@ -553,7 +471,7 @@ async function scheduled(config: Config): Promise<number> {
   }
   let stamp: number | null = null;
   try {
-    stamp = parseStamp(readFileSync(join(config.state, 'last-success'), 'utf8'));
+    stamp = parseStamp(readFileSync(lastSuccessFile(config.state), 'utf8'));
   } catch {
     stamp = null;
   }

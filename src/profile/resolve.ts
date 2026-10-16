@@ -55,6 +55,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, utimesSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
+import { classifyReference, prefetchArgs, prefetchedTree } from './reference.ts';
 import { cacheRootIfAny, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
 import { log, slow, SITE } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
@@ -273,13 +274,9 @@ type Kind = { path: string } | { flake: string };
 const canonical = (path: string): string => (existsSync(path) ? realpath(path) : path);
 
 function classify(reference: string, env: NodeJS.ProcessEnv): Kind | null {
-  if (reference.startsWith('/')) return { path: canonical(reference) };
-  if (reference === '.' || reference === '..' || reference.startsWith('./') || reference.startsWith('../')) {
-    return { path: canonical(resolve(reference)) };
-  }
-  if (reference.startsWith('~/') && env.HOME) return { path: canonical(join(env.HOME, reference.slice(2))) };
-  if (/[/:]/.test(reference)) return { flake: reference };
-  return null;
+  const kind = classifyReference(reference, { home: env.HOME || undefined, cwd: process.cwd() });
+  if (kind === null || 'flake' in kind) return kind;
+  return { path: canonical(resolve(kind.path)) };
 }
 
 /** What a selection names, or null when it names nothing. */
@@ -351,22 +348,16 @@ function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironme
  * looked up in it, so the others skip it.
  */
 export function prefetch(reference: string, what: string): string {
-  const registry = /^[a-z][a-z0-9+.-]*:/i.test(reference) ? ['--option', 'flake-registry', ''] : [];
-  const text = nix(['flake', 'prefetch', ...registry, '--json', reference], `${what}: cannot fetch ${reference}`);
-  let storePath: unknown;
-  let dir: unknown;
+  const text = nix(prefetchArgs(reference), `${what}: cannot fetch ${reference}`);
+  let tree: { path: string } | null;
   try {
-    const value = JSON.parse(text);
-    storePath = value.storePath;
-    dir = value.locked?.dir ?? value.original?.dir;
+    tree = prefetchedTree(JSON.parse(text));
   } catch (error) {
     log.profile.debug(`nix flake prefetch printed unreadable JSON: ${(error as Error).message}`);
-    storePath = undefined;
+    tree = null;
   }
-  if (!isString(storePath) || !isAbsolute(storePath)) {
-    throw new LaunchError(`${what}: nix flake prefetch gave no store path for ${reference}`);
-  }
-  return isString(dir) && dir ? join(storePath, dir) : storePath;
+  if (tree === null) throw new LaunchError(`${what}: nix flake prefetch gave no store path for ${reference}`);
+  return tree.path;
 }
 
 /** The store path `reference` last fetched to, or '' when there is none. */

@@ -5,8 +5,11 @@
   "sideEffects": false,
   "exports": {
     "./listing": "./listing.ts",
+    "./profile/reference": "./profile/reference.ts",
     "./update/due": "./update/due.ts",
     "./update/history": "./update/history.ts",
+    "./update/history-log": "./update/history-log.ts",
+    "./update/state": "./update/state.ts",
     "./update/versions": "./update/versions.ts"
   }
 }
