@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const [src] = process.argv.slice(2);
+const [src, schemaPath] = process.argv.slice(2);
 const profile = await import(join(src, 'profile/resolve.ts'));
 const listing = await import(join(src, 'listing.ts'));
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
@@ -148,6 +148,13 @@ function manifestProfile(directory: string, options: {
   return file;
 }
 
+/**
+ * A `plugin.json` a launch reads as a profile: a supported `$schema` and a
+ * name. Discovery skips one that is not (an unrelated manifest in a
+ * repository), so a test that wants discovery to find one writes this.
+ */
+const validManifest = (name = 'manifest') => JSON.stringify({ $schema: SCHEMA, name });
+
 /** What the fake nix answers a plugin.json profile's `packages` evaluation with, by attribute. */
 function packageAttributes(table: Record<string, unknown>) {
   writeFileSync(join(bin, 'packages.json'), JSON.stringify(table));
@@ -217,14 +224,22 @@ test('discovery goes from the working directory up to the git root, and no furth
   // A directory with a plugin.json and no agent-distro.nix is a profile too.
   const manifestRepository = temporary();
   mkdirSync(join(manifestRepository, '.git'));
-  writeFileSync(join(manifestRepository, 'plugin.json'), '{}');
+  writeFileSync(join(manifestRepository, 'plugin.json'), validManifest());
   assert.equal(profile.discover(manifestRepository), join(manifestRepository, 'plugin.json'));
   // The nearest wins across the two: a plugin.json below an agent-distro.nix.
-  writeFileSync(join(repo, 'a/b/plugin.json'), '{}');
+  writeFileSync(join(repo, 'a/b/plugin.json'), validManifest());
   assert.equal(profile.discover(join(repo, 'a/b')), join(repo, 'a/b/plugin.json'));
   // And agent-distro.nix wins where both are in one directory.
-  writeFileSync(join(repo, 'a/plugin.json'), '{}');
+  writeFileSync(join(repo, 'a/plugin.json'), validManifest());
   assert.equal(profile.discover(join(repo, 'a')), join(repo, 'a/agent-distro.nix'));
+  // A `plugin.json` that is not an Agent Plugin — an unrelated manifest — is
+  // not a profile: discovery skips it and keeps walking up.
+  const foreign = temporary();
+  mkdirSync(join(foreign, '.git'));
+  writeFileSync(join(foreign, 'plugin.json'), JSON.stringify({ name: 'grafana', schemaVersion: 39 }));
+  assert.equal(profile.discover(foreign), null);
+  writeFileSync(join(foreign, 'agent-distro.nix'), '{ }');
+  assert.equal(profile.discover(join(foreign, 'nested/deep')), join(foreign, 'agent-distro.nix'));
 });
 
 test('the stack: a positional profile alone, else every AI_PROFILE entry and the repository', () => {
@@ -502,10 +517,12 @@ test('a plugin.json profile\'s packages are nixpkgs attribute paths, evaluated a
   manifestProfile(directory, { name: 'packaged', extension: { packages: ['mcp-nixos'] } });
   const evaluations = calls('eval');
   assert.deepEqual(resolve({ source: 'positional', origin: directory }).paths, [mcp.bin]);
-  // Once to learn it has packages, once with nixpkgs, against agent-distro's own.
-  assert.equal(calls('eval') - evaluations, 2);
+  // One evaluation with nixpkgs: the extension names the paths, so there is
+  // nothing to learn before fetching it.
+  assert.equal(calls('eval') - evaluations, 1);
   assert.deepEqual(lastEvaluation().given.attributes, ['mcp-nixos']);
-  // An attribute nixpkgs does not have is an error naming it.
+  // An attribute nixpkgs does not have is an error naming it, in the
+  // launcher's words. (test-mk-profile.nix covers the real expression.)
   const unknown = temporary();
   manifestProfile(unknown, { name: 'unknown', extension: { packages: ['nope'] } });
   assert.throws(() => resolve({ source: 'positional', origin: unknown }),
@@ -531,7 +548,9 @@ test('the extension takes four members, and an unknown one is named', () => {
 test('where a directory holds both, agent-distro.nix wins and the plugin.json is not read', () => {
   const directory = temporary();
   profileFile(directory, { name: 'from-nix', description: 'Nix wins', env: { FROM_NIX: '1' } });
-  manifestProfile(directory, { name: 'from-manifest', extension: { env: { FROM_MANIFEST: '1' } } });
+  // An *invalid* manifest — no `$schema` — beside it: were it read at all, the
+  // launch would fail, so a resolved `from-nix` proves it was not.
+  writeFileSync(join(directory, 'plugin.json'), JSON.stringify({ name: 'from-manifest', extensions: { [profile.EXTENSION]: { env: { FROM_MANIFEST: '1' } } } }));
   assert.deepEqual(resolve({ source: 'positional', origin: directory }), {
     name: 'from-nix', description: 'Nix wins', source: 'positional', origin: directory,
     plugins: [], env: { FROM_NIX: '1' }, settings: {}, paths: [],
@@ -541,7 +560,7 @@ test('where a directory holds both, agent-distro.nix wins and the plugin.json is
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
   profileFile(repo, { name: 'repo-nix' });
-  manifestProfile(repo, { name: 'repo-manifest' });
+  writeFileSync(join(repo, 'plugin.json'), JSON.stringify({ name: 'repo-manifest' }));
   const infoFile = join(temporary(), 'info.json');
   writeFileSync(infoFile, JSON.stringify(info));
   const listed = spawnSync(process.execPath,
@@ -553,6 +572,8 @@ test('where a directory holds both, agent-distro.nix wins and the plugin.json is
   assert.equal(JSON.parse(listed.stdout).profile.name, 'repo-nix');
   assert.match(listed.stderr,
     /agent-distro\.nix and plugin\.json are both here; agent-distro\.nix wins and the plugin\.json extension is not read/);
+  // `discover` itself returns the Nix file, which is what makes the above so.
+  assert.equal(profile.discover(repo), join(repo, 'agent-distro.nix'));
 });
 
 test('a directory with neither file names both', () => {
@@ -571,19 +592,30 @@ test('a plugin.json profile is cached by content, as the Nix one is', () => {
   const evaluations = () => calls('eval');
   const start = evaluations();
   assert.deepEqual(profile.resolveProfile(info, [selection], env).paths, [hello.bin]);
-  assert.equal(evaluations() - start, 2);
+  assert.equal(evaluations() - start, 1);
   // A second launch reads the cache: nothing is evaluated.
   assert.equal(profile.resolveProfile(info, [selection], env).name, 'cached-manifest');
-  assert.equal(evaluations() - start, 2);
+  assert.equal(evaluations() - start, 1);
   // New contents are a new entry, under a new key.
   writeFileSync(file, JSON.stringify({
     $schema: SCHEMA, name: 'cached-manifest', description: 'edited',
     extensions: { [profile.EXTENSION]: { packages: ['hello'] } },
   }));
   assert.equal(profile.resolveProfile(info, [selection], env).description, 'edited');
-  assert.equal(evaluations() - start, 4);
+  assert.equal(evaluations() - start, 2);
   assert.equal(readdirSync(join(cache, 'agent-distro/profiles')).length, 2);
 });
+
+// The member list lives in three places — resolve.ts, lib/mk-profile.nix and
+// the published schema — so the schema is checked against the one the resolver
+// validates. test/flake.nix passes the schema's path.
+if (schemaPath !== undefined) {
+  test('the published schema names exactly the extension members the resolver takes', () => {
+    const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
+    assert.deepEqual(Object.keys(schema.properties).sort(), [...profile.EXTENSION_MEMBERS].sort());
+    assert.equal(schema.additionalProperties, false, 'the schema admits exactly those members');
+  });
+}
 
 test('flake references are fetched: the profile and its plugin references, every launch', () => {
   const tree = temporary();

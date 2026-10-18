@@ -52,6 +52,16 @@ let
     system = pkgs.stdenv.hostPlatform.system;
     profile = ./fixtures/plugin-profile;
   };
+  # The same profile named by its manifest file rather than its directory.
+  asManifestFile = mkProfile {
+    system = pkgs.stdenv.hostPlatform.system;
+    profile = ./fixtures/plugin-profile/plugin.json;
+  };
+  # An extension member the resolver does not read is refused here too.
+  badMember = builtins.tryEval (mkProfile {
+    system = pkgs.stdenv.hostPlatform.system;
+    profile = ./fixtures/plugin-profile-bad;
+  }).drvPath;
   pluginRoot = ./fixtures/plugin-profile;
   reader = builtins.baseNameOf (toString runtime.tree);
   plugin = ./fixtures/profile;
@@ -65,8 +75,11 @@ let
 in
 assert !referenced.success;
 assert !foreignPackages.success;
+assert !badMember.success;
 assert forForeign.drvPath == pluginsOnly.drvPath;
-pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq ]; } ''
+# A manifest named by its file, and one by its directory, are the same profile.
+assert pluginProfile.drvPath == asManifestFile.drvPath;
+pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq pkgs.nix ]; } ''
   built=${build}
   jq -e --arg reader ${lib.escapeShellArg reader} '
     .name == "mk-profile-check" and .description == "Built by mkProfile"
@@ -91,10 +104,10 @@ pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq ]; } ''
   # A plugin.json profile: the manifest names it, its own directory is its
   # first plugin, the extension adds another and the rest.
   plugin=${pluginProfile}
-  jq -e '
+  jq -e --arg reader ${lib.escapeShellArg reader} '
     .name == "plugin-profile" and .description == "A profile that is only an Agent Plugin"
-    and .env.PLUGIN_PROFILE == "yes" and .settings.omp.modelRoles.default == "litellm/small"' \
-    "$plugin/share/agent-distro/profile.json"
+    and .env.PLUGIN_PROFILE == "yes" and .settings.omp.modelRoles.default == "litellm/small"
+    and .reader == $reader' "$plugin/share/agent-distro/profile.json"
   test "$(readlink -f "$plugin/share/agent-distro/plugins/0/root")" = "$(readlink -f ${pluginRoot})"
   test "$(readlink -f "$plugin/share/agent-distro/plugins/1/root")" = "$(readlink -f ${pluginRoot}/extra)"
   jq -e '.manifest.name == "plugin-profile" and .skills.hello == ["SKILL.md"]' \
@@ -102,7 +115,22 @@ pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq ]; } ''
   jq -e '.manifest.name == "plugin-profile-extra" and .skills.extra == ["SKILL.md"]' \
     "$plugin/share/agent-distro/plugins/1/description.json"
   # `bin/` is the extension's `packages`, by nixpkgs attribute path.
-  test -x "$plugin/bin/hello"
+  test "$(ls "$plugin/bin")" = hello
+  # The manifest file names the same profile, so the same profile.json.
+  test -f ${asManifestFile}/share/agent-distro/profile.json
+  jq -e '.name == "plugin-profile"' "${asManifestFile}/share/agent-distro/profile.json"
+  # An attribute nixpkgs does not have: the launcher's own expression
+  # (src/profile/evaluate-packages.nix) is what says so, in its own words.
+  export NIX_STATE_DIR="$TMPDIR/nix-state"
+  if nix-instantiate --eval --strict --expr 'import ${agent-distro}/src/profile/evaluate-packages.nix {
+      attributes = [ "nope" ];
+      nixpkgs = ${pkgs.path};
+      system = "${pkgs.stdenv.hostPlatform.system}";
+    }' 2>err; then
+    echo "evaluate-packages.nix: expected an error for an unknown attribute" >&2
+    exit 1
+  fi
+  grep -F 'nixpkgs has no attribute `nope`' err >/dev/null || { cat err >&2; exit 1; }
   # `bin/` holds the packages' commands, and their other outputs are not here:
   # the tool's own `share/` would be, if the profile linked a whole `lib.getBin`
   # output rather than its `bin/`.

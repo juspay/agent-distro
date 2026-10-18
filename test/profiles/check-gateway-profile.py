@@ -68,5 +68,7 @@ for plugin, names in expected.items():
     assert claude_support.inventory(plugin)[0] == set(names), (plugin, names)
 listing = claude_support.run('mcp', 'list')
 assert re.search(r'plugin:kolu:kolu: \S+ .*Connected', listing), listing
-assert 'plugin:juspay-skills:nixos:' in listing, listing
+# The plugin that carries the bare `nixos` server is the profile's own root:
+# `juspay-skills` in the Nix form, `gateway` in the manifest one.
+assert any(f'plugin:{name}:nixos:' in listing for name in expected), listing
 print('✅ the gateway profile at launch reaches OMP, Codex and Claude Code')

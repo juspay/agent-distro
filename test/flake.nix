@@ -218,7 +218,7 @@
           # fake nix.
           profile-resolve = pkgs.runCommand "profile-resolve-check" { } ''
             export HOME="$TMPDIR"
-            ${runtime.node} ${./check-profile.ts} ${runtime.tree}/src
+            ${runtime.node} ${./check-profile.ts} ${runtime.tree}/src ${agent-distro}/doc/agent-distro.schema.json
             touch "$out"
           '';
           # `check-profile` without a VM: one line per package, every package

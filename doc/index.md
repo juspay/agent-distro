@@ -22,14 +22,14 @@ To keep the agents installed and updated, see [Install and keep updated](#instal
 
 The chooser is master–detail: harnesses are the list on the left, and the highlighted harness fills the panel on the right.[^chooser-rows] The [profiles](#profiles) in effect for the launch are in the header — named from the bottom of the stack up, `juspay + repo` — and the row under it says what the top one is and where every one of them came from. Nothing in the box is ever cut.
 
-Here the terminal is in a repository whose `agent-distro.nix` is the Juspay profile, and `pi` is remembered from last time.
+Here the terminal is in a repository whose profile is Juspay's `plugin.json`, and `pi` is remembered from last time.
 
 [^chooser-rows]: The panel shows the highlighted harness's tagline and its auth status. Versions reflect the packages pinned at build time, shown without revision suffixes.
 
 ```
-╭─ agent-distro · juspay ────────────────────────────────────── 5 harnesses ─╮
-│ juspay · Juspay skills + Kolu, via Juspay's LiteLLM gateway · from         │
-│ /home/me/src/skills/agent-distro.nix                                       │
+╭─ agent-distro · juspay-skills ─────────────────────────────── 5 harnesses ─╮
+│ juspay-skills · Juspay skills + Kolu, via Juspay's LiteLLM gateway · from  │
+│ /home/me/src/skills/plugin.json                                            │
 ├──────────────────────────────┬─────────────────────────────────────────────┤
 │     ✓ Oh My Pi       18.7.0  │ Pi 1.0.4                                    │
 │     ✓ Codex         0.160.1  │ OMP's upstream · plugins per home           │
@@ -149,7 +149,7 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
     "source": "repository",
     "origin": "/home/me/src/ekala-ai-skills/agent-distro.nix",
     "over": {
-      "name": "juspay",
+      "name": "juspay-skills",
       "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
       "source": "variable",
       "origin": "github:juspay/skills"
@@ -323,7 +323,7 @@ By default a launch prints a line only when something chose a profile for you, a
 
 ```text
 agent-distro profile: using repo (from /home/me/repo/agent-distro.nix) · https://agent-distro.nixos.asia
-agent-distro profile: using juspay + repo (from /home/me/repo/agent-distro.nix over AI_PROFILE=github:juspay/skills) · https://agent-distro.nixos.asia
+agent-distro profile: using juspay-skills + repo (from /home/me/repo/agent-distro.nix over AI_PROFILE=github:juspay/skills) · https://agent-distro.nixos.asia
 ```
 
 and when something will take a while, such as evaluating a profile for the first time or fetching its packages. A launch with no profile, or with one you named yourself, prints nothing.
@@ -449,7 +449,7 @@ The `plugin.json` form, Juspay's profile as its repository carries it:
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "juspay-skills",
-  "description": "Nix, writing, and tooling skills for coding agents",
+  "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
   "extensions": {
     "asia.nixos.agent-distro": {
       "plugins": ["github:juspay/kolu?dir=agent-plugin"],
@@ -469,8 +469,15 @@ The `plugin.json` form, Juspay's profile as its repository carries it:
 
 The extension's own JSON Schema is published at
 [agent-distro.schema.json](https://agent-distro.nixos.asia/agent-distro.schema.json),
-for editors to complete it against; it mirrors the launch's validator. The same
-fields, in the two forms:
+and mirrors the launch's validator. `plugin.json`'s `$schema` stays the Agent
+Plugins one, so point an editor at it from the editor's own settings — for VS
+Code, in `.vscode/settings.json`:
+
+```json
+{ "json.schemas": [{ "fileMatch": ["**/plugin.json"], "url": "https://agent-distro.nixos.asia/agent-distro.schema.json" }] }
+```
+
+The same fields, in the two forms:
 
 | Field | `plugin.json` | `agent-distro.nix` | Meaning |
 | --- | --- | --- | --- |
@@ -610,7 +617,7 @@ AI_PROFILE= agent-distro omp                 # nothing but the repository's own 
 
 | Profile | What it is |
 | --- | --- |
-| `github:juspay/skills` | Juspay skills + Kolu, via Juspay's LiteLLM gateway |
+| `github:juspay/skills` (`juspay-skills`) | Juspay skills + Kolu, via Juspay's LiteLLM gateway |
 | `/nix/store/…-agent-distro-profile-…` | Any profile built with `agent-distro.lib.mkProfile` (`profiles = [ inputs.skills ]`): pinned, offline, and unevaluated at launch |
 
 <details>
@@ -628,7 +635,7 @@ Its `plugin.json` is the whole of it:[^litellm-key]
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "juspay-skills",
-  "description": "Nix, writing, and tooling skills for coding agents",
+  "description": "Juspay skills + Kolu, via Juspay's LiteLLM gateway",
   "extensions": {
     "asia.nixos.agent-distro": {
       "plugins": ["github:juspay/kolu?dir=agent-plugin"],

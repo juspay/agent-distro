@@ -10,7 +10,7 @@ Extra user plugins compose with them; no persistent installation is needed.
 A plugin on `AGENT_DISTRO_PLUGINS` is written the same way into the cache and
 added as one more `--plugin-dir`; one named like a plugin of a profile in
 effect takes its place. Like the profile's, it lasts only for the session. A
-profile read at launch (an `agent-distro.nix`) is written the same way, its
+profile read at launch (a `plugin.json` or an `agent-distro.nix`) is written the same way, its
 plugins ahead of the variable's.
 
 The npins branch pin tracks `sadjow/claude-code-nix`. Its standalone binary

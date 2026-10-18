@@ -115,6 +115,26 @@ test('a directory names the agent-distro.nix in it', () => {
   assert.equal(check([work], { profile: profile('hello-2.12') }).out, 'hello-2.12: cached\n');
 });
 
+test('a directory with both files: agent-distro.nix is the one checked', () => {
+  const directory = join(work, 'both');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'agent-distro.nix'), '{ }\n');
+  writeFileSync(join(directory, 'plugin.json'), JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', name: 'loses',
+    extensions: { 'asia.nixos.agent-distro': { packages: ['ignored-1.0'] } },
+  }));
+  assert.equal(check([directory], { profile: profile('hello-2.12') }).out, 'hello-2.12: cached\n');
+});
+
+test('a directory with neither file names both', () => {
+  const directory = join(work, 'neither');
+  mkdirSync(directory, { recursive: true });
+  const result = check([directory]);
+  assert.equal(result.status, 2);
+  assert.match(result.err, /no agent-distro\.nix or plugin\.json at /);
+  assert.match(result.err, /usage: check-profile/);
+});
+
 test('a plugin.json profile is read as a directory, its packages by attribute path', () => {
   const directory = join(work, 'plugin');
   mkdirSync(directory, { recursive: true });

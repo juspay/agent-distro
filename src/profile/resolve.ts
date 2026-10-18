@@ -60,7 +60,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
 import { classifyReference, prefetchArgs, prefetchedTree } from './reference.ts';
 import { cacheRootIfAny, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
-import { Fatal, readManifest, type Manifest } from '../plugin/read.ts';
+import { Fatal, PLUGIN_SCHEMAS, readManifest, type Manifest } from '../plugin/read.ts';
 import { log, slow, SITE } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists, realpath } from '../util.ts';
@@ -75,7 +75,7 @@ export const MANIFEST = 'plugin.json';
  */
 export const EXTENSION = 'asia.nixos.agent-distro';
 /** The only members `EXTENSION` takes; anything else is an error naming it. */
-const EXTENSION_MEMBERS: readonly string[] = ['plugins', 'packages', 'env', 'settings'];
+export const EXTENSION_MEMBERS: readonly string[] = ['plugins', 'packages', 'env', 'settings'];
 /** The variable a profile reference falls back to: a whitespace-separated stack. */
 export const VARIABLE = 'AI_PROFILE';
 
@@ -221,17 +221,46 @@ export function isResolved(value: unknown): value is Resolved {
     && (value.descriptions === undefined || isDescriptions(value.descriptions));
 }
 
+/** One package a profile names, as the value of its `packages` holds it. */
+const isPackage = (value: unknown): value is Package =>
+  isObject(value) && isString(value.name) && isString(value.drvPath) && isString(value.out) && isString(value.bin);
+
 function isEvaluated(value: unknown): value is Evaluated {
   return isObject(value) && isName(value.name) && isString(value.description) && isStrings(value.plugins)
     && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.deprecated)
-    && Array.isArray(value.packages)
-    && value.packages.every((p) => isObject(p) && isString(p.name) && isString(p.drvPath) && isString(p.out) && isString(p.bin));
+    && Array.isArray(value.packages) && value.packages.every(isPackage);
+}
+
+/**
+ * Whether `file` is a `plugin.json` a launch may read as a profile on
+ * discovery: valid JSON whose `$schema` is a supported Agent Plugins version.
+ * An unrelated `plugin.json` in a repository — Grafana's, say — must not make
+ * every launch in it fail, so discovery only takes one that says what it is.
+ */
+function isManifest(file: string): boolean {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      log.profile.debug(`${file}: not valid JSON; not read as a profile`);
+      return false;
+    }
+    throw error;
+  }
+  const schema = isObject(value) ? value.$schema : undefined;
+  if (!isString(schema) || !Object.hasOwn(PLUGIN_SCHEMAS, schema)) {
+    log.profile.debug(`${file}: \`$schema\` ${JSON.stringify(schema ?? null)} is not an Agent Plugins version; not read as a profile`);
+    return false;
+  }
+  return true;
 }
 
 /**
  * The profile file nearest `cwd`, at or below the git root that holds it: an
- * `agent-distro.nix` or, where a directory has none, its `plugin.json`; null
- * outside a git repository or when there is neither.
+ * `agent-distro.nix` or, where a directory has none, a `plugin.json` that is
+ * an Agent Plugin manifest; null outside a git repository or when there is
+ * neither.
  */
 export function discover(cwd: string): string | null {
   let found: string | null = null;
@@ -244,7 +273,9 @@ export function discover(cwd: string): string | null {
           log.profile.debug(`${nix}: ${FILE} and ${MANIFEST} are both here; ${FILE} wins and the ${MANIFEST} extension is not read`);
         }
         found = nix;
-      } else if (isFile(manifest)) {
+      } else if (isFile(manifest) && isManifest(manifest)) {
+        // A `plugin.json` that is not an Agent Plugin — Grafana's, say — is
+        // not this repository's profile: keep walking, and say so at debug.
         found = manifest;
       }
     }
@@ -462,33 +493,26 @@ export function evaluate(file: string, info: Info, cache: string | null, what: s
   return value;
 }
 
-const isPackage = (value: unknown): value is Package =>
-  isObject(value) && isString(value.name) && isString(value.drvPath) && isString(value.out) && isString(value.bin);
-
 /**
  * Evaluate a plugin.json profile's `packages`: nixpkgs attribute paths, against
  * the nixpkgs the launcher holds, for `system`, restricted and never compiling,
  * exactly as an `agent-distro.nix`'s are. An attribute nixpkgs does not have is
- * an error naming it. Without nixpkgs, a non-empty list evaluates to null: only
- * then is nixpkgs fetched and the list evaluated again.
+ * an error naming it. The extension names the attribute paths themselves, so
+ * nixpkgs is fetched up front and the list is evaluated once.
  */
 function evaluatePackages(attributes: string[], info: Info, cache: string | null, what: string): Package[] {
-  const run = (nixpkgs: string | null): unknown => JSON.parse(nix(['eval', '--json', '--impure',
+  const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
+  const nixpkgs = isAbsolute(info.nixpkgs) ? info.nixpkgs
+    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
+  const value: unknown = JSON.parse(nix(['eval', '--json', '--impure',
     '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
-    ...[dirname(EVALUATE_PACKAGES), ...(nixpkgs === null ? [] : [nixpkgs])].flatMap((path) => ['-I', path]),
+    ...[dirname(EVALUATE_PACKAGES), nixpkgs].flatMap((path) => ['-I', path]),
     '--expr', `import ${JSON.stringify(EVALUATE_PACKAGES)} (${nixJSON({ attributes, nixpkgs, system: info.system })})`],
   `${what}: cannot evaluate its ${EXTENSION} \`packages\``, nixEnvironment(true)));
-  const checked = (value: unknown): Package[] => {
-    if (!Array.isArray(value) || !value.every(isPackage)) {
-      throw new LaunchError(`${what}: its ${EXTENSION} \`packages\` did not evaluate`);
-    }
-    return value;
-  };
-  const value = run(null);
-  if (value !== null) return checked(value);
-  const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
-  return checked(run(isAbsolute(info.nixpkgs) ? info.nixpkgs
-    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache)));
+  if (!Array.isArray(value) || !value.every(isPackage)) {
+    throw new LaunchError(`${what}: its ${EXTENSION} \`packages\` did not evaluate`);
+  }
+  return value;
 }
 
 /** Fail on any `EXTENSION` member that is not one of `EXTENSION_MEMBERS`. */
@@ -598,6 +622,9 @@ function evaluated(file: string, info: Info, cache: string | null, what: string,
 
 /** The cached value of a plugin.json profile: the same cache, its own evaluators in the key. */
 function pluginEvaluated(file: string, info: Info, cache: string | null, what: string, again: boolean): Evaluated {
+  // As `evaluated` above: `runtime: import.meta.dirname` would re-read every
+  // plugin.json in every repository on every commit that touches src/, for a
+  // value only the manifest, the reader and evaluate-packages.nix shape.
   const key = sha256(JSON.stringify({
     file, content: sha256(readFileSync(file)),
     evaluator: sha256(readFileSync(READER) + readFileSync(EVALUATE_PACKAGES)),

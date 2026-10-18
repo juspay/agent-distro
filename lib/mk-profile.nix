@@ -64,19 +64,20 @@ let
     if builtins.pathExists (directory + "/agent-distro.nix") then directory + "/agent-distro.nix"
     else if builtins.pathExists (directory + "/plugin.json") then directory + "/plugin.json"
     else null;
-  # The manifest of a plugin.json profile, read with the same reader a launch
-  # uses — `runtime.readPlugin` is src/plugin/read.ts — so `plugin.json` has one
-  # parser. Its `extensions` is where a profile's plugins, packages, env and
-  # settings live when there is no Nix file.
+  # The manifest of a plugin.json profile, read here at evaluation rather than
+  # by `runtime.readPlugin`: that reader is a derivation, and reading one needs
+  # import-from-derivation, which `allow-import-from-derivation = false`
+  # refuses — including for a Home Manager `profiles` entry. `readPlugin` still
+  # validates the same manifest at build time (`described` below).
   manifest =
     if file == null || builtins.baseNameOf (toString file) != "plugin.json" then null
-    else builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile (runtime.readPlugin directory)));
+    else builtins.fromJSON (builtins.readFile (directory + "/plugin.json"));
   # The attribute set a plugin.json profile stands for: the manifest's name and
   # description, its directory as the first plugin (and never listed), and the
   # extension's members, with the shapes the resolver validates at launch.
   # `packages` is the Nix form's function, over the attribute paths the
   # extension names.
-  extension = if manifest == null then { } else manifest.manifest.extensions."asia.nixos.agent-distro" or { };
+  extension = if manifest == null then { } else manifest.extensions."asia.nixos.agent-distro" or { };
   # The members the resolver reads; anything else is an error here too.
   members = [ "plugins" "packages" "env" "settings" ];
   unknown = builtins.filter (key: !(builtins.elem key members)) (builtins.attrNames extension);
@@ -85,13 +86,16 @@ let
     else if unknown != [ ] then
       throw "mkProfile: a plugin.json profile's extensions.\"asia.nixos.agent-distro\" has no member `${builtins.head unknown}`"
     else {
-      name = manifest.manifest.name;
-      description = manifest.manifest.description or "";
+      name = manifest.name;
+      description = manifest.description or "";
       plugins = [ directory ] ++ map
         (entry: if lib.hasPrefix "./" entry then "${directory}/${lib.removePrefix "./" entry}" else entry)
         (extension.plugins or [ ]);
       packages = pkgs: map
-        (attribute: lib.getAttrFromPath (lib.splitString "." attribute) pkgs)
+        (attribute:
+          let path = lib.splitString "." attribute; in
+          if lib.hasAttrByPath path pkgs then lib.getAttrFromPath path pkgs
+          else throw "mkProfile: profile packages: nixpkgs has no attribute `${attribute}`")
         (extension.packages or [ ]);
       env = extension.env or { };
       settings = extension.settings or { };

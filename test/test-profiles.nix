@@ -7,9 +7,9 @@
 # agent-distro.nix composed over every AI_PROFILE entry, the environment and
 # settings they carry, an evaluation that sees neither the user's environment
 # nor the network, and the refusal of a package the binary cache lacks. Then
-# the gateway profile of test/flake.nix, written out as a plugin.json profile a
-# repository would carry — the manifest naming it, the extension adding the
-# rest — runs the real OMP, Codex and Claude Code.
+# the gateway profile of test/flake.nix, carried twice — as an
+# `agent-distro.nix` and as a `plugin.json` whose extension holds the same
+# fields — runs the real OMP, Codex and Claude Code.
 { pkgs, agent-distro, nixpkgs, juspay-skills, koluPlugin }:
 let
   inherit (pkgs) lib;
@@ -65,11 +65,22 @@ let
       agents.title.model = "litellm/open-fast";
     };
   };
-  # The gateway profile of test/flake.nix, as a plugin.json profile a repository
-  # would carry: the manifest names it, the directory itself is its first
-  # plugin, and the extension adds Kolu, mcp-nixos, the environment and the
-  # settings. The fixture copy is the Juspay skills, so their skills are the
-  # profile's own plugin's.
+  # The gateway profile of test/flake.nix, as a repository carries it: the same
+  # `env` and `settings`, against the same fixture, its plugin references local
+  # paths since the VM has no network.
+  profileFile = ''
+    {
+      name = "gateway";
+      description = "A team's skills, with the LiteLLM gateway it runs them on";
+      plugins = [ ./. "${koluPlugin}" ];
+      packages = pkgs: [ pkgs.mcp-nixos ];
+      env = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileEnv)};
+      settings = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileSettings)};
+    }
+  '';
+  # The same profile as a plugin.json: the manifest names it, the directory
+  # itself is its first plugin, and the extension adds Kolu, mcp-nixos, the
+  # environment and the settings.
   profileManifest = {
     "$schema" = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
     name = "gateway";
@@ -85,7 +96,14 @@ let
   skillsOf = root: builtins.filter (name: builtins.pathExists "${root}/skills/${name}/SKILL.md")
     (builtins.attrNames (builtins.readDir "${root}/skills"));
   manifestName = root: (builtins.fromJSON (builtins.readFile "${root}/plugin.json")).name;
-  expected = {
+  # The Nix and the manifest form read the same fixture, so its skills are the
+  # first plugin's in both — under the copied manifest's name (`juspay-skills`)
+  # in the former, and the profile manifest's (`gateway`) in the latter.
+  expectedNix = {
+    ${manifestName juspay-skills} = skillsOf juspay-skills;
+    ${manifestName koluPlugin} = skillsOf koluPlugin;
+  };
+  expectedManifest = {
     "gateway" = skillsOf juspay-skills;
     ${manifestName koluPlugin} = skillsOf koluPlugin;
   };
@@ -257,15 +275,30 @@ in
             assert "agent-distro never compiles" in output, output
             assert "STUB-STARTED" not in output, output
 
-    with subtest("the gateway profile, as a plugin.json read at launch, reaches OMP, Codex and Claude Code"):
+    with subtest("the gateway profile, as an agent-distro.nix, reaches OMP, Codex and Claude Code"):
         user("cp -r ${juspay-skills} ~/gateway && chmod -R u+w ~/gateway")
-        # The manifest in place of the file: the directory is the profile and
-        # its first plugin, and the extension carries the rest.
-        write("~/gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})
+        # The copied manifest is beside it: agent-distro.nix wins, and the
+        # manifest is not read as the profile.
+        write("~/gateway/agent-distro.nix", ${builtins.toJSON profileFile})
         gateway = "AI_PROFILE=/home/testuser/gateway"
         assert in_effect("~", gateway)["name"] == "gateway"
         user(f"{gateway} python " + shlex.quote("${./profiles/check-gateway-profile.py}") + " " + " ".join(shlex.quote(a) for a in [
-            ${builtins.toJSON (builtins.toJSON expected)}, "agent-distro-",
+            ${builtins.toJSON (builtins.toJSON expectedNix)}, "agent-distro-",
+            "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
+            "${pkgs.mcp-nixos}/bin",
+            ${builtins.toJSON (builtins.toJSON profileEnv)},
+            ${builtins.toJSON (builtins.toJSON profileSettings)}]))
+
+    with subtest("the same profile as a plugin.json reaches OMP, Codex and Claude Code"):
+        user("cp -r ${juspay-skills} ~/manifest-gateway && chmod -R u+w ~/manifest-gateway"
+             + " && rm ~/manifest-gateway/agent-distro.nix")
+        # The manifest in place of the file: the directory is the profile and
+        # its first plugin, and the extension carries the rest.
+        write("~/manifest-gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})
+        manifestGateway = "AI_PROFILE=/home/testuser/manifest-gateway"
+        assert in_effect("~", manifestGateway)["name"] == "gateway"
+        user(f"{manifestGateway} python " + shlex.quote("${./profiles/check-gateway-profile.py}") + " " + " ".join(shlex.quote(a) for a in [
+            ${builtins.toJSON (builtins.toJSON expectedManifest)}, "agent-distro-",
             "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
             "${pkgs.mcp-nixos}/bin",
             ${builtins.toJSON (builtins.toJSON profileEnv)},

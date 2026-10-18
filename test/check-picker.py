@@ -19,8 +19,8 @@ import time
 LISTING = json.loads(sys.argv[1])
 ROWS = LISTING['harnesses']
 NAMES = [row['name'] for row in ROWS]
-# A profile to name positionally or in AI_PROFILE: a directory holding an
-# `agent-distro.nix`, which is all a profile is.
+# A profile to name positionally or in AI_PROFILE: a directory holding a
+# profile file, an `agent-distro.nix` or a `plugin.json`.
 PROFILES = tempfile.mkdtemp(prefix='picker-profiles-')
 OTHER = os.path.join(PROFILES, 'other')
 os.makedirs(OTHER)
