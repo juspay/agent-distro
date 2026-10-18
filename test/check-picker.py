@@ -19,13 +19,15 @@ import time
 LISTING = json.loads(sys.argv[1])
 ROWS = LISTING['harnesses']
 NAMES = [row['name'] for row in ROWS]
-# A profile to name positionally or in AI_PROFILE: a directory holding a
-# profile file, an `agent-distro.nix` or a `plugin.json`.
+# A profile to name positionally or in AI_PROFILE: a directory holding its
+# `plugin.json`.
 PROFILES = tempfile.mkdtemp(prefix='picker-profiles-')
 OTHER = os.path.join(PROFILES, 'other')
 os.makedirs(OTHER)
-with open(os.path.join(OTHER, 'agent-distro.nix'), 'w') as handle:
-    handle.write('{ name = "chosen"; description = "Chosen on the command line"; plugins = [ ]; }\n')
+with open(os.path.join(OTHER, 'plugin.json'), 'w') as handle:
+    handle.write(json.dumps({
+        '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+        'name': 'chosen', 'description': 'Chosen on the command line'}))
 DOWN = b'\x1b[B'
 RIGHT = b'\x1b[C'
 ESCAPE = b'\x1b'
@@ -279,12 +281,16 @@ with tempfile.TemporaryDirectory() as work:
     repo = os.path.join(work, 'repo')
     os.makedirs(os.path.join(repo, '.git'))
     os.makedirs(os.path.join(repo, 'nested', 'deep'))
-    with open(os.path.join(repo, 'agent-distro.nix'), 'w') as handle:
-        handle.write('{ name = "repo"; description = "Found in the repository"; plugins = [ ]; }\n')
+    with open(os.path.join(repo, 'plugin.json'), 'w') as handle:
+        handle.write(json.dumps({
+            '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+            'name': 'repo', 'description': 'Found in the repository'}))
     other = os.path.join(work, 'other')
     os.makedirs(other)
-    with open(os.path.join(other, 'agent-distro.nix'), 'w') as handle:
-        handle.write('{ name = "chosen"; description = "Chosen on the command line"; plugins = [ ]; }\n')
+    with open(os.path.join(other, 'plugin.json'), 'w') as handle:
+        handle.write(json.dumps({
+            '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+            'name': 'chosen', 'description': 'Chosen on the command line'}))
     nested = os.path.join(repo, 'nested', 'deep')
     found = run(flow(b'\r'), version(NAMES[0]), cwd=nested)
     assert b'agent-distro \xc2\xb7 repo' in found.drawn, found.drawn
@@ -292,7 +298,7 @@ with tempfile.TemporaryDirectory() as work:
     assert found.choice == NAMES[0], found.choice
     listed = json.loads(subprocess.check_output(['agent-distro', '--list', '--json'], cwd=nested))
     assert listed['profile'] == {'name': 'repo', 'description': 'Found in the repository', 'source': 'repository',
-                                 'origin': os.path.join(repo, 'agent-distro.nix')}, listed
+                                 'origin': os.path.join(repo, 'plugin.json')}, listed
     # The positional selector wins over the repository; a relative path starts with ./.
     chosen = run(flow(b'\r'), version(NAMES[0]), args=['../../../other', '--version'], cwd=nested, size=(24, 120))
     assert b'agent-distro \xc2\xb7 chosen' in chosen.drawn, chosen.drawn

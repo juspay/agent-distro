@@ -75,7 +75,7 @@ in
         whitespace-separated and composed left to right, later entries winning.
         A string is a profile reference, read when a harness starts: a flake
         reference such as the example, or an absolute path to a repository with
-        a plugin.json or an agent-distro.nix. Anything else — a path, or a flake input
+        its plugin.json. Anything else — a path, or a flake input
         (`inputs.skills`, with `flake = false`) — is built by lib.mkProfile and
         read from the store, pinned and offline.
 

@@ -149,12 +149,12 @@ test('tags name the component; the root has none; repeats are never folded', () 
 test('slow: a synchronous call says so first, and its time at debug', () => {
   const { stream, text } = sink();
   const log = createLogger({ stream, env: { AGENT_DISTRO_LOG: 'debug' } });
-  const result = slow(log.profile, 'evaluating /p/agent-distro.nix', () => {
-    assert.equal(text(), 'agent-distro profile: evaluating /p/agent-distro.nix …\n');
+  const result = slow(log.profile, 'reading /p/plugin.json', () => {
+    assert.equal(text(), 'agent-distro profile: reading /p/plugin.json …\n');
     return 42;
   });
   assert.equal(result, 42);
-  assert.match(text().split('\n')[1], /^agent-distro profile: evaluating \/p\/agent-distro\.nix: done in \d+\.\ds$/);
+  assert.match(text().split('\n')[1], /^agent-distro profile: reading \/p\/plugin\.json: done in \d+\.\ds$/);
   const quiet = sink();
   slow(createLogger({ stream: quiet.stream, env: {} }).profile, 'building', () => 0);
   assert.equal(quiet.text(), 'agent-distro profile: building …\n');

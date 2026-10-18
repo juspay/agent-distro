@@ -6,7 +6,7 @@
     home-manager.inputs.nixpkgs.follows = "agent-distro/nixpkgs";
     nixpkgs.follows = "agent-distro/nixpkgs";
     # The Juspay profile's sources, for a test profile built from them and for
-    # a fixture copy of its agent-distro.nix read at launch.
+    # a fixture copy of its plugin.json read at launch.
     juspay-skills = { url = "github:juspay/skills"; flake = false; };
     kolu = { url = "github:juspay/kolu"; flake = false; };
   };
@@ -169,7 +169,7 @@
               mkdir -p "$HOME" "$XDG_CACHE_HOME"
               omp=${lib.getExe launcher}
               # A profile handed over as the picker hands one, with the settings
-              # section its `agent-distro.nix` carries (src/plugin/launch.ts).
+              # section its extension carries (src/plugin/launch.ts).
               resolved() { printf '{"name":"%s","description":"d","source":"variable","origin":"/%s","plugins":[],"env":{},"settings":%s,"paths":[]}' "$1" "$1" "$2"; }
               configured=$(resolved configured '{"omp":{"modelRoles":{"default":"litellm/large"}}}')
               silent=$(resolved silent '{}')
@@ -230,8 +230,8 @@
           '';
           # Profiles read at launch, in a VM: paths and git+file: references,
           # discovery from a nested directory, precedence, the refusal of a
-          # package the binary cache lacks, and a fixture copy of the Juspay
-          # profile's `agent-distro.nix` read at launch, the way a profile
+          # package the binary cache lacks, an `agent-distro.nix` refused, and
+          # the Juspay profile's `plugin.json` read at launch, the way a profile
           # repository carries one.
           profiles = pkgs.testers.runNixOSTest (import ./test-profiles.nix {
             inherit pkgs agent-distro nixpkgs juspay-skills koluPlugin;

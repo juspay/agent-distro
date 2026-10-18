@@ -2,8 +2,8 @@
 # `bin/agent-distro` as the picker. `share/agent-distro/versions` lists the
 # harnesses it carries and their versions (src/listing.ts).
 #
-# No profile is part of the build. A profile is an `agent-distro.nix` or a
-# `plugin.json` read when a harness starts, or one built into its own store path
+# No profile is part of the build. A profile is a `plugin.json` read when a
+# harness starts, or one built into its own store path
 # by lib/mk-profile.nix; a launch composes them (src/profile/resolve.ts). What a
 # launcher knows of the build is the nixpkgs its profiles' `packages` are
 # evaluated against, and the picker's menu.

@@ -27,7 +27,7 @@ concurrent installs the first is kept. The copy stays, inert without the
 override; launches stamp the ones they use, and an install removes the ones
 unused for 14 days. Codex's `-c` splits its key at every `.` unless the key is
 quoted, so a plugin whose name contains one is enabled with its name quoted. A
-profile read at launch (a `plugin.json` or an `agent-distro.nix`) reaches Codex the same way: its
+profile read at launch (a `plugin.json`) reaches Codex the same way: its
 plugins get these one-plugin marketplaces.
 
 The npins branch pin tracks `sadjow/codex-cli-nix`. Its standalone binary

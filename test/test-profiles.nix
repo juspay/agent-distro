@@ -4,12 +4,11 @@
 # Stub harnesses that print what they were started with show the plugins and
 # packages each launch got: path and git+file: references, discovery from a
 # nested directory, the positional selector taken exactly, the repository's
-# agent-distro.nix composed over every AI_PROFILE entry, the environment and
-# settings they carry, an evaluation that sees neither the user's environment
-# nor the network, and the refusal of a package the binary cache lacks. Then
-# the gateway profile of test/flake.nix, carried twice — as an
-# `agent-distro.nix` and as a `plugin.json` whose extension holds the same
-# fields — runs the real OMP, Codex and Claude Code.
+# plugin.json composed over every AI_PROFILE entry, the environment and
+# settings they carry, and the refusal of a package the binary cache lacks. An
+# `agent-distro.nix` anywhere is refused, naming it. Then the gateway profile of
+# test/flake.nix, as a plugin.json whose extension holds those fields, runs the
+# real OMP, Codex and Claude Code.
 { pkgs, agent-distro, nixpkgs, juspay-skills, koluPlugin }:
 let
   inherit (pkgs) lib;
@@ -42,9 +41,12 @@ let
     printf -- '---\nname: ${name}-skill\ndescription: ${name}\n---\n' > "$out/skills/${name}-skill/SKILL.md"
   '';
   plugins = lib.genAttrs [ "alpha" "beta" "gamma" "delta" ] plugin;
-  # The gateway profile of test/flake.nix, as a repository carries it: the same
-  # `env` and `settings`, against the same fixture, its plugin references local
-  # paths since the VM has no network.
+  # One profile manifest, as a repository carries it: the manifest's name and
+  # whatever the extension namespace adds.
+  manifest = { name, description ? "", members ? { } }: builtins.toJSON ({
+    "$schema" = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+    inherit name description;
+  } // lib.optionalAttrs (members != { }) { extensions."asia.nixos.agent-distro" = members; });
   profileEnv = {
     LITELLM_BASE_URL = "http://127.0.0.1:8080";
     LITELLM_API_KEY = { secret = true; hint = "Create a key at the team's dashboard"; };
@@ -65,22 +67,9 @@ let
       agents.title.model = "litellm/open-fast";
     };
   };
-  # The gateway profile of test/flake.nix, as a repository carries it: the same
-  # `env` and `settings`, against the same fixture, its plugin references local
-  # paths since the VM has no network.
-  profileFile = ''
-    {
-      name = "gateway";
-      description = "A team's skills, with the LiteLLM gateway it runs them on";
-      plugins = [ ./. "${koluPlugin}" ];
-      packages = pkgs: [ pkgs.mcp-nixos ];
-      env = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileEnv)};
-      settings = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileSettings)};
-    }
-  '';
-  # The same profile as a plugin.json: the manifest names it, the directory
-  # itself is its first plugin, and the extension adds Kolu, mcp-nixos, the
-  # environment and the settings.
+  # The gateway profile of test/flake.nix, as a plugin.json: the manifest names
+  # it, the directory itself is its first plugin, and the extension adds Kolu,
+  # mcp-nixos, the environment and the settings.
   profileManifest = {
     "$schema" = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
     name = "gateway";
@@ -92,17 +81,12 @@ let
       settings = profileSettings;
     };
   };
-  # Skills per plugin, as the profile's checks expect them.
+  # Skills per plugin, as the profile's checks expect them. The profile's own
+  # directory is its first plugin, so it carries the fixture's skills under the
+  # manifest's name.
   skillsOf = root: builtins.filter (name: builtins.pathExists "${root}/skills/${name}/SKILL.md")
     (builtins.attrNames (builtins.readDir "${root}/skills"));
   manifestName = root: (builtins.fromJSON (builtins.readFile "${root}/plugin.json")).name;
-  # The Nix and the manifest form read the same fixture, so its skills are the
-  # first plugin's in both — under the copied manifest's name (`juspay-skills`)
-  # in the former, and the profile manifest's (`gateway`) in the latter.
-  expectedNix = {
-    ${manifestName juspay-skills} = skillsOf juspay-skills;
-    ${manifestName koluPlugin} = skillsOf koluPlugin;
-  };
   expectedManifest = {
     "gateway" = skillsOf juspay-skills;
     ${manifestName koluPlugin} = skillsOf koluPlugin;
@@ -110,8 +94,6 @@ let
   koluFixture = pkgs.writeShellScriptBin "kolu" ''
     exec ${pkgs.python3}/bin/python ${./support/kolu-mcp-fixture.py} "$@"
   '';
-  # A package no binary cache has: fetching it would mean compiling it.
-  uncached = ''(pkgs.hello.overrideAttrs { pname = "agent-distro-uncached"; })'';
 in
 {
   name = "profiles";
@@ -144,8 +126,7 @@ in
         user(f"mkdir -p $(dirname {path}) && printf %s {shlex.quote(text)} > {path}")
 
     # The gateway check, once: the same script, test modules, `mcp-nixos` bin
-    # and profile env/settings; only the expected skills differ between the two
-    # forms the same profile is carried in.
+    # and profile env/settings.
     CHECK = ["python", "${./profiles/check-gateway-profile.py}", None, "agent-distro-",
              "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
              "${pkgs.mcp-nixos}/bin",
@@ -167,39 +148,51 @@ in
     def in_effect(cwd="~", env=""):
         return json.loads(user(f"cd {cwd} && {env} probe-agent-distro --list --json"))["profile"]
 
-    # A repository whose profile names a plugin beside it, for discovery.
+    # A repository whose profile names a plugin beside it, for discovery. Its
+    # own directory is its first plugin, so a launch there loads both.
     user("mkdir -p ~/repo/.git ~/repo/nested/deep && cp -r ${plugins.alpha} ~/repo/plugin && chmod -R u+w ~/repo/plugin")
-    write("~/repo/agent-distro.nix", '{ name = "repo"; description = "The repository"; plugins = [ ./plugin ]; }')
+    write("~/repo/plugin.json", ${builtins.toJSON (manifest {
+      name = "repo"; description = "The repository"; members.plugins = [ "./plugin" ];
+    })})
     # A profile directory, for AI_PROFILE and the positional selector, with an
     # environment and a secret variable for the repository's to fall back to.
-    write("~/elsewhere/agent-distro.nix", '{ name = "elsewhere"; plugins = [ ${plugins.beta} ]; '
-          + 'env = { ELSEWHERE_URL = "https://elsewhere.test"; '
-          + 'ELSEWHERE_KEY = { secret = true; hint = "Ask the team for a key"; }; }; }')
+    write("~/elsewhere/plugin.json", ${builtins.toJSON (manifest {
+      name = "elsewhere";
+      members = {
+        plugins = [ "${plugins.beta}" ];
+        env = {
+          ELSEWHERE_URL = "https://elsewhere.test";
+          ELSEWHERE_KEY = { secret = true; hint = "Ask the team for a key"; };
+        };
+      };
+    })})
     # A git repository fetched by git+file:, itself a plugin, naming another
     # plugin by git+file: reference.
     user("mkdir -p ~/plugins && cp -r ${plugins.delta} ~/plugins/delta && chmod -R u+w ~/plugins")
     user("cd ~/plugins && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm plugins")
     user("cp -r ${plugins.gamma} ~/fetched && chmod -R u+w ~/fetched")
-    write("~/fetched/agent-distro.nix", '{ name = "fetched"; plugins = [ ./. "git+file:///home/testuser/plugins?dir=delta" ]; }')
+    write("~/fetched/plugin.json", ${builtins.toJSON (manifest {
+      name = "fetched"; members.plugins = [ "git+file:///home/testuser/plugins?dir=delta" ];
+    })})
     user("cd ~/fetched && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm profile")
 
     with subtest("a path profile, positional or in AI_PROFILE"):
-        assert launched("probe-agent-distro /home/testuser/elsewhere claude") == (["beta"], "")
-        assert launched("cd ~ && probe-agent-distro ./elsewhere claude") == (["beta"], "")
-        assert launched("AI_PROFILE=/home/testuser/elsewhere/agent-distro.nix probe-claude") == (["beta"], "")
+        assert launched("probe-agent-distro /home/testuser/elsewhere claude") == (["elsewhere", "beta"], "")
+        assert launched("cd ~ && probe-agent-distro ./elsewhere claude") == (["elsewhere", "beta"], "")
+        assert launched("AI_PROFILE=/home/testuser/elsewhere/plugin.json probe-claude") == (["elsewhere", "beta"], "")
 
     with subtest("a git+file: reference, and a plugin by reference"):
-        assert launched("probe-agent-distro git+file:///home/testuser/fetched claude") == (["gamma", "delta"], "")
+        assert launched("probe-agent-distro git+file:///home/testuser/fetched claude") == (["fetched", "delta"], "")
         assert in_effect(env="AI_PROFILE=git+file:///home/testuser/fetched") == {
             "name": "fetched", "description": "", "source": "variable", "origin": "git+file:///home/testuser/fetched"}
 
     with subtest("discovery from a nested directory, up to the git root"):
-        assert launched("cd ~/repo/nested/deep && probe-claude") == (["alpha"], "")
+        assert launched("cd ~/repo/nested/deep && probe-claude") == (["repo", "alpha"], "")
         assert in_effect("~/repo/nested/deep") == {
             "name": "repo", "description": "The repository", "source": "repository",
-            "origin": "/home/testuser/repo/agent-distro.nix"}
+            "origin": "/home/testuser/repo/plugin.json"}
         # --list names it, and where it was found.
-        assert "repo · The repository · from /home/testuser/repo/agent-distro.nix" in user("cd ~/repo && probe-agent-distro --list")
+        assert "repo · The repository · from /home/testuser/repo/plugin.json" in user("cd ~/repo && probe-agent-distro --list")
         # Outside the repository, nothing is in effect at all.
         assert launched("probe-claude") == ([], "")
         assert "profile" not in json.loads(user("probe-agent-distro --list --json"))
@@ -208,7 +201,7 @@ in
         def stderr_of(command):
             return user(f"{{ {command}; }} 2>&1 >/dev/null")
         repo = stderr_of("cd ~/repo && probe-claude")
-        assert "agent-distro profile: using repo (from /home/testuser/repo/agent-distro.nix) · https://agent-distro.nixos.asia\n" in repo, repo
+        assert "agent-distro profile: using repo (from /home/testuser/repo/plugin.json) · https://agent-distro.nixos.asia\n" in repo, repo
         variable = stderr_of("AI_PROFILE=/home/testuser/elsewhere probe-claude")
         assert "agent-distro profile: using elsewhere (from AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n" in variable, variable
         # No profile at all, and a positional choice, say nothing.
@@ -220,31 +213,31 @@ in
     with subtest("a repository's profile composes over AI_PROFILE; a positional one is exact"):
         other = "AI_PROFILE=/home/testuser/elsewhere"
         # Named positionally: that profile alone.
-        assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/fetched claude")[0] == ["gamma", "delta"]
-        assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/elsewhere claude")[0] == ["beta"]
+        assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/fetched claude")[0] == ["fetched", "delta"]
+        assert launched(f"cd ~/repo && {other} probe-agent-distro /home/testuser/elsewhere claude")[0] == ["elsewhere", "beta"]
         # The user's plugins, then the repository's.
-        assert launched(f"cd ~/repo && {other} probe-claude")[0] == ["beta", "alpha"]
+        assert launched(f"cd ~/repo && {other} probe-claude")[0] == ["elsewhere", "beta", "repo", "alpha"]
         assert in_effect("~/repo", other) == {
             "name": "repo", "description": "The repository", "source": "repository",
-            "origin": "/home/testuser/repo/agent-distro.nix",
+            "origin": "/home/testuser/repo/plugin.json",
             "over": {"name": "elsewhere", "description": "", "source": "variable", "origin": "/home/testuser/elsewhere"}}
         listed = user(f"cd ~/repo && {other} probe-agent-distro --list")
-        assert ("elsewhere + repo · The repository · from /home/testuser/repo/agent-distro.nix"
+        assert ("elsewhere + repo · The repository · from /home/testuser/repo/plugin.json"
                 " over AI_PROFILE=/home/testuser/elsewhere") in listed, listed
         noticed = stderr_of(f"cd ~/repo && {other} probe-claude")
-        assert ("agent-distro profile: using elsewhere + repo (from /home/testuser/repo/agent-distro.nix"
+        assert ("agent-distro profile: using elsewhere + repo (from /home/testuser/repo/plugin.json"
                 " over AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n") in noticed, noticed
         # The repository declares no `env`: AI_PROFILE's is in effect, and its
         # secret variable is what a launch without a terminal refuses.
         output = refused(f"cd ~/repo && {other} probe-omp")
         assert "ELSEWHERE_KEY is not set" in output and "Ask the team for a key" in output, output
-        assert launched(f"{other} probe-claude")[0] == ["beta"]
+        assert launched(f"{other} probe-claude")[0] == ["elsewhere", "beta"]
         assert in_effect("~", other)["source"] == "variable"
         assert "over" not in in_effect("~", other)
         assert launched("probe-claude")[0] == []
         # AGENT_DISTRO_PLUGINS composes on top of whichever profile is in effect.
-        assert launched("cd ~/repo && AGENT_DISTRO_PLUGINS=${plugins.beta} probe-claude")[0] == ["alpha", "beta"]
-        assert launched(f"cd ~/repo && {other} AGENT_DISTRO_PLUGINS=${plugins.gamma} probe-claude")[0] == ["beta", "alpha", "gamma"]
+        assert launched("cd ~/repo && AGENT_DISTRO_PLUGINS=${plugins.beta} probe-claude")[0] == ["repo", "alpha", "beta"]
+        assert launched(f"cd ~/repo && {other} AGENT_DISTRO_PLUGINS=${plugins.gamma} probe-claude")[0] == ["elsewhere", "beta", "repo", "alpha", "gamma"]
         # The positional selector is the picker's own: it never reaches the harness.
         assert "/home/testuser/fetched" not in user("probe-agent-distro /home/testuser/fetched claude")
 
@@ -252,7 +245,7 @@ in
         # Two entries, both at the fixture: `elsewhere`'s plugin, then
         # `fetched`'s own and the one it names by reference.
         stack = 'AI_PROFILE="/home/testuser/elsewhere /home/testuser/fetched"'
-        assert launched(f"{stack} probe-claude")[0] == ["beta", "gamma", "delta"]
+        assert launched(f"{stack} probe-claude")[0] == ["elsewhere", "beta", "fetched", "delta"]
         assert in_effect(env=stack) == {
             "name": "fetched", "description": "", "source": "variable", "origin": "/home/testuser/fetched",
             "over": {"name": "elsewhere", "description": "", "source": "variable", "origin": "/home/testuser/elsewhere"}}
@@ -269,48 +262,50 @@ in
         assert "AI_PROFILE=nonesuch (entry 2 of 2): not a reference" in output, output
         assert "STUB-STARTED" not in output, output
 
-    with subtest("a profile is evaluated without the user's environment or the network"):
-        write("~/nosy/agent-distro.nix", '{ name = "nosy"; description = "[" + builtins.getEnv "SECRET" + "]"; }')
-        assert in_effect("~", "SECRET=hunter2 AI_PROFILE=/home/testuser/nosy")["description"] == "[]"
-        write("~/fetching/agent-distro.nix", '{ name = "fetching"; description = builtins.readFile (builtins.fetchurl "https://example.com/"); }')
-        output = refused("AI_PROFILE=/home/testuser/fetching probe-claude")
-        assert "access to URI 'https://example.com/' is forbidden in restricted mode" in output, output
+    with subtest("an agent-distro.nix is refused, naming the file and saying to migrate"):
+        write("~/legacy/agent-distro.nix", '{ name = "legacy"; }')
+        for command in ["AI_PROFILE=/home/testuser/legacy probe-claude",
+                        "probe-agent-distro /home/testuser/legacy claude"]:
+            output = refused(command)
+            assert "/home/testuser/legacy/agent-distro.nix: agent-distro.nix is no longer read" in output, output
+            assert 'extensions."asia.nixos.agent-distro"' in output, output
+            assert "agent-distro.nixos.asia/#profiles" in output, output
+            assert "STUB-STARTED" not in output, output
+        # The repository a launch starts in, too.
+        write("~/legacy-repo/.git/keep", "keep")
+        write("~/legacy-repo/agent-distro.nix", '{ name = "legacy"; }')
+        output = refused("cd ~/legacy-repo && probe-claude")
+        assert "/home/testuser/legacy-repo/agent-distro.nix: agent-distro.nix is no longer read" in output, output
         assert "STUB-STARTED" not in output, output
 
     with subtest("packages from the binary cache, and the refusal of one it lacks"):
-        write("~/packaged/agent-distro.nix", '{ name = "packaged"; packages = pkgs: [ pkgs.hello ]; }')
-        assert launched("AI_PROFILE=/home/testuser/packaged probe-claude") == ([], "${pkgs.hello}/bin/hello")
-        write("~/uncached/agent-distro.nix", '{ name = "uncached"; packages = pkgs: [ ${uncached} ]; }')
+        write("~/packaged/plugin.json", ${builtins.toJSON (manifest {
+          name = "packaged"; members.packages = [ "hello" ];
+        })})
+        assert launched("AI_PROFILE=/home/testuser/packaged probe-claude") == (["packaged"], "${pkgs.hello}/bin/hello")
+        # `jq` is not in the store and nothing can be fetched, so it would have
+        # to be compiled — which a launch refuses.
+        write("~/uncached/plugin.json", ${builtins.toJSON (manifest {
+          name = "uncached"; members.packages = [ "jq" ];
+        })})
         for command in ["AI_PROFILE=/home/testuser/uncached probe-claude", "probe-agent-distro /home/testuser/uncached claude",
                         "AI_PROFILE=/home/testuser/uncached probe-omp"]:
             output = refused(command)
-            assert "package agent-distro-uncached-${pkgs.hello.version} is not in the binary cache" in output, output
+            assert "package ${pkgs.jq.name} is not in the binary cache" in output, output
             assert "agent-distro never compiles" in output, output
             assert "STUB-STARTED" not in output, output
 
-    with subtest("the gateway profile, as an agent-distro.nix, reaches OMP, Codex and Claude Code"):
-        user("cp -r ${juspay-skills} ~/gateway && chmod -R u+w ~/gateway")
-        # The copied manifest is beside it: agent-distro.nix wins, and the
-        # manifest is not read as the profile.
-        write("~/gateway/agent-distro.nix", ${builtins.toJSON profileFile})
+    with subtest("the gateway profile, as a plugin.json, reaches OMP, Codex and Claude Code"):
+        # The fixture is a checkout that still carries an `agent-distro.nix`
+        # (the pinned revision): a profile is its plugin.json, so it is removed.
+        user("cp -r ${juspay-skills} ~/gateway && chmod -R u+w ~/gateway"
+             + " && rm -f ~/gateway/agent-distro.nix")
+        write("~/gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})
         gateway = "AI_PROFILE=/home/testuser/gateway"
         assert in_effect("~", gateway)["name"] == "gateway"
-        # A home of its own per launch: the harnesses keep installation state
-        # (Codex's marketplace cache, OMP's config) that a second launch in the
-        # same home would see, and the profile rather than that state is what
-        # this checks.
-        user("mkdir -p /home/testuser/gateway-nix-home")
-        user(f"HOME=/home/testuser/gateway-nix-home {gateway} " + gateway_check(${builtins.toJSON expectedNix}))
-
-    with subtest("the same profile as a plugin.json reaches OMP, Codex and Claude Code"):
-        user("cp -r ${juspay-skills} ~/manifest-gateway && chmod -R u+w ~/manifest-gateway"
-             + " && rm -f ~/manifest-gateway/agent-distro.nix")
-        # The manifest in place of the file: the directory is the profile and
-        # its first plugin, and the extension carries the rest.
-        write("~/manifest-gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})
-        manifestGateway = "AI_PROFILE=/home/testuser/manifest-gateway"
-        assert in_effect("~", manifestGateway)["name"] == "gateway"
-        user("mkdir -p /home/testuser/gateway-json-home")
-        user(f"HOME=/home/testuser/gateway-json-home {manifestGateway} " + gateway_check(${builtins.toJSON expectedManifest}))
+        # A home of its own: the harnesses keep installation state (Codex's
+        # marketplace cache, OMP's config) that nothing else should see.
+        user("mkdir -p /home/testuser/gateway-home")
+        user(f"HOME=/home/testuser/gateway-home {gateway} " + gateway_check(${builtins.toJSON expectedManifest}))
   '';
 }

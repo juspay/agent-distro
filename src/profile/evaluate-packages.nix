@@ -4,8 +4,7 @@
 # (nixpkgs attribute paths), `nixpkgs` and `system`.
 #
 # Each attribute is a path into the nixpkgs the launcher was built with, for
-# `system` (src/profile/evaluate.nix evaluates an `agent-distro.nix`'s
-# `packages` the same way). An attribute nixpkgs does not have is an error
+# `system`. An attribute nixpkgs does not have is an error
 # naming it, in the launcher's words rather than nixpkgs'.
 { attributes, nixpkgs, system }:
 let

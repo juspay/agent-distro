@@ -7,7 +7,7 @@
  *   { "harnesses": [ { "name": "claude", "tagline": "…",
  *                      "title": "Claude Code", "version": "2.1.291" } ],
  *     "profile": { "description": "…", "name": "ekala",
- *                  "origin": "/home/me/ekala/agent-distro.nix", "source": "repository",
+ *                  "origin": "/home/me/ekala/plugin.json", "source": "repository",
  *                  "over": { "description": "…", "name": "juspay-skills",
  *                            "origin": "github:juspay/skills", "source": "variable" } } }
  *
@@ -17,7 +17,7 @@
  * `positional` (`agent-distro <reference>`), `repository` (the profile file
  * found from the working directory up to the git root) or
  * `variable` (AI_PROFILE), and `origin` is that reference or the path to that
- * file — an `agent-distro.nix`, or a `plugin.json`. `over`, when present, is the profile it is composed
+ * `plugin.json`. `over`, when present, is the profile it is composed
  * over, in the same shape: a repository's over your AI_PROFILE, each entry
  * over the one before. A launch with no profile at all — nothing set, and no
  * repository — has no `profile` here.
@@ -40,7 +40,7 @@ export type InEffect = {
   name: string;
   description: string;
   source: Source;
-  /** The reference, or the path to the profile file found (`agent-distro.nix` or `plugin.json`). */
+  /** The reference, or the path to the `plugin.json` found. */
   origin: string;
   /** The profile this one is composed over, if any. */
   over?: InEffect;

@@ -8,7 +8,8 @@
  * is `{ substituters, trustedPublicKeys }`, the caches the answer is about
  * (lib/cache.nix), whatever the machine's own nix configuration says. The
  * profile defaults to the working directory, and may name a directory holding
- * an `agent-distro.nix` or a `plugin.json`, or one of those two files.
+ * a `plugin.json`, or the file itself. An `agent-distro.nix` is the migration
+ * error (resolve.ts).
  * One line per package; exits 1 if any is not cached or cannot be told, 2 on
  * bad arguments or a missing profile.
  */
@@ -18,7 +19,7 @@ import { log } from '../log.ts';
 import { cacheRoot, LaunchError, printable } from '../plugin/launch.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isSystemError } from '../util.ts';
-import { FILE, findProfile, MANIFEST, nixEnvironment, profileValue, type Info } from './resolve.ts';
+import { findProfile, MANIFEST, nixEnvironment, profileValue, type Info } from './resolve.ts';
 
 type Caches = { substituters: string[]; trustedPublicKeys: string[] };
 
@@ -32,9 +33,9 @@ function run(argv: string[]): number {
   }
   const given = resolve(rest[0] ?? '.');
   const what = printable(rest[0] ?? '.');
-  const at = findProfile(given, what);
-  if (at === null) {
-    log.profile.error(`no ${FILE} or ${MANIFEST} at ${given}\n${USAGE}`);
+  const file = findProfile(given, what);
+  if (file === null) {
+    log.profile.error(`no ${MANIFEST} at ${given}\n${USAGE}`);
     return 2;
   }
   const info: Info = JSON.parse(readFileSync(infoPath, 'utf8'));
@@ -42,7 +43,7 @@ function run(argv: string[]): number {
   const options = ['--option', 'substituters', caches.substituters.join(' '),
     '--option', 'trusted-public-keys', caches.trustedPublicKeys.join(' ')];
 
-  const { packages } = profileValue(at, info, cacheRoot(process.env, what), what);
+  const { packages } = profileValue(file, info, cacheRoot(process.env, what), what);
   if (packages.length === 0) {
     process.stdout.write(`${what}: no packages\n`);
     return 0;

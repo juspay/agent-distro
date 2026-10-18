@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agent-distro",
+  "description": "agent-distro maintainers: odu, to run this repository's CI",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": ["github:juspay/odu?dir=agent-plugin"]
+    }
+  }
+}

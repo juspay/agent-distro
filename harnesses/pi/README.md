@@ -18,8 +18,8 @@ until the next `pi` launch, however much later that is. Without a home for
 those files (`HOME` and `PI_CODING_AGENT_DIR` unset, or a directory it cannot
 write), the launch fails rather than start without the plugins. Launches that run at
 the same moment with different values can see each other's entries, since Pi
-reads them from the same files. A profile read at launch (a `plugin.json` or an
-`agent-distro.nix`) is merged as these are.
+reads them from the same files. A profile read at launch (a `plugin.json`) is
+merged as these are.
 
 The npins branch pin tracks `sadjow/pi-nix`. Its standalone binary packaging
 recipe is called with the distribution's shared nixpkgs rather than the

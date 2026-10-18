@@ -10,8 +10,7 @@ reads it when a harness starts.
 `plugin.json` may also carry `extensions."asia.nixos.agent-distro"`, the shape
 this template shows empty: `plugins` for more plugin directories (paths
 beginning with `./`) or flake references, `packages` for nixpkgs attribute paths
-put on `PATH`, and `env` and `settings` — the same fields an `agent-distro.nix`
-holds, for a profile that needs no Nix. See
+put on `PATH`, and `env` and `settings`. See
 [Profiles](https://agent-distro.nixos.asia/#profiles).
 
 Edit `plugin.json` to name your distribution, add skills under `skills/`, and
