@@ -295,7 +295,12 @@ in
         write("~/gateway/agent-distro.nix", ${builtins.toJSON profileFile})
         gateway = "AI_PROFILE=/home/testuser/gateway"
         assert in_effect("~", gateway)["name"] == "gateway"
-        user(f"{gateway} " + gateway_check(${builtins.toJSON expectedNix}))
+        # A home of its own per launch: the harnesses keep installation state
+        # (Codex's marketplace cache, OMP's config) that a second launch in the
+        # same home would see, and the profile rather than that state is what
+        # this checks.
+        user("mkdir -p /home/testuser/gateway-nix-home")
+        user(f"HOME=/home/testuser/gateway-nix-home {gateway} " + gateway_check(${builtins.toJSON expectedNix}))
 
     with subtest("the same profile as a plugin.json reaches OMP, Codex and Claude Code"):
         user("cp -r ${juspay-skills} ~/manifest-gateway && chmod -R u+w ~/manifest-gateway"
@@ -305,6 +310,7 @@ in
         write("~/manifest-gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})
         manifestGateway = "AI_PROFILE=/home/testuser/manifest-gateway"
         assert in_effect("~", manifestGateway)["name"] == "gateway"
-        user(f"{manifestGateway} " + gateway_check(${builtins.toJSON expectedManifest}))
+        user("mkdir -p /home/testuser/gateway-json-home")
+        user(f"HOME=/home/testuser/gateway-json-home {manifestGateway} " + gateway_check(${builtins.toJSON expectedManifest}))
   '';
 }
