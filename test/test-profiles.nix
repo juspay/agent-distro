@@ -283,15 +283,16 @@ in
           name = "packaged"; members.packages = [ "hello" ];
         })})
         assert launched("AI_PROFILE=/home/testuser/packaged probe-claude") == (["packaged"], "${pkgs.hello}/bin/hello")
-        # `jq` is not in the store and nothing can be fetched, so it would have
-        # to be compiled — which a launch refuses.
+        # `cowsay` is not in the store and nothing can be fetched, so it would
+        # have to be compiled — which a launch refuses. (Any package outside
+        # the VM's closure would do; nothing here depends on cowsay.)
         write("~/uncached/plugin.json", ${builtins.toJSON (manifest {
-          name = "uncached"; members.packages = [ "jq" ];
+          name = "uncached"; members.packages = [ "cowsay" ];
         })})
         for command in ["AI_PROFILE=/home/testuser/uncached probe-claude", "probe-agent-distro /home/testuser/uncached claude",
                         "AI_PROFILE=/home/testuser/uncached probe-omp"]:
             output = refused(command)
-            assert "package ${pkgs.jq.name} is not in the binary cache" in output, output
+            assert "package ${pkgs.cowsay.name} is not in the binary cache" in output, output
             assert "agent-distro never compiles" in output, output
             assert "STUB-STARTED" not in output, output
 
