@@ -588,7 +588,7 @@ function describe<A>(
         : `prompts for ${name}${value.hint ? ` (${value.hint})` : ''}`);
     }
     if (settings) log.profile.debug(`settings.${harness} from the profile`);
-    else if (profile.settings[harness]) log.profile.debug(`settings.${harness} is for another harness`);
+    else if (Object.keys(profile.settings[harness] ?? {}).length) log.profile.debug(`settings.${harness} is for another harness`);
   }
   log.harness(harness).debug(`harness arguments: ${launched}`);
 }
@@ -611,7 +611,11 @@ export async function main(argsPath: string): Promise<number> {
     // a secret variable is not this launch's to export either — the launcher
     // prompts for it after this shell, so its value is never a file or an argv.
     const opted = process.env.AGENT_DISTRO_SETTINGS === '0';
-    const settings = opted ? undefined : profile?.settings[args.harness];
+    // An empty section is no section: a profile that carries `settings.omp = { }`
+    // has configured nothing for the harness, so it is handed no settings (and
+    // the launcher writes no empty layer) exactly as if it had none at all.
+    const section = opted ? undefined : profile?.settings[args.harness];
+    const settings = section && Object.keys(section).length ? section : undefined;
     describe(args.harness, profile, launch, launched, settings, opted);
     process.stdout.write(shell(launched, opted || !profile ? {} : profile.env, settings, profile?.paths ?? [],
       log.unknown ? log.level : null));

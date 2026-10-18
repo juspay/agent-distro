@@ -173,6 +173,7 @@
               resolved() { printf '{"name":"%s","description":"d","source":"variable","origin":"/%s","plugins":[],"env":{},"settings":%s,"paths":[]}' "$1" "$1" "$2"; }
               configured=$(resolved configured '{"omp":{"modelRoles":{"default":"litellm/large"}}}')
               silent=$(resolved silent '{}')
+              empty=$(resolved empty '{"omp":{}}')
               same() {
                 expected=$1
                 shift
@@ -184,6 +185,8 @@
               }
               same 1 env AGENT_DISTRO_PROFILE="$configured" "$omp"
               same unset env AGENT_DISTRO_PROFILE="$silent" "$omp"
+              # An empty `settings.omp` configured nothing: no wizard skip.
+              same unset env AGENT_DISTRO_PROFILE="$empty" "$omp"
               same keep env AGENT_DISTRO_PROFILE="$configured" OMP_SKIP_SETUP=keep "$omp"
               touch "$out"
             '';

@@ -8,12 +8,13 @@ launch was typed in (doc/index.md, "Working directory"). The environment and
 the `settings.omp` of the profile in effect, read at launch, are exported
 before OMP starts — a `secret` variable is prompted for when it is not already
 set — and its YAML fills only the keys the user has not set, preserving
-existing values and comments. A non-empty `settings.omp` has answered OMP's
-setup wizard, so the launcher exports `OMP_SKIP_SETUP=1` (never over a value you
-exported yourself); with none, the wizard runs as upstream intends. Every
-profile fills `hideThinkingBlock: true` and `task.showResolvedModelBadge: true`,
-so thinking blocks stay hidden and a subagent's row names the model it resolved
-to; set either to `false` in `config.yml` to turn it off again.
+existing values and comments. A profile with a `settings.omp` section has
+already made the choices the setup wizard asks for, so the launcher exports
+`OMP_SKIP_SETUP=1` (never over a value you exported yourself); with none, the
+wizard runs as upstream intends. Every profile fills `hideThinkingBlock: true`
+and `task.showResolvedModelBadge: true`, so thinking blocks stay hidden and a
+subagent's row names the model it resolved to; set either to `false` in
+`config.yml` to turn it off again.
 
 OMP uses an npins release pin. Its source build is loaded from upstream's lock,
 except that every nixpkgs in it is the distribution's shared nixpkgs.
