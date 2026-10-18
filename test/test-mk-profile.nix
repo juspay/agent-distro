@@ -31,6 +31,18 @@ let
   # beside its manifest, are both refused, telling it to migrate.
   legacyFile = builtins.tryEval (mkProfile { inherit system; profile = ./fixtures/legacy/agent-distro.nix; }).drvPath;
   legacyDirectory = builtins.tryEval (mkProfile { inherit system; profile = ./fixtures/plugin-profile-legacy; }).drvPath;
+  # A profile whose fields are an attribute set, for a Nix consumer that has no
+  # plugin.json to point at: the same fields, `packages` attribute paths.
+  asAttrs = mkProfile {
+    inherit system;
+    profile = {
+      name = "mk-profile-attrs";
+      description = "Built from fields";
+      plugins = [ ./fixtures/profile ];
+      packages = [ "hello" ];
+      env = { FROM_ATTRS = "1"; };
+    };
+  };
   reader = builtins.baseNameOf (toString runtime.tree);
   fixture = ./fixtures/profile;
   # Built here for a host of another system: without packages it is this
@@ -77,6 +89,10 @@ pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq pkgs.nix ]; } ''
   test -f ${plain}/share/agent-distro/plugins/0/description.json
   test ! -e ${plain}/share/agent-distro/plugins/1
   test "$(jq -c .env ${plain}/share/agent-distro/profile.json)" = '{}'
+  # The attribute-set form: the fields a Nix consumer passes, and nothing else.
+  jq -e '.name == "mk-profile-attrs" and .description == "Built from fields" and .env.FROM_ATTRS == "1"' \
+    ${asAttrs}/share/agent-distro/profile.json
+  test "$(ls ${asAttrs}/bin)" = hello
   # An attribute nixpkgs does not have: the launcher's own expression
   # (src/profile/evaluate-packages.nix) is what says so, in its own words.
   export NIX_STATE_DIR="$TMPDIR/nix-state"

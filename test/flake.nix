@@ -24,7 +24,7 @@
         name = "gateway";
         description = "A team's skills, with the LiteLLM gateway it runs them on";
         plugins = [ juspay-skills koluPlugin ];
-        packages = pkgs: [ pkgs.mcp-nixos ];
+        packages = [ "mcp-nixos" ];
         env = {
           LITELLM_BASE_URL = "http://127.0.0.1:8080";
           LITELLM_API_KEY = { secret = true; hint = "Create a key at the team's dashboard"; };

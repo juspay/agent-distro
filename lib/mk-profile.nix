@@ -18,11 +18,13 @@
 #
 # `profile` is a path to a `plugin.json` or to the directory holding one — a
 # Nix path, a store path in a string, or the flake input itself, whose
-# `outPath` is one. That manifest's `extensions."asia.nixos.agent-distro"` is
-# the profile: its directory is its first plugin, `plugins` names more, and
-# `packages` names nixpkgs attribute paths. An `agent-distro.nix` is no longer
-# read: finding one is an error saying to migrate (src/profile/resolve.ts
-# `migration`).
+# `outPath` is one — or the profile's fields as an attribute set, for a Nix
+# consumer that has no file to point at: `name`, `description`, `plugins`,
+# `packages`, `env` and `settings`, exactly as the manifest's extension holds
+# them (`packages` a list of nixpkgs attribute paths). A `plugin.json` profile's
+# own directory is its first plugin; an attribute set has no directory, so it
+# lists its plugins itself. An `agent-distro.nix` is no longer read: finding one
+# is an error saying to migrate (src/profile/resolve.ts `migration`).
 #
 # Its plugins are paths — a flake input's, or a checkout's — or flake references
 # (`github:owner/repo?dir=sub`), which are locked here, once: fetched with
@@ -53,8 +55,6 @@ let
     if builtins.isPath profile then profile
     else if builtins.isAttrs profile && (profile ? outPath) then
       /. + builtins.unsafeDiscardStringContext profile.outPath
-    else if builtins.isAttrs profile then
-      throw "mkProfile: a profile is a plugin.json; pass a path to one (or to the directory holding it), not an attribute set (see https://agent-distro.nixos.asia/#profiles)"
     else
       /. + builtins.unsafeDiscardStringContext (toString profile);
   # `agent-distro.nix` is gone; a repository that still carries it is told to
@@ -79,8 +79,10 @@ let
   members = [ "plugins" "packages" "env" "settings" ];
   extension = manifest.extensions."asia.nixos.agent-distro" or { };
   unknown = builtins.filter (key: !(builtins.elem key members)) (builtins.attrNames extension);
-  attrs =
-    if unknown != [ ] then
+  # The profile's fields, whichever form `profile` took.
+  fields =
+    if builtins.isAttrs profile && !(profile ? outPath) then profile
+    else if unknown != [ ] then
       throw "mkProfile: a profile's extensions.\"asia.nixos.agent-distro\" has no member `${builtins.head unknown}`"
     else {
       name = manifest.name;
@@ -89,18 +91,11 @@ let
       plugins = [ directory ] ++ map
         (entry: if lib.hasPrefix "./" entry then "${directory}/${lib.removePrefix "./" entry}" else entry)
         (extension.plugins or [ ]);
-      # Attribute paths into the nixpkgs the profile is built against, as the
-      # launcher evaluates them (src/profile/evaluate-packages.nix).
-      packages = pkgs: map
-        (attribute:
-          let path = lib.splitString "." attribute; in
-          if lib.hasAttrByPath path pkgs then lib.getAttrFromPath path pkgs
-          else throw "mkProfile: profile packages: nixpkgs has no attribute `${attribute}`")
-        (extension.packages or [ ]);
+      packages = extension.packages or [ ];
       env = extension.env or { };
       settings = extension.settings or { };
     };
-  name = attrs.name;
+  name = fields.name;
   # A flake reference's directory, locked now: the fetched tree, and its `dir`
   # within it (src/profile/resolve.ts `prefetch` reads a reference at launch
   # the same way). `currentSystem` is what a pure evaluation lacks, and
@@ -117,8 +112,15 @@ let
       if reference ? dir then "${tree.outPath}/${reference.dir}" else tree.outPath;
   plugins = map
     (entry: if builtins.isString entry && !(lib.hasPrefix "/" entry) then locked entry else entry)
-    (attrs.plugins or [ ]);
-  packagesFor = (attrs.packages or (_: [ ]));
+    (fields.plugins or [ ]);
+  # Attribute paths into the nixpkgs the profile is built against, as the
+  # launcher evaluates them (src/profile/evaluate-packages.nix).
+  packagesFor = pkgs': map
+    (attribute:
+      let path = lib.splitString "." attribute; in
+      if lib.hasAttrByPath path pkgs' then lib.getAttrFromPath path pkgs'
+      else throw "mkProfile: profile packages: nixpkgs has no attribute `${attribute}`")
+    (fields.packages or [ ]);
   packages =
     if hostSystem == system then packagesFor pkgs
     else if packagesFor (import nixpkgs { system = hostSystem; config.allowUnfree = true; }) != [ ] then
@@ -145,9 +147,9 @@ let
   };
   json = pkgs.writeTextDir "share/agent-distro/profile.json" (builtins.toJSON {
     inherit name;
-    description = attrs.description or "";
-    env = attrs.env or { };
-    settings = attrs.settings or { };
+    description = fields.description or "";
+    env = fields.env or { };
+    settings = fields.settings or { };
     # What the descriptions above were written by: a launch uses them only when
     # its own runtime tree has this name (src/profile/resolve.ts `runtimeReader`).
     reader = builtins.baseNameOf (toString runtime.tree);
