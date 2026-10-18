@@ -7,8 +7,9 @@
 # agent-distro.nix composed over every AI_PROFILE entry, the environment and
 # settings they carry, an evaluation that sees neither the user's environment
 # nor the network, and the refusal of a package the binary cache lacks. Then
-# the gateway profile of test/flake.nix, written out as a repository would
-# carry it, runs the real OMP, Codex and Claude Code.
+# the gateway profile of test/flake.nix, written out as a plugin.json profile a
+# repository would carry — the manifest naming it, the extension adding the
+# rest — runs the real OMP, Codex and Claude Code.
 { pkgs, agent-distro, nixpkgs, juspay-skills, koluPlugin }:
 let
   inherit (pkgs) lib;
@@ -64,31 +65,30 @@ let
       agents.title.model = "litellm/open-fast";
     };
   };
-  # The file and the checks below read one source: JSON as a string literal,
-  # which Nix parses, handed to `builtins.fromJSON` (pure, so the restricted
-  # evaluation of a profile read at launch is unaffected).
-  profileFile = ''
-    {
-      name = "gateway";
-      description = "A team's skills, with the LiteLLM gateway it runs them on";
-      plugins = [ ./. "${koluPlugin}" ];
-      packages = pkgs: [ pkgs.mcp-nixos ];
-      env = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileEnv)};
-      settings = builtins.fromJSON ${builtins.toJSON (builtins.toJSON profileSettings)};
-    }
-  '';
+  # The gateway profile of test/flake.nix, as a plugin.json profile a repository
+  # would carry: the manifest names it, the directory itself is its first
+  # plugin, and the extension adds Kolu, mcp-nixos, the environment and the
+  # settings. The fixture copy is the Juspay skills, so their skills are the
+  # profile's own plugin's.
+  profileManifest = {
+    "$schema" = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+    name = "gateway";
+    description = "A team's skills, with the LiteLLM gateway it runs them on";
+    extensions."asia.nixos.agent-distro" = {
+      plugins = [ koluPlugin ];
+      packages = [ "mcp-nixos" ];
+      env = profileEnv;
+      settings = profileSettings;
+    };
+  };
   # Skills per plugin, as the profile's checks expect them.
-  expected = builtins.listToAttrs (map
-    (root:
-      let
-        manifest = builtins.fromJSON (builtins.readFile "${root}/plugin.json");
-        entries = builtins.readDir "${root}/skills";
-      in
-      {
-        name = manifest.name;
-        value = builtins.filter (name: builtins.pathExists "${root}/skills/${name}/SKILL.md") (builtins.attrNames entries);
-      })
-    [ juspay-skills koluPlugin ]);
+  skillsOf = root: builtins.filter (name: builtins.pathExists "${root}/skills/${name}/SKILL.md")
+    (builtins.attrNames (builtins.readDir "${root}/skills"));
+  manifestName = root: (builtins.fromJSON (builtins.readFile "${root}/plugin.json")).name;
+  expected = {
+    "gateway" = skillsOf juspay-skills;
+    ${manifestName koluPlugin} = skillsOf koluPlugin;
+  };
   koluFixture = pkgs.writeShellScriptBin "kolu" ''
     exec ${pkgs.python3}/bin/python ${./support/kolu-mcp-fixture.py} "$@"
   '';
@@ -257,9 +257,11 @@ in
             assert "agent-distro never compiles" in output, output
             assert "STUB-STARTED" not in output, output
 
-    with subtest("the gateway profile, read at launch, reaches OMP, Codex and Claude Code"):
+    with subtest("the gateway profile, as a plugin.json read at launch, reaches OMP, Codex and Claude Code"):
         user("cp -r ${juspay-skills} ~/gateway && chmod -R u+w ~/gateway")
-        write("~/gateway/agent-distro.nix", ${builtins.toJSON profileFile})
+        # The manifest in place of the file: the directory is the profile and
+        # its first plugin, and the extension carries the rest.
+        write("~/gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})
         gateway = "AI_PROFILE=/home/testuser/gateway"
         assert in_effect("~", gateway)["name"] == "gateway"
         user(f"{gateway} python " + shlex.quote("${./profiles/check-gateway-profile.py}") + " " + " ".join(shlex.quote(a) for a in [

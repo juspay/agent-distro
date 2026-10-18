@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-distro.nixos.asia/agent-distro.schema.json",
+  "title": "agent-distro profile extension",
+  "description": "The `extensions.\"asia.nixos.agent-distro\"` member of a plugin.json: what the directory adds to the plugin itself when agent-distro reads it as a profile (src/profile/resolve.ts). Its members are the fields of an `agent-distro.nix`, in JSON. The plugin root is always the profile's first plugin and is never listed.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "plugins": {
+      "description": "More Agent Plugins directories: a flake reference such as \"github:owner/repo?dir=sub\", or a path relative to the plugin root, which begins with \"./\".",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "packages": {
+      "description": "nixpkgs attribute paths (\"mcp-nixos\", \"python3Packages.foo\") put on PATH for every harness. They are fetched from the binary cache; a launch never compiles.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "env": {
+      "description": "Variables every launch exports, and `{ \"secret\": true, \"hint\": \"...\" }` ones it prompts for when unset.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["secret"],
+            "properties": {
+              "secret": { "const": true },
+              "hint": { "type": "string" }
+            }
+          }
+        ]
+      }
+    },
+    "settings": {
+      "description": "What the harnesses that read it default. A non-empty `omp` also skips OMP's setup wizard.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "omp": { "type": "object" },
+        "opencode": { "type": "object" }
+      }
+    }
+  }
+}

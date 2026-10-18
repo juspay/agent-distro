@@ -18,8 +18,11 @@
 #
 # `profile` is a path to an `agent-distro.nix` or to the directory holding one —
 # a Nix path, a store path in a string, or the flake input itself, whose
-# `outPath` is one — or the attribute set the file holds. Its plugins are paths
-# — a flake input's, or a checkout's — or flake references
+# `outPath` is one — or the attribute set the file holds. A directory with no
+# `agent-distro.nix` but a `plugin.json` is a profile too: the manifest names
+# it and its directory is its first plugin, with
+# `extensions."asia.nixos.agent-distro"` adding `plugins`, `packages`, `env`
+# and `settings`. Its plugins are paths — a flake input's, or a checkout's — or flake references
 # (`github:owner/repo?dir=sub`), which are locked here, once: fetched with
 # `builtins.fetchTree` as lib/flake-source.nix fetches its sources, and built
 # in as the store path they are at that moment, so the built profile follows no
@@ -41,11 +44,10 @@ let
   pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
   inherit (pkgs) lib;
   runtime = import ./runtime.nix pkgs;
-  # The `agent-distro.nix` a path-like `profile` names: the file itself, or
-  # the one in that directory. A flake input is a source whose `outPath` is a
-  # store path, and its context rides the path, so the build depends on the
-  # input either way.
-  file =
+  # The directory a path-like `profile` names: the file itself or the directory
+  # holding it. A flake input is a source whose `outPath` is a store path, and
+  # its context rides the path, so the build depends on the input either way.
+  directory =
     let
       at =
         if builtins.isPath profile then profile
@@ -53,9 +55,53 @@ let
           /. + builtins.unsafeDiscardStringContext
             (if builtins.isAttrs profile then profile.outPath else toString profile);
     in
-    if builtins.pathExists (at + "/agent-distro.nix") then at + "/agent-distro.nix" else at;
+    if builtins.elem (builtins.baseNameOf (toString at)) [ "agent-distro.nix" "plugin.json" ]
+    then builtins.dirOf at
+    else at;
+  # An `agent-distro.nix` wins over a `plugin.json`, as it does at launch
+  # (src/profile/resolve.ts `findProfile`).
+  file =
+    if builtins.pathExists (directory + "/agent-distro.nix") then directory + "/agent-distro.nix"
+    else if builtins.pathExists (directory + "/plugin.json") then directory + "/plugin.json"
+    else null;
+  # The manifest of a plugin.json profile, read with the same reader a launch
+  # uses — `runtime.readPlugin` is src/plugin/read.ts — so `plugin.json` has one
+  # parser. Its `extensions` is where a profile's plugins, packages, env and
+  # settings live when there is no Nix file.
+  manifest =
+    if file == null || builtins.baseNameOf (toString file) != "plugin.json" then null
+    else builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile (runtime.readPlugin directory)));
+  # The attribute set a plugin.json profile stands for: the manifest's name and
+  # description, its directory as the first plugin (and never listed), and the
+  # extension's members, with the shapes the resolver validates at launch.
+  # `packages` is the Nix form's function, over the attribute paths the
+  # extension names.
+  extension = if manifest == null then { } else manifest.manifest.extensions."asia.nixos.agent-distro" or { };
+  # The members the resolver reads; anything else is an error here too.
+  members = [ "plugins" "packages" "env" "settings" ];
+  unknown = builtins.filter (key: !(builtins.elem key members)) (builtins.attrNames extension);
+  pluginProfile =
+    if manifest == null then null
+    else if unknown != [ ] then
+      throw "mkProfile: a plugin.json profile's extensions.\"asia.nixos.agent-distro\" has no member `${builtins.head unknown}`"
+    else {
+      name = manifest.manifest.name;
+      description = manifest.manifest.description or "";
+      plugins = [ directory ] ++ map
+        (entry: if lib.hasPrefix "./" entry then "${directory}/${lib.removePrefix "./" entry}" else entry)
+        (extension.plugins or [ ]);
+      packages = pkgs: map
+        (attribute: lib.getAttrFromPath (lib.splitString "." attribute) pkgs)
+        (extension.packages or [ ]);
+      env = extension.env or { };
+      settings = extension.settings or { };
+    };
   # The file's attribute set, or the one `profile` holds itself.
-  attrs = if builtins.isAttrs profile && !(profile ? outPath) then profile else import file;
+  attrs =
+    if builtins.isAttrs profile && !(profile ? outPath) then profile
+    else if pluginProfile != null then pluginProfile
+    else if file != null then import file
+    else throw "mkProfile: no agent-distro.nix or plugin.json at ${toString directory}, and no attribute set";
   # A profile written for an older agent-distro is warned about here, as one
   # read at launch is (src/profile/resolve.ts).
   name = lib.warnIf (attrs ? gateway)

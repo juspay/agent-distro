@@ -83,7 +83,7 @@
       lib = api;
       templates.default = {
         path = ./templates/default;
-        description = "A profile: an agent-distro.nix any agent-distro reads";
+        description = "A profile: a plugin.json (or agent-distro.nix) any agent-distro reads";
       };
     };
 }

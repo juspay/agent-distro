@@ -73,7 +73,7 @@ agent-distro --list                      # the profiles in effect, then harness 
 agent-distro --list --json               # the same, as JSON (below)
 ```
 
-- **Precedence.** The positional profile is used exactly, alone. Otherwise the repository's `agent-distro.nix` is composed over the profiles of `AI_PROFILE` ([Profiles](#profiles)). `AI_HARNESS` takes precedence over a positional harness.
+- **Precedence.** The positional profile is used exactly, alone. Otherwise the repository's profile is composed over the profiles of `AI_PROFILE` ([Profiles](#profiles)). `AI_HARNESS` takes precedence over a positional harness.
 - **Passthrough.** Recognized leading selectors are consumed;[^dash] other arguments and everything after `--` are passed to the harness unchanged.
 
 [^dash]: An argument starting with `-` is never a selector, so `agent-distro --model=a:b` passes it to the harness.
@@ -165,7 +165,7 @@ An interactive selection is remembered in `${XDG_STATE_HOME:-$HOME/.local/state}
 | `version` | The display version, as `--list` prints it[^plus-suffix] |
 | `profile` | The profile in effect for a launch from the same directory and environment; absent when there is none |
 | `profile.source` | `positional`, `repository` or `variable` (`AI_PROFILE`) |
-| `profile.origin` | The reference as given, or the path to the `agent-distro.nix` found |
+| `profile.origin` | The reference as given, or the path to the profile file found |
 | `profile.over` | The profile composed beneath it, in the same shape: a repository's over your `AI_PROFILE`, each entry over the one before |
 
 Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list` takes no other arguments.[^three-agree] A profile that cannot be read fails `--list` as it would fail a launch.
@@ -229,7 +229,7 @@ inputs.skills = { url = "github:juspay/skills"; flake = false; };
 services.agent-distro.profiles = [ inputs.skills "github:ekala-project/ekala-ai-skills" ];
 ```
 
-[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own `agent-distro.nix` is composed over either. Every entry is a profile reference or something built from one; a string that is neither stops the launch, naming it. `profile`, the one-profile spelling of this option, is deprecated for one release: a reference becomes `profiles = [ it ]`.
+[^hm-reference]: An `AI_PROFILE` already in the environment wins, and a repository's own profile is composed over either. Every entry is a profile reference or something built from one; a string that is neither stops the launch, naming it. `profile`, the one-profile spelling of this option, is deprecated for one release: a reference becomes `profiles = [ it ]`.
 
 [^hm-prune]: At activation its prune stage deletes sibling state directories left from an earlier flake/profile choice.
 
@@ -319,7 +319,7 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro
 
 Every message agent-distro prints goes to stderr as `agent-distro <component>: …`, with `warning:` or `error:` when it is one. Stdout is never used for messages: launchers and tools read it.
 
-By default a launch prints a line only when something chose a profile for you, a repository's `agent-distro.nix` or `AI_PROFILE`, worded as `--list` words it:
+By default a launch prints a line only when something chose a profile for you, a repository's profile or `AI_PROFILE`, worded as `--list` words it:
 
 ```text
 agent-distro profile: using repo (from /home/me/repo/agent-distro.nix) · https://agent-distro.nixos.asia
@@ -367,10 +367,11 @@ agent-distro.lib.mkPicker { pkgs; launchers; nixpkgs ? null; }
 #   `launchers`, a `mkLaunchers` result.
 
 agent-distro.lib.mkProfile { system; profile; }
-# → one profile, built: an `agent-distro.nix` — a path to the file, to the
-#   directory holding one, a flake input (whose `outPath` is a store path), or
-#   the attribute set it holds — with its plugins read and its `packages`
-#   realised. Its store path is an `AI_PROFILE` value ([Profiles](#profiles)),
+# → one profile, built: an `agent-distro.nix` or a `plugin.json` — a path to
+#   the file, to the directory holding one, a flake input (whose `outPath` is a
+#   store path), or, for the Nix form, the attribute set it holds — with its
+#   plugins read and its `packages` realised. Its store path is an `AI_PROFILE`
+#   value ([Profiles](#profiles)),
 #   used as it is. A plugin named by a flake reference is locked as the
 #   profile is built — fetched once, and built in as that store path — which
 #   needs an impure evaluation (`nix build --impure`); a pure one refuses it,
@@ -431,7 +432,61 @@ The updater's words are a small TypeScript library a program can import rather t
 
 ## Profiles
 
-A profile is an `agent-distro.nix` in a git repository:
+A profile is a git repository, and it is one of two things:
+
+- an [Agent Plugin](https://agent-plugins.org/specification/) — `plugin.json`,
+  `skills/<name>/SKILL.md`, optionally `mcp.json`. The manifest's `name` and
+  `description` are the profile's, the directory is its first plugin, and
+  `extensions."asia.nixos.agent-distro"` adds the plugins, packages,
+  environment and settings a plugin does not carry. This profile needs no Nix
+  file at all.
+- an `agent-distro.nix`, when the profile needs Nix. Everything a profile can
+  say is there, and it is read exactly as the extension is.
+
+The `plugin.json` form, Juspay's profile as its repository carries it:
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "juspay-skills",
+  "description": "Nix, writing, and tooling skills for coding agents",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": ["github:juspay/kolu?dir=agent-plugin"],
+      "packages": ["mcp-nixos"],
+      "env": {
+        "LITELLM_BASE_URL": "https://grid.ai.juspay.net",
+        "LITELLM_API_KEY": { "secret": true, "hint": "Create a key at grid.ai.juspay.net/dashboard (Juspay VPN)" }
+      },
+      "settings": {
+        "omp": { "modelRoles": { "default": "litellm/open-large", "task": "litellm/open-large", "smol": "litellm/open-fast" } },
+        "opencode": { "model": "litellm/open-large", "agents": { "title": { "model": "litellm/open-fast" } } }
+      }
+    }
+  }
+}
+```
+
+The extension's own JSON Schema is published at
+[agent-distro.schema.json](https://agent-distro.nixos.asia/agent-distro.schema.json),
+for editors to complete it against; it mirrors the launch's validator. The same
+fields, in the two forms:
+
+| Field | `plugin.json` | `agent-distro.nix` | Meaning |
+| --- | --- | --- | --- |
+| Name, description | `name`, `description` | `name`, `description` | Profile identifier the chooser and `--list` name the stack with, and the line shown with it |
+| Plugins | `extensions."asia.nixos.agent-distro".plugins` | `plugins` | [Agent Plugins](https://agent-plugins.org/specification/) directories[^plugin-dir]. In `plugin.json` the profile's own directory is always the first plugin, and is not listed |
+| Packages | `…packages`: `["mcp-nixos"]` | `packages = pkgs: [ pkgs.mcp-nixos ];` | Commands the plugins' MCP servers name, put first on `PATH` for every harness[^bare-command] |
+| Environment | `…env` | `env` | Variables every launch exports, and `{ secret = true; hint ? };` ones it prompts for when unset |
+| Settings | `…settings` | `settings` | What `omp` and `opencode` default, in their own configuration's shape; a non-empty `settings.omp` also skips OMP's setup wizard (`OMP_SKIP_SETUP=1`) |
+
+A `plugin.json` with no extension is the plugin alone — its skills and MCP
+servers — which is a valid profile. A namespace member that is not one of the
+four is a launch error naming it, as is the wrong shape for one.
+
+### When you need Nix: `agent-distro.nix`
+
+The same kind of profile, written as Nix:
 
 ```nix
 {
@@ -457,16 +512,12 @@ A profile is an `agent-distro.nix` in a git repository:
 }
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `name` | Profile identifier; the chooser and `--list` name the stack with it |
-| `description` | Shown with the profile in the picker |
-| `plugins` | List of [Agent Plugins](https://agent-plugins.org/specification/) directories[^plugin-dir] |
-| `env` | Optional: variables every launch exports, and `{ secret = true; hint ? };` ones it prompts for when unset |
-| `settings` | Optional: what `omp` and `opencode` default, in their own configuration's shape; a non-empty `settings.omp` also skips OMP's setup wizard (`OMP_SKIP_SETUP=1`), as if the profile had exported it |
-| `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness[^bare-command] |
+Write one only for what the extension cannot say: a plugin listed as a Nix path
+rather than a string, a package chosen by a Nix expression, or a field of your
+own. Where a directory holds both files, `agent-distro.nix` wins and the
+`plugin.json` extension is not read.
 
-[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A path is taken relative to the `agent-distro.nix`; a flake reference string is read at launch, or locked once when `mkProfile` builds the profile (impurely; see [Library](#library)).
+[^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. In `agent-distro.nix` a path is taken relative to that file; in the extension, relative to the plugin root, beginning with `./`. A flake reference string is read at launch, or locked once when `mkProfile` builds the profile (impurely; see [Library](#library)).
 [^bare-command]: An MCP server that a plugin declares by bare command, such as `"command": "mcp-nixos"`, is found on `PATH`. List its package here and it is built, or fetched from a binary cache, so the server starts at once instead of being downloaded when the agent first asks for it, and every user runs the version the profile pinned.
 
 ### Run with a profile
@@ -477,10 +528,11 @@ nix run github:juspay/agent-distro -- github:juspay/skills  # one profile
 AI_PROFILE=github:juspay/skills agent-distro omp            # the same, by variable
 ```
 
-A repository's own `agent-distro.nix` is composed on top of that whenever a harness starts inside
-one: with no profile named on the command line, the launcher composes the `agent-distro.nix` found
-from the working directory up to the git root over every `AI_PROFILE` entry.
-Discovery needs a git repository: an `agent-distro.nix` in a plain directory is read only when
+A repository's own profile is composed on top of that whenever a harness starts inside
+one: with no profile named on the command line, the launcher composes the profile found
+from the working directory up to the git root over every `AI_PROFILE` entry — the nearest
+`agent-distro.nix`, or a `plugin.json` where a directory has none.
+Discovery needs a git repository: a profile in a plain directory is read only when
 named, as `./dir` or in `AI_PROFILE`. A terminal opened in a repository, in Kolu or anywhere,
 starts its agents with that repository's profile on top of yours.
 
@@ -529,7 +581,7 @@ AI_PROFILE=github:juspay/skills agent-distro omp                      # the same
 ```
 
 Both work offline after first use; the built one also never touches the network for its plugins, and
-never compiles. juspay/skills itself stays a repository with an `agent-distro.nix`.
+never compiles. juspay/skills itself stays a repository: a `plugin.json` profile.
 
 ### Opt out, per launch
 
@@ -538,7 +590,7 @@ AGENT_DISTRO_SETTINGS=0 agent-distro omp     # plugins only: no env, no secrets 
 AI_PROFILE= agent-distro omp                 # nothing but the repository's own profile, if any
 ```
 
-- **Nothing to register.** Any repository with an `agent-distro.nix` is a profile.
+- **Nothing to register.** Any repository with an `agent-distro.nix` or a `plugin.json` is a profile.
 - **Always the latest agent-distro.** The profile is read when the harness starts, by whatever
   agent-distro you run. The repository pins nothing.
 - **Read once.** Each profile and its `packages` are evaluated on first use and cached per file,
@@ -570,29 +622,27 @@ nix run github:juspay/agent-distro -- github:juspay/skills omp --version
 AI_PROFILE=github:juspay/skills agent-distro claude
 ```
 
-Its `agent-distro.nix` is the whole of it:[^litellm-key]
+Its `plugin.json` is the whole of it:[^litellm-key]
 
-```nix
+```json
 {
-  name = "juspay";
-  description = "Juspay skills + Kolu, via Juspay's LiteLLM gateway";
-  plugins = [ ./. "github:juspay/kolu?dir=agent-plugin" ];
-  packages = pkgs: pkgs.lib.optionals (pkgs.stdenv.hostPlatform.system == "x86_64-linux") [ pkgs.mcp-nixos ];
-  env = {
-    LITELLM_BASE_URL = "https://grid.ai.juspay.net";
-    OMP_SKIP_SETUP = "1";
-    LITELLM_API_KEY = { secret = true; hint = "Create a key at grid.ai.juspay.net/dashboard (Juspay VPN)"; };
-  };
-  settings = {
-    omp.modelRoles = { default = "litellm/open-large"; slow = "litellm/open-large";
-                       task = "litellm/open-large"; smol = "litellm/open-fast"; };
-    opencode = {
-      providers.litellm = { package = "@opencode/ai/providers/openai-compatible";
-                            settings.baseURL = "https://grid.ai.juspay.net/v1"; };
-      model = "litellm/open-large";
-      agents.title.model = "litellm/open-fast";
-    };
-  };
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "juspay-skills",
+  "description": "Nix, writing, and tooling skills for coding agents",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": ["github:juspay/kolu?dir=agent-plugin"],
+      "packages": ["mcp-nixos"],
+      "env": {
+        "LITELLM_BASE_URL": "https://grid.ai.juspay.net",
+        "LITELLM_API_KEY": { "secret": true, "hint": "Create a key at grid.ai.juspay.net/dashboard (Juspay VPN)" }
+      },
+      "settings": {
+        "omp": { "modelRoles": { "default": "litellm/open-large", "task": "litellm/open-large", "smol": "litellm/open-fast" } },
+        "opencode": { "model": "litellm/open-large", "agents": { "title": { "model": "litellm/open-fast" } } }
+      }
+    }
+  }
 }
 ```
 
@@ -611,8 +661,8 @@ Its `agent-distro.nix` is the whole of it:[^litellm-key]
 A profile's `packages` must be in the binary cache on every platform its users run, or the launch stops. Check them ahead of time:
 
 ```sh
-nix run github:juspay/agent-distro#check-profile                       # ./agent-distro.nix
-nix run github:juspay/agent-distro#check-profile -- path/to/agent-distro.nix
+nix run github:juspay/agent-distro#check-profile                       # the working directory
+nix run github:juspay/agent-distro#check-profile -- path/to/profile    # its agent-distro.nix or plugin.json
 ```
 
 It runs the launcher's own policy, against agent-distro's nixpkgs and caches, and prints one line per package; it exits 1 if any is not cached, or cannot be told. It checks for the machine it runs on, so run it in CI once per platform.
@@ -631,7 +681,7 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 
 ## How it works
 
-- **Profile.** Harness-independent data: an `agent-distro.nix`, read at launch, or one built with `agent-distro.lib.mkProfile`.
+- **Profile.** Harness-independent data: an `agent-distro.nix` or a `plugin.json`, read at launch, or one built with `agent-distro.lib.mkProfile`.
 - **Harness.** The agent application.
 - **Plugin.** A portable Agent Plugins directory.
 - **Environment and settings.** Optional data a profile carries: variables every launch exports, a `secret` one prompted for when it is unset, and what `omp` and `opencode` default. OpenCode's own copy of those models comes from [`opencode-plugin-litellm`](https://github.com/yuseferi/opencode-litellm), vendored in `harnesses/opencode/npins` and loaded by every launch: it discovers a LiteLLM server's `/v1/models` and `/v1/model/info`, prices and limits included, and probes a local one when nothing names it.
@@ -724,7 +774,7 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 Consumers can import `test/lib.nix { pkgs; nixpkgs ? null; profiles ? [ ]; updated ? profiles; features ? [ ]; koluPlugin ? null; }`, where `nixpkgs` is the flake input `pkgs` came from, so the guest launchers name it by a locked reference rather than hold its source. `profiles` are `mkProfile` derivations, whose store paths are the `AI_PROFILE` the checks launch with; `updated` defaults to `profiles`, and a caller passes the same profiles with their plugins rebuilt to new store paths, for the `changed` fixture. Checks are selected by required features from each harness's metadata;[^features] `picker` is shared.
 
 - **Plugin rebuilds.** Select plugin rebuild checks only for nonempty skill plugins.
-- **Coverage.** The test flake covers the package with no profile (with kolu's plugin loaded at launch), the Juspay profile built with `mkProfile`, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and a repository's `agent-distro.nix` reaching OMP, Codex and Claude Code as the same profile built by `mkProfile` does; and `ca-update`: the update that takes the published content-addressed path as an untrusted user, and the skip where the index publishes none.
+- **Coverage.** The test flake covers the package with no profile (with kolu's plugin loaded at launch), the Juspay profile built with `mkProfile`, and spec fixtures, plus `profiles`: profiles read at launch, by path and `git+file:`, from a nested directory, in precedence order, refusing an uncached package, and the gateway profile carried as a `plugin.json` reaching OMP, Codex and Claude Code as the same profile built by `mkProfile` does; and `ca-update`: the update that takes the published content-addressed path as an untrusted user, and the skip where the index publishes none.
 
 [^features]: The features are `plugins`, `gateway` (the checks that run against the fixture-backed LiteLLM profile), `kolu`, `spec`, and `koluLaunch`, which loads `koluPlugin` through `AGENT_DISTRO_PLUGINS`.
 

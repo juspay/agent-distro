@@ -45,6 +45,14 @@ let
     system = pkgs.stdenv.hostPlatform.system;
     profile = profile // { plugins = [ "github:juspay/skills" ]; };
   }).drvPath;
+  # A profile that is only an Agent Plugin: the manifest names it and its own
+  # directory is its first plugin, with the extension's `plugins`, `packages`,
+  # `env` and `settings` (test/fixtures/plugin-profile).
+  pluginProfile = mkProfile {
+    system = pkgs.stdenv.hostPlatform.system;
+    profile = ./fixtures/plugin-profile;
+  };
+  pluginRoot = ./fixtures/plugin-profile;
   reader = builtins.baseNameOf (toString runtime.tree);
   plugin = ./fixtures/profile;
   # Built here for a host of another system: without packages it is this
@@ -80,6 +88,21 @@ pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq ]; } ''
   test -d ${pluginless}/share/agent-distro/plugins
   test -z "$(ls -A ${pluginless}/share/agent-distro/plugins)"
   test "$(jq -r .env.PLAIN ${pluginless}/share/agent-distro/profile.json)" = 1
+  # A plugin.json profile: the manifest names it, its own directory is its
+  # first plugin, the extension adds another and the rest.
+  plugin=${pluginProfile}
+  jq -e '
+    .name == "plugin-profile" and .description == "A profile that is only an Agent Plugin"
+    and .env.PLUGIN_PROFILE == "yes" and .settings.omp.modelRoles.default == "litellm/small"' \
+    "$plugin/share/agent-distro/profile.json"
+  test "$(readlink -f "$plugin/share/agent-distro/plugins/0/root")" = "$(readlink -f ${pluginRoot})"
+  test "$(readlink -f "$plugin/share/agent-distro/plugins/1/root")" = "$(readlink -f ${pluginRoot}/extra)"
+  jq -e '.manifest.name == "plugin-profile" and .skills.hello == ["SKILL.md"]' \
+    "$plugin/share/agent-distro/plugins/0/description.json"
+  jq -e '.manifest.name == "plugin-profile-extra" and .skills.extra == ["SKILL.md"]' \
+    "$plugin/share/agent-distro/plugins/1/description.json"
+  # `bin/` is the extension's `packages`, by nixpkgs attribute path.
+  test -x "$plugin/bin/hello"
   # `bin/` holds the packages' commands, and their other outputs are not here:
   # the tool's own `share/` would be, if the profile linked a whole `lib.getBin`
   # output rather than its `bin/`.

@@ -109,7 +109,12 @@ function readJson(path: string): Json {
   return JSON.parse(decodeUtf8(readFileSync(path)));
 }
 
-function readManifest(root: string, report: Report): Manifest {
+/**
+ * The manifest of the Agent Plugin at `root`: the one parser for `plugin.json`,
+ * used by the reader and by the resolver that reads a directory as a profile
+ * (src/profile/resolve.ts). Fatal for an invalid manifest.
+ */
+export function readManifest(root: string, report: Report): Manifest {
   const path = join(root, 'plugin.json');
   if (!lexists(path)) throw new Fatal('plugin.json is missing');
   const resolved = realpath(path);

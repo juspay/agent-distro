@@ -33,8 +33,19 @@ const fake = JSON.parse(fs.readFileSync(${JSON.stringify(join(work, 'fake.json')
 const miss = fake.miss;
 const unknown = fake.unknown;
 const drv = (name) => '/nix/store/' + '0'.repeat(32) + '-' + name + '.drv';
-if (args[0] === 'eval') process.stdout.write(fake.profile);
-else if (args[0] === 'build' && args.includes('--dry-run')) {
+if (args[0] === 'eval') {
+  // A plugin.json profile's packages: attribute paths, each its own derivation.
+  const expr = args[args.indexOf('--expr') + 1];
+  const literal = expr.slice(expr.indexOf('(builtins.fromJSON ') + 19, -1).replaceAll('\\$', '$');
+  const given = JSON.parse(JSON.parse(literal));
+  if (Array.isArray(given.attributes)) {
+    if (given.nixpkgs === null) process.stdout.write('null');
+    else process.stdout.write(JSON.stringify(given.attributes.map((name) => ({
+      name, drvPath: drv(name), out: '/nix/store/' + '0'.repeat(32) + '-' + name,
+      bin: '/nix/store/' + '0'.repeat(32) + '-' + name + '/bin',
+    }))));
+  } else process.stdout.write(fake.profile);
+} else if (args[0] === 'build' && args.includes('--dry-run')) {
   const name = args[1].replace(/^\\/nix\\/store\\/0+-/, '').replace(/\\.drv\\^\\*$/, '');
   if (miss.includes(name) || unknown.includes(name)) console.error('these derivations will be built:\\n  ' + drv(name));
 } else if (args[0] === 'derivation') {
@@ -102,6 +113,32 @@ test('no packages is nothing to fail', () => {
 
 test('a directory names the agent-distro.nix in it', () => {
   assert.equal(check([work], { profile: profile('hello-2.12') }).out, 'hello-2.12: cached\n');
+});
+
+test('a plugin.json profile is read as a directory, its packages by attribute path', () => {
+  const directory = join(work, 'plugin');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'plugin.json'), JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+    name: 'manifest-profile',
+    extensions: { 'asia.nixos.agent-distro': { packages: ['mcp-nixos-3.0.1', 'hello-2.12'] } },
+  }));
+  assert.equal(check([directory]).out, 'mcp-nixos-3.0.1: cached\nhello-2.12: cached\n');
+  // A package that would build fails, in the launcher's words.
+  const missed = check([directory], { miss: ['mcp-nixos-3.0.1'] });
+  assert.equal(missed.status, 1);
+  assert.match(missed.out, /package mcp-nixos-3\.0\.1 is not in the binary cache/);
+});
+
+test('a plugin.json profile with no packages is nothing to fail', () => {
+  const directory = join(work, 'bare-plugin');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'plugin.json'), JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', name: 'bare',
+  }));
+  const result = check([directory]);
+  assert.equal(result.status, 0);
+  assert.match(result.out, /: no packages\n$/);
 });
 
 test('a missing file is a usage error', () => {

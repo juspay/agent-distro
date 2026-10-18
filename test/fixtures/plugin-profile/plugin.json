@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "plugin-profile",
+  "version": "1.0.0",
+  "description": "A profile that is only an Agent Plugin",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": ["./extra"],
+      "packages": ["hello"],
+      "env": { "PLUGIN_PROFILE": "yes" },
+      "settings": { "omp": { "modelRoles": { "default": "litellm/small" } } }
+    }
+  }
+}
