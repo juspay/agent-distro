@@ -150,6 +150,43 @@
               same "--standalone $TMPDIR/project" "$TMPDIR/project"
               touch "$out"
             '';
+          # The OMP launcher's setup-wizard rule, without a VM or OMP: a
+          # non-empty `settings.omp` exports `OMP_SKIP_SETUP`, a profile that
+          # says nothing leaves it unset, and the user's own value survives.
+          # Built against a package that only prints the variable it was handed.
+          omp-skip-setup =
+            let
+              argv = pkgs.writeShellScriptBin "omp" ''
+                printf '%s' "''${OMP_SKIP_SETUP-unset}"
+              '' // { version = "0"; };
+              launcher = (agent-distro.lib.mkLaunchers {
+                inherit pkgs;
+                sources = _: _: argv;
+              }).omp;
+            in
+            pkgs.runCommand "omp-skip-setup-check" { nativeBuildInputs = [ pkgs.bash ]; } ''
+              export HOME="$TMPDIR/home" XDG_CACHE_HOME="$TMPDIR/cache"
+              mkdir -p "$HOME" "$XDG_CACHE_HOME"
+              omp=${lib.getExe launcher}
+              # A profile handed over as the picker hands one, with the settings
+              # section its `agent-distro.nix` carries (src/plugin/launch.ts).
+              resolved() { printf '{"name":"%s","description":"d","source":"variable","origin":"/%s","plugins":[],"env":{},"settings":%s,"paths":[]}' "$1" "$1" "$2"; }
+              configured=$(resolved configured '{"omp":{"modelRoles":{"default":"litellm/large"}}}')
+              silent=$(resolved silent '{}')
+              same() {
+                expected=$1
+                shift
+                actual=$("$@")
+                if [ "$actual" != "$expected" ]; then
+                  echo "OMP_SKIP_SETUP: expected '$expected', got '$actual'" >&2
+                  exit 1
+                fi
+              }
+              same 1 env AGENT_DISTRO_PROFILE="$configured" "$omp"
+              same unset env AGENT_DISTRO_PROFILE="$silent" "$omp"
+              same keep env AGENT_DISTRO_PROFILE="$configured" OMP_SKIP_SETUP=keep "$omp"
+              touch "$out"
+            '';
           # `--list --json` alone, without a VM: its type, the picker's menu
           # with the profile in effect, `--list`, and versions stripped of `+`
           # suffixes.
