@@ -36,6 +36,8 @@ let
   build = mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = profile; };
   asDirectory = mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = ./fixtures/profile; };
   asFile = mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = ./fixtures/profile/agent-distro.nix; };
+  # A Nix profile file under another name is the Nix form too, as it was before.
+  asNamedFile = mkProfile { system = pkgs.stdenv.hostPlatform.system; profile = ./fixtures/profile/dev.nix; };
   # A flake input is a source whose `outPath` is a store path; it is built too.
   asSource = mkProfile {
     system = pkgs.stdenv.hostPlatform.system;
@@ -79,6 +81,8 @@ assert !badMember.success;
 assert forForeign.drvPath == pluginsOnly.drvPath;
 # A manifest named by its file, and one by its directory, are the same profile.
 assert pluginProfile.drvPath == asManifestFile.drvPath;
+# A Nix profile file under another name is the same profile as the directory's.
+assert asNamedFile.drvPath == asDirectory.drvPath;
 pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq pkgs.nix ]; } ''
   built=${build}
   jq -e --arg reader ${lib.escapeShellArg reader} '
@@ -93,8 +97,9 @@ pkgs.runCommand "mk-profile" { nativeBuildInputs = [ pkgs.jq pkgs.nix ]; } ''
     and .skills.hello == ["SKILL.md"]' "$built/share/agent-distro/plugins/0/description.json"
   # bin/ is the profile's packages.
   test "$("$built/bin/profile-tool")" = tool
-  # A directory, a file, a source and the attribute set are the same profile.
-  for other in ${asDirectory} ${asFile} ${asSource}; do
+  # A directory, a file, a file under another name, a source and the attribute
+  # set are the same profile.
+  for other in ${asDirectory} ${asFile} ${asNamedFile} ${asSource}; do
     test -f "$other/share/agent-distro/profile.json"
   done
   # A profile with no plugins has an empty `plugins/` and its env.

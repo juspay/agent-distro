@@ -291,7 +291,7 @@ in
 
     with subtest("the same profile as a plugin.json reaches OMP, Codex and Claude Code"):
         user("cp -r ${juspay-skills} ~/manifest-gateway && chmod -R u+w ~/manifest-gateway"
-             + " && rm ~/manifest-gateway/agent-distro.nix")
+             + " && rm -f ~/manifest-gateway/agent-distro.nix")
         # The manifest in place of the file: the directory is the profile and
         # its first plugin, and the extension carries the rest.
         write("~/manifest-gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})

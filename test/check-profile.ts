@@ -52,16 +52,12 @@ if (args[0] === 'eval') {
   const given = JSON.parse(JSON.parse(literal));
   fs.writeFileSync(path.join(bin, 'eval.json'), JSON.stringify({ args, given, env: process.env }));
   // A plugin.json profile's packages: attribute paths, answered from
-  // <bin>/packages.json, or null until nixpkgs is given.
+  // <bin>/packages.json.
   if (Array.isArray(given.attributes)) {
-    if (!given.attributes.length) { process.stdout.write('[]'); }
-    else if (given.nixpkgs === null) { process.stdout.write('null'); }
-    else {
-      const table = JSON.parse(fs.readFileSync(path.join(bin, 'packages.json'), 'utf8'));
-      const missing = given.attributes.filter((attribute) => !(attribute in table));
-      if (missing.length) { console.error('error: profile package: nixpkgs has no attribute ' + missing[0]); process.exit(1); }
-      process.stdout.write(JSON.stringify(given.attributes.map((attribute) => table[attribute])));
-    }
+    const table = JSON.parse(fs.readFileSync(path.join(bin, 'packages.json'), 'utf8'));
+    const missing = given.attributes.filter((attribute) => !(attribute in table));
+    if (missing.length) { console.error('error: profile package: nixpkgs has no attribute ' + missing[0]); process.exit(1); }
+    process.stdout.write(JSON.stringify(given.attributes.map((attribute) => table[attribute])));
   } else if (!fs.existsSync(given.file + '.json')) { console.error('error: undefined variable'); process.exit(1); }
   else {
     const answer = JSON.parse(fs.readFileSync(given.file + '.json', 'utf8'));
@@ -240,6 +236,21 @@ test('discovery goes from the working directory up to the git root, and no furth
   assert.equal(profile.discover(foreign), null);
   writeFileSync(join(foreign, 'agent-distro.nix'), '{ }');
   assert.equal(profile.discover(join(foreign, 'nested/deep')), join(foreign, 'agent-distro.nix'));
+  // A `plugin.json` that cannot be read at all is skipped too, not a failure:
+  // an EACCES, or a race with deletion, must not fail every launch there. Only
+  // a user whose reads can be denied (not root) can show it.
+  if (process.getuid?.() !== 0) {
+    const unreadable = temporary();
+    mkdirSync(join(unreadable, '.git'));
+    const at = join(unreadable, 'plugin.json');
+    writeFileSync(at, validManifest());
+    chmodSync(at, 0o000);
+    try {
+      assert.equal(profile.discover(unreadable), null);
+    } finally {
+      chmodSync(at, 0o644);
+    }
+  }
 });
 
 test('the stack: a positional profile alone, else every AI_PROFILE entry and the repository', () => {

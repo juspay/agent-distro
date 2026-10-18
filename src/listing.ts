@@ -8,7 +8,7 @@
  *                      "title": "Claude Code", "version": "2.1.291" } ],
  *     "profile": { "description": "…", "name": "ekala",
  *                  "origin": "/home/me/ekala/agent-distro.nix", "source": "repository",
- *                  "over": { "description": "…", "name": "juspay",
+ *                  "over": { "description": "…", "name": "juspay-skills",
  *                            "origin": "github:juspay/skills", "source": "variable" } } }
  *
  * `harnesses` is what the package carries, in menu order. `version` is the

@@ -39,8 +39,7 @@ if (args[0] === 'eval') {
   const literal = expr.slice(expr.indexOf('(builtins.fromJSON ') + 19, -1).replaceAll('\\$', '$');
   const given = JSON.parse(JSON.parse(literal));
   if (Array.isArray(given.attributes)) {
-    if (given.nixpkgs === null) process.stdout.write('null');
-    else process.stdout.write(JSON.stringify(given.attributes.map((name) => ({
+    process.stdout.write(JSON.stringify(given.attributes.map((name) => ({
       name, drvPath: drv(name), out: '/nix/store/' + '0'.repeat(32) + '-' + name,
       bin: '/nix/store/' + '0'.repeat(32) + '-' + name + '/bin',
     }))));

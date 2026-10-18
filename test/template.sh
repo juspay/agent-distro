@@ -11,7 +11,7 @@ git init -q
 system=$(nix eval --impure --raw --expr builtins.currentSystem)
 distro=$(nix build --no-link --print-out-paths "$root#packages.$system.default")
 AI_HARNESS=omp "$distro/bin/agent-distro" --version
-# The same agent-distro.nix, read at launch: from the repository it sits in,
+# The same plugin.json profile, read at launch: from the repository it sits in,
 # and by path from anywhere. It sets no `env` or `settings`, so both reads
 # cover a profile with neither.
 listed=$("$distro/bin/agent-distro" --list --json)

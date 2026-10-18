@@ -4,7 +4,7 @@
 # One package, so every launch is a harness. The profile in effect is resolved
 # here (src/profile/resolve.ts) and handed to the launcher in
 # AGENT_DISTRO_PROFILE: a leading positional selector, else the repository's
-# `agent-distro.nix` over every AI_PROFILE entry.
+# profile — an `agent-distro.nix`, or a `plugin.json` — over every AI_PROFILE entry.
 { lib, pkgs, writeShellApplication, launchers, nixpkgs ? null }:
 let
   runtime = import ./runtime.nix pkgs;

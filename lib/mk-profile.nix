@@ -44,26 +44,26 @@ let
   pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
   inherit (pkgs) lib;
   runtime = import ./runtime.nix pkgs;
-  # The directory a path-like `profile` names: the file itself or the directory
-  # holding it. A flake input is a source whose `outPath` is a store path, and
-  # its context rides the path, so the build depends on the input either way.
-  directory =
-    let
-      at =
-        if builtins.isPath profile then profile
-        else
-          /. + builtins.unsafeDiscardStringContext
-            (if builtins.isAttrs profile then profile.outPath else toString profile);
-    in
-    if builtins.elem (builtins.baseNameOf (toString at)) [ "agent-distro.nix" "plugin.json" ]
-    then builtins.dirOf at
-    else at;
-  # An `agent-distro.nix` wins over a `plugin.json`, as it does at launch
-  # (src/profile/resolve.ts `findProfile`).
+  # The path-like `profile` names: a regular file as it is — a `plugin.json` is
+  # the manifest form, any other a Nix file, as before — or the profile file in
+  # that directory, `agent-distro.nix` winning where it holds both
+  # (src/profile/resolve.ts `findProfile`). A flake input is a source whose
+  # `outPath` is a store path, and its context rides the path, so the build
+  # depends on the input either way.
+  at =
+    if builtins.isPath profile then profile
+    else
+      /. + builtins.unsafeDiscardStringContext
+        (if builtins.isAttrs profile then profile.outPath else toString profile);
   file =
-    if builtins.pathExists (directory + "/agent-distro.nix") then directory + "/agent-distro.nix"
-    else if builtins.pathExists (directory + "/plugin.json") then directory + "/plugin.json"
+    if !(builtins.pathExists at) then null
+    else if builtins.readFileType at == "regular" then at
+    else if builtins.pathExists (at + "/agent-distro.nix") then at + "/agent-distro.nix"
+    else if builtins.pathExists (at + "/plugin.json") then at + "/plugin.json"
     else null;
+  # The directory a plugin.json profile's manifest is in, which is also its
+  # first plugin.
+  directory = if file == null then at else builtins.dirOf file;
   # The manifest of a plugin.json profile, read here at evaluation rather than
   # by `runtime.readPlugin`: that reader is a derivation, and reading one needs
   # import-from-derivation, which `allow-import-from-derivation = false`
@@ -71,7 +71,7 @@ let
   # validates the same manifest at build time (`described` below).
   manifest =
     if file == null || builtins.baseNameOf (toString file) != "plugin.json" then null
-    else builtins.fromJSON (builtins.readFile (directory + "/plugin.json"));
+    else builtins.fromJSON (builtins.readFile file);
   # The attribute set a plugin.json profile stands for: the manifest's name and
   # description, its directory as the first plugin (and never listed), and the
   # extension's members, with the shapes the resolver validates at launch.

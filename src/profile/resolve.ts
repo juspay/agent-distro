@@ -242,11 +242,11 @@ function isManifest(file: string): boolean {
   try {
     value = JSON.parse(readFileSync(file, 'utf8'));
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      log.profile.debug(`${file}: not valid JSON; not read as a profile`);
-      return false;
-    }
-    throw error;
+    // Unreadable or not JSON — EACCES, or a race with deletion between the
+    // `isFile` and this read, as much as a syntax error: discovery skips it
+    // rather than fail every launch in the repository.
+    log.profile.debug(`${file}: not read as a profile: ${(error as Error).message}`);
+    return false;
   }
   const schema = isObject(value) ? value.$schema : undefined;
   if (!isString(schema) || !Object.hasOwn(PLUGIN_SCHEMAS, schema)) {
@@ -273,10 +273,10 @@ export function discover(cwd: string): string | null {
           log.profile.debug(`${nix}: ${FILE} and ${MANIFEST} are both here; ${FILE} wins and the ${MANIFEST} extension is not read`);
         }
         found = nix;
-      } else if (isFile(manifest) && isManifest(manifest)) {
-        // A `plugin.json` that is not an Agent Plugin — Grafana's, say — is
-        // not this repository's profile: keep walking, and say so at debug.
-        found = manifest;
+      } else if (isFile(manifest)) {
+        // `isManifest` logs, at debug, a `plugin.json` that is not an Agent
+        // Plugin — Grafana's, say — and discovery walks past it.
+        if (isManifest(manifest)) found = manifest;
       }
     }
     // `.git` is a directory in a clone and a file in a worktree or submodule.

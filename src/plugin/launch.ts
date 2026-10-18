@@ -40,7 +40,7 @@
  * profile below it, and among those the last of a name wins.
  *
  * A launch names the profile in effect on stderr when a repository's
- * `agent-distro.nix` or AI_PROFILE chose it — the whole stack, from the bottom
+ * profile or AI_PROFILE chose it — the whole stack, from the bottom
  * up, worded as `--list` words it and followed by the website (`SITE`) — since
  * that line is the only one a plain launch prints and the change to plugins,
  * PATH, env and settings is silent otherwise. At debug it also logs each plugin

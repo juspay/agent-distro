@@ -20,7 +20,7 @@ To keep the agents installed and updated, see [Install and keep updated](#instal
 
 ### The chooser
 
-The chooser is master–detail: harnesses are the list on the left, and the highlighted harness fills the panel on the right.[^chooser-rows] The [profiles](#profiles) in effect for the launch are in the header — named from the bottom of the stack up, `juspay + repo` — and the row under it says what the top one is and where every one of them came from. Nothing in the box is ever cut.
+The chooser is master–detail: harnesses are the list on the left, and the highlighted harness fills the panel on the right.[^chooser-rows] The [profiles](#profiles) in effect for the launch are in the header — named from the bottom of the stack up, `juspay-skills + repo` — and the row under it says what the top one is and where every one of them came from. Nothing in the box is ever cut.
 
 Here the terminal is in a repository whose profile is Juspay's `plugin.json`, and `pi` is remembered from last time.
 
@@ -68,7 +68,7 @@ A leading argument naming a harness is the harness. Otherwise any value containi
 agent-distro codex --version
 agent-distro github:juspay/skills claude --version
 agent-distro ./path/to/repo claude
-agent-distro /nix/store/…-agent-distro-profile-juspay omp   # a built profile, by its store path
+agent-distro /nix/store/…-agent-distro-profile-juspay-skills omp   # a built profile, by its store path
 agent-distro --list                      # the profiles in effect, then harness title version, one per line
 agent-distro --list --json               # the same, as JSON (below)
 ```
@@ -555,13 +555,13 @@ AI_PROFILE="github:juspay/skills github:ekala-project/ekala-ai-skills" agent-dis
 
 So in `~/code/kolu`, with the variable above, OMP starts with Juspay's skills, Ekala's skills, and
 Kolu's own — and Juspay's gateway, because nothing above it set another one. The picker header
-names the stack: `juspay + ekala + kolu`.
+names the stack: `juspay-skills + ekala + kolu`.
 
 | Field | Composed, from the bottom up |
 | --- | --- |
 | `plugins`, `packages` | All of them, the bottom first; a plugin replaces one of the same name beneath it |
 | `env`, `settings` | Key by key, the topmost winning; the same harness a second time replaces that harness's whole section |
-| `name`, `description` | The topmost; the chooser and `--list` name the whole stack, as `juspay + ekala + kolu` |
+| `name`, `description` | The topmost; the chooser and `--list` name the whole stack, as `juspay-skills + ekala + kolu` |
 
 A profile named on the command line is that profile alone: nothing is composed beneath it, not even
 a repository's own.
@@ -583,7 +583,7 @@ Outside Home Manager, `agent-distro.lib.mkProfile { system; profile = inputs.ski
 derivation; its store path works anywhere a reference does:
 
 ```sh
-AI_PROFILE=/nix/store/…-agent-distro-profile-juspay agent-distro omp   # built
+AI_PROFILE=/nix/store/…-agent-distro-profile-juspay-skills agent-distro omp   # built
 AI_PROFILE=github:juspay/skills agent-distro omp                      # the same profile, read at launch
 ```
 
