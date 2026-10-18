@@ -463,7 +463,7 @@ A profile is an `agent-distro.nix` in a git repository:
 | `description` | Shown with the profile in the picker |
 | `plugins` | List of [Agent Plugins](https://agent-plugins.org/specification/) directories[^plugin-dir] |
 | `env` | Optional: variables every launch exports, and `{ secret = true; hint ? };` ones it prompts for when unset |
-| `settings` | Optional: what `omp` and `opencode` default, in their own configuration's shape |
+| `settings` | Optional: what `omp` and `opencode` default, in their own configuration's shape; a non-empty `settings.omp` also skips OMP's setup wizard (`OMP_SKIP_SETUP=1`), as if the profile had exported it |
 | `packages` | Optional `pkgs: [ … ]`: commands the plugins' MCP servers name, put first on `PATH` for every harness[^bare-command] |
 
 [^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A path is taken relative to the `agent-distro.nix`; a flake reference string is read at launch, or locked once when `mkProfile` builds the profile (impurely; see [Library](#library)).

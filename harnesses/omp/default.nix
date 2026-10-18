@@ -39,6 +39,14 @@ let
     if [ -n "''${PI_CODING_AGENT_DIR:-}''${HOME:-}" ]; then
       ${runtime.script "harness/omp.ts"} "$agent_dir/config.yml" "''${default_layers[@]}"
     fi
+
+    # A profile that configures OMP has answered its setup wizard, so skip it:
+    # `settings.omp` non-empty means the profile has decided the models. With
+    # none the wizard runs as upstream intends, and a value the user exported
+    # is never replaced.
+    if [ -n "$profile_settings" ] && [ -z "''${OMP_SKIP_SETUP+x}" ]; then
+      export OMP_SKIP_SETUP=1
+    fi
   '';
 in
 writeShellApplication {
