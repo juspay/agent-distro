@@ -474,41 +474,23 @@ const EVALUATE_PACKAGES = join(import.meta.dirname, 'evaluate-packages.nix');
 const READER = join(import.meta.dirname, '../plugin/read.ts');
 
 /**
- * One `nix eval --json` of `script` over `value`: without network or the user's
- * environment (restrict-eval also empties getEnv), reading nothing beyond the
- * `includes` paths. `--impure` is only for reading a checkout in place, outside
- * the store; restrict-eval bounds it. `what` names the work in nix's failure,
- * as nix's own message follows it.
- */
-function restrictedEval(script: string, includes: string[], value: unknown, what: string): unknown {
-  return JSON.parse(nix(['eval', '--json', '--impure',
-    '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
-    ...includes.flatMap((path) => ['-I', path]),
-    '--expr', `import ${JSON.stringify(script)} (${nixJSON(value)})`],
-  what, nixEnvironment(true)));
-}
-
-/**
- * The nixpkgs a profile's `packages` are evaluated against: the launcher's
- * locked reference, or the store path it holds while that is still there.
- */
-function nixpkgsFor(info: Info, cache: string | null, what: string): string {
-  const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
-  return isAbsolute(info.nixpkgs) ? info.nixpkgs
-    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
-}
-
-/**
  * Evaluate a profile's `packages`: nixpkgs attribute paths, against the nixpkgs
- * the launcher holds, for `system`, restricted and never compiling. An
- * attribute nixpkgs does not have is an error naming it. The extension names
- * the attribute paths themselves, so nixpkgs is fetched up front and the list
+ * the launcher holds — its store path while that is there, else its locked
+ * reference, fetched — for `system`, restricted (no network, no user
+ * environment, nothing beyond nixpkgs and this evaluator) and never compiling.
+ * An attribute nixpkgs does not have is an error naming it. The extension names
+ * the attribute paths themselves, so nixpkgs is resolved up front and the list
  * is evaluated once.
  */
 function evaluatePackages(attributes: string[], info: Info, cache: string | null, what: string): Package[] {
-  const nixpkgs = nixpkgsFor(info, cache, what);
-  const value = restrictedEval(EVALUATE_PACKAGES, [dirname(EVALUATE_PACKAGES), nixpkgs],
-    { attributes, nixpkgs, system: info.system }, `${what}: cannot evaluate its ${EXTENSION} \`packages\``);
+  const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
+  const nixpkgs = isAbsolute(info.nixpkgs) ? info.nixpkgs
+    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
+  const value: unknown = JSON.parse(nix(['eval', '--json', '--impure',
+    '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
+    ...[dirname(EVALUATE_PACKAGES), nixpkgs].flatMap((path) => ['-I', path]),
+    '--expr', `import ${JSON.stringify(EVALUATE_PACKAGES)} (${nixJSON({ attributes, nixpkgs, system: info.system })})`],
+  `${what}: cannot evaluate its ${EXTENSION} \`packages\``, nixEnvironment(true)));
   if (!Array.isArray(value) || !value.every(isPackage)) {
     throw new LaunchError(`${what}: its ${EXTENSION} \`packages\` did not evaluate`);
   }
