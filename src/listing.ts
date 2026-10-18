@@ -56,7 +56,7 @@ export type Listing = {
 /** Names are selectors: one shell word, no `/`. */
 export const isName = (value: unknown): value is string => typeof value === 'string' && /^[^\s/]+$/.test(value);
 
-/** The profile in effect's name, then those it is composed over: `juspay + repo`. */
+/** The profile in effect's name, then those it is composed over: `juspay-skills + repo`. */
 export function nameText({ name, over }: Pick<InEffect, 'name' | 'over'>): string {
   return over ? `${nameText(over)} + ${name}` : name;
 }

@@ -143,6 +143,19 @@ in
     def write(path, text):
         user(f"mkdir -p $(dirname {path}) && printf %s {shlex.quote(text)} > {path}")
 
+    # The gateway check, once: the same script, test modules, `mcp-nixos` bin
+    # and profile env/settings; only the expected skills differ between the two
+    # forms the same profile is carried in.
+    CHECK = ["python", "${./profiles/check-gateway-profile.py}", None, "agent-distro-",
+             "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
+             "${pkgs.mcp-nixos}/bin",
+             ${builtins.toJSON (builtins.toJSON profileEnv)}, ${builtins.toJSON (builtins.toJSON profileSettings)}]
+
+    def gateway_check(expected):
+        argv = list(CHECK)
+        argv[2] = json.dumps(expected)
+        return " ".join(shlex.quote(str(a)) for a in argv)
+
     def launched(command):
         """The plugins a stub harness was started with, by manifest name, and where it found hello."""
         lines = user(command).splitlines()
@@ -282,12 +295,7 @@ in
         write("~/gateway/agent-distro.nix", ${builtins.toJSON profileFile})
         gateway = "AI_PROFILE=/home/testuser/gateway"
         assert in_effect("~", gateway)["name"] == "gateway"
-        user(f"{gateway} python " + shlex.quote("${./profiles/check-gateway-profile.py}") + " " + " ".join(shlex.quote(a) for a in [
-            ${builtins.toJSON (builtins.toJSON expectedNix)}, "agent-distro-",
-            "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
-            "${pkgs.mcp-nixos}/bin",
-            ${builtins.toJSON (builtins.toJSON profileEnv)},
-            ${builtins.toJSON (builtins.toJSON profileSettings)}]))
+        user(f"{gateway} " + gateway_check(${builtins.toJSON expectedNix}))
 
     with subtest("the same profile as a plugin.json reaches OMP, Codex and Claude Code"):
         user("cp -r ${juspay-skills} ~/manifest-gateway && chmod -R u+w ~/manifest-gateway"
@@ -297,11 +305,6 @@ in
         write("~/manifest-gateway/plugin.json", ${builtins.toJSON (builtins.toJSON profileManifest)})
         manifestGateway = "AI_PROFILE=/home/testuser/manifest-gateway"
         assert in_effect("~", manifestGateway)["name"] == "gateway"
-        user(f"{manifestGateway} python " + shlex.quote("${./profiles/check-gateway-profile.py}") + " " + " ".join(shlex.quote(a) for a in [
-            ${builtins.toJSON (builtins.toJSON expectedManifest)}, "agent-distro-",
-            "${../harnesses/omp/tests}", "${../harnesses/codex/tests}", "${../harnesses/claude/tests}",
-            "${pkgs.mcp-nixos}/bin",
-            ${builtins.toJSON (builtins.toJSON profileEnv)},
-            ${builtins.toJSON (builtins.toJSON profileSettings)}]))
+        user(f"{manifestGateway} " + gateway_check(${builtins.toJSON expectedManifest}))
   '';
 }

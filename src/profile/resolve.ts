@@ -256,6 +256,11 @@ function isManifest(file: string): boolean {
   return true;
 }
 
+/** Say that a directory's `FILE` wins over its `MANIFEST`; `where` names it. */
+function notePrecedence(where: string): void {
+  log.profile.debug(`${where}: ${FILE} and ${MANIFEST} are both here; ${FILE} wins and the ${MANIFEST} extension is not read`);
+}
+
 /**
  * The profile file nearest `cwd`, at or below the git root that holds it: an
  * `agent-distro.nix` or, where a directory has none, a `plugin.json` that is
@@ -269,9 +274,7 @@ export function discover(cwd: string): string | null {
       const nix = join(directory, FILE);
       const manifest = join(directory, MANIFEST);
       if (isFile(nix)) {
-        if (isFile(manifest)) {
-          log.profile.debug(`${nix}: ${FILE} and ${MANIFEST} are both here; ${FILE} wins and the ${MANIFEST} extension is not read`);
-        }
+        if (isFile(manifest)) notePrecedence(nix);
         found = nix;
       } else if (isFile(manifest)) {
         // `isManifest` logs, at debug, a `plugin.json` that is not an Agent
@@ -467,23 +470,43 @@ const EVALUATE_PACKAGES = join(import.meta.dirname, 'evaluate-packages.nix');
 const READER = join(import.meta.dirname, '../plugin/read.ts');
 
 /**
+ * One `nix eval --json` of `script` over `value`: without network or the user's
+ * environment (restrict-eval also empties getEnv), reading nothing beyond the
+ * `includes` paths. `--impure` is only for reading a checkout in place, outside
+ * the store; restrict-eval bounds it. `what` names the work in nix's failure,
+ * as nix's own message follows it.
+ */
+function restrictedEval(script: string, includes: string[], value: unknown, what: string): unknown {
+  return JSON.parse(nix(['eval', '--json', '--impure',
+    '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
+    ...includes.flatMap((path) => ['-I', path]),
+    '--expr', `import ${JSON.stringify(script)} (${nixJSON(value)})`],
+  what, nixEnvironment(true)));
+}
+
+/**
+ * The nixpkgs a profile's `packages` are evaluated against: the launcher's
+ * locked reference, or the store path it holds while that is still there.
+ */
+function nixpkgsFor(info: Info, cache: string | null, what: string): string {
+  const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
+  return isAbsolute(info.nixpkgs) ? info.nixpkgs
+    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
+}
+
+/**
  * Evaluate `file`, without network or the user's environment (restrict-eval
  * also empties getEnv), and reading nothing beyond its directory,
- * evaluate.nix and nixpkgs. --impure is only for reading the checkout in
- * place, outside the store; restrict-eval bounds it. Without nixpkgs, a
- * profile with packages evaluates them to null: only then is nixpkgs fetched
- * and the file evaluated again.
+ * evaluate.nix and nixpkgs. Without nixpkgs, a profile with packages evaluates
+ * them to null: only then is nixpkgs fetched and the file evaluated again.
  */
 export function evaluate(file: string, info: Info, cache: string | null, what: string): Evaluated {
-  const run = (nixpkgs: string | null): unknown => JSON.parse(nix(['eval', '--json', '--impure',
-    '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
-    ...[dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])].flatMap((path) => ['-I', path]),
-    '--expr', `import ${JSON.stringify(EVALUATE)} (${nixJSON({ file, nixpkgs, system: info.system })})`],
-  `${what}: cannot evaluate ${file}`, nixEnvironment(true)));
+  const run = (nixpkgs: string | null): unknown => restrictedEval(EVALUATE,
+    [dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])],
+    { file, nixpkgs, system: info.system }, `${what}: cannot evaluate ${file}`);
   let value = run(null);
   if (isObject(value) && value.packages === null) {
-    const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
-    value = run(isAbsolute(info.nixpkgs) ? info.nixpkgs : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache));
+    value = run(nixpkgsFor(info, cache, what));
   }
   if (isObject(value)) {
     if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
@@ -501,14 +524,9 @@ export function evaluate(file: string, info: Info, cache: string | null, what: s
  * nixpkgs is fetched up front and the list is evaluated once.
  */
 function evaluatePackages(attributes: string[], info: Info, cache: string | null, what: string): Package[] {
-  const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
-  const nixpkgs = isAbsolute(info.nixpkgs) ? info.nixpkgs
-    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
-  const value: unknown = JSON.parse(nix(['eval', '--json', '--impure',
-    '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
-    ...[dirname(EVALUATE_PACKAGES), nixpkgs].flatMap((path) => ['-I', path]),
-    '--expr', `import ${JSON.stringify(EVALUATE_PACKAGES)} (${nixJSON({ attributes, nixpkgs, system: info.system })})`],
-  `${what}: cannot evaluate its ${EXTENSION} \`packages\``, nixEnvironment(true)));
+  const nixpkgs = nixpkgsFor(info, cache, what);
+  const value = restrictedEval(EVALUATE_PACKAGES, [dirname(EVALUATE_PACKAGES), nixpkgs],
+    { attributes, nixpkgs, system: info.system }, `${what}: cannot evaluate its ${EXTENSION} \`packages\``);
   if (!Array.isArray(value) || !value.every(isPackage)) {
     throw new LaunchError(`${what}: its ${EXTENSION} \`packages\` did not evaluate`);
   }
@@ -671,9 +689,7 @@ export function findProfile(path: string, what: string): ProfileFile | null {
   const hasNix = isFile(nix);
   const hasManifest = isFile(manifest);
   if (hasNix) {
-    if (hasManifest) {
-      log.profile.debug(`${what}: ${FILE} and ${MANIFEST} are both here; ${FILE} wins and the ${MANIFEST} extension is not read`);
-    }
+    if (hasManifest) notePrecedence(what);
     return { kind: 'nix', file: nix };
   }
   if (hasManifest) return { kind: 'plugin', file: manifest };
