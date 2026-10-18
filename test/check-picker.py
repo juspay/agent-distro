@@ -424,7 +424,7 @@ with tempfile.TemporaryDirectory() as state:
 
     # Naming the profile still shows the chooser, so its selection is remembered.
     narrowed = run([(LAUNCH, b'/no-matches'), (b'no matches', ESCAPE + b'\r')],
-                   version(NAMES[0]), args=[OTHER, '--version'], state=state)
+                   version(NAMES[0], profile=True), args=[OTHER, '--version'], state=state)
     assert narrowed.choice == NAMES[0], narrowed.choice
     for args, extra in [([OTHER, NAMES[-1], '--version'], {}),
                         (['--version'], {'AI_HARNESS': NAMES[-1]})]:
