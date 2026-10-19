@@ -4,7 +4,7 @@
   "description": "agent-distro maintainers: odu, to run this repository's CI",
   "extensions": {
     "asia.nixos.agent-distro": {
-      "plugins": ["github:juspay/odu?dir=agent-plugin"]
+      "plugins": ["github:juspay/odu"]
     }
   }
 }
