@@ -16,7 +16,7 @@ stdenvNoCC.mkDerivation {
       --from markdown+smart --to html5 \
       --template template.html --metadata-file "$metadataPath" \
       --toc --toc-depth 3 --wrap none --columns 500
-    cp style.css site.js logo.svg demo.gif demo.png og.png "$out/"
+    cp style.css site.js logo.svg demo.gif demo.png og.png agent-distro.schema.json "$out/"
     # Pages caches assets for ten minutes; a content hash in the URL means a
     # new page never runs with an old stylesheet or script.
     for asset in style.css site.js; do

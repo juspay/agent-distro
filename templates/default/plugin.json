@@ -1,5 +1,13 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "my-skills",
-  "description": "My skills"
+  "name": "my-distribution",
+  "description": "My skills with your choice of coding agent",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": [],
+      "packages": [],
+      "env": {},
+      "settings": {}
+    }
+  }
 }

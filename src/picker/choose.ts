@@ -143,7 +143,7 @@ export class Menu {
 
   constructor(listing: Listing, remembered = '', profile?: InEffect) {
     this.harnesses = listing.harnesses;
-    // Named with the profiles it is composed over: `juspay + repo`.
+    // Named with the profiles it is composed over: `juspay-skills + repo`.
     this.name = profile ? nameText(profile) : '';
     this.description = profile?.description ?? '';
     this.source = profile ? sourceText(profile) : '';

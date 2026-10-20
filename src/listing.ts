@@ -7,17 +7,17 @@
  *   { "harnesses": [ { "name": "claude", "tagline": "…",
  *                      "title": "Claude Code", "version": "2.1.291" } ],
  *     "profile": { "description": "…", "name": "ekala",
- *                  "origin": "/home/me/ekala/agent-distro.nix", "source": "repository",
- *                  "over": { "description": "…", "name": "juspay",
+ *                  "origin": "/home/me/ekala/plugin.json", "source": "repository",
+ *                  "over": { "description": "…", "name": "juspay-skills",
  *                            "origin": "github:juspay/skills", "source": "variable" } } }
  *
  * `harnesses` is what the package carries, in menu order. `version` is the
  * display version, without the package's `+` revision suffix. `profile` is the
  * one a launch from here uses, and where it came from: `source` is
- * `positional` (`agent-distro <reference>`), `repository` (the
- * `agent-distro.nix` found from the working directory up to the git root) or
+ * `positional` (`agent-distro <reference>`), `repository` (the profile file
+ * found from the working directory up to the git root) or
  * `variable` (AI_PROFILE), and `origin` is that reference or the path to that
- * `agent-distro.nix`. `over`, when present, is the profile it is composed
+ * `plugin.json`. `over`, when present, is the profile it is composed
  * over, in the same shape: a repository's over your AI_PROFILE, each entry
  * over the one before. A launch with no profile at all — nothing set, and no
  * repository — has no `profile` here.
@@ -40,7 +40,7 @@ export type InEffect = {
   name: string;
   description: string;
   source: Source;
-  /** The reference, or the path to the `agent-distro.nix`. */
+  /** The reference, or the path to the `plugin.json` found. */
   origin: string;
   /** The profile this one is composed over, if any. */
   over?: InEffect;
@@ -56,7 +56,7 @@ export type Listing = {
 /** Names are selectors: one shell word, no `/`. */
 export const isName = (value: unknown): value is string => typeof value === 'string' && /^[^\s/]+$/.test(value);
 
-/** The profile in effect's name, then those it is composed over: `juspay + repo`. */
+/** The profile in effect's name, then those it is composed over: `juspay-skills + repo`. */
 export function nameText({ name, over }: Pick<InEffect, 'name' | 'over'>): string {
   return over ? `${nameText(over)} + ${name}` : name;
 }

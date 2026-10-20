@@ -11,7 +11,7 @@ git init -q
 system=$(nix eval --impure --raw --expr builtins.currentSystem)
 distro=$(nix build --no-link --print-out-paths "$root#packages.$system.default")
 AI_HARNESS=omp "$distro/bin/agent-distro" --version
-# The same agent-distro.nix, read at launch: from the repository it sits in,
+# The same plugin.json profile, read at launch: from the repository it sits in,
 # and by path from anywhere. It sets no `env` or `settings`, so both reads
 # cover a profile with neither.
 listed=$("$distro/bin/agent-distro" --list --json)
@@ -24,18 +24,28 @@ grep -qF '"name":"my-distribution"' <<<"$(AI_PROFILE="$work" "$distro/bin/agent-
 # names it by the store path it was locked to, so a launch fetches nothing.
 # Only an impure evaluation may lock; test/test-mk-profile.nix covers the
 # refusal in a pure one.
+mkdir -p "$work/locked"
+cat > "$work/locked/plugin.json" <<JSON
+{
+  "\$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "locked",
+  "extensions": { "asia.nixos.agent-distro": { "plugins": ["path:$root/test?dir=fixtures/profile"] } }
+}
+JSON
 built=$(nix build --impure --no-link --print-out-paths --expr "
   (builtins.getFlake \"path:$root\").lib.mkProfile {
     system = \"$system\";
-    profile = {
-      name = \"locked\";
-      plugins = [ \"path:$root/test?dir=fixtures/profile\" ];
-    };
+    profile = \"$work/locked\";
   }")
 root0=$(readlink "$built/share/agent-distro/plugins/0/root")
-case "$root0" in
-  /nix/store/*-source/fixtures/profile) ;;
-  *) echo "mkProfile did not lock the path: reference; plugins/0/root is $root0" >&2; exit 1 ;;
+test "$root0" = "$work/locked" || case "$root0" in
+  /nix/store/*-locked) ;;
+  *) echo "mkProfile did not make the profile's own directory plugins/0: $root0" >&2; exit 1 ;;
 esac
-test -f "$root0/plugin.json"
+root1=$(readlink "$built/share/agent-distro/plugins/1/root")
+case "$root1" in
+  /nix/store/*-source/fixtures/profile) ;;
+  *) echo "mkProfile did not lock the path: reference; plugins/1/root is $root1" >&2; exit 1 ;;
+esac
+test -f "$root1/plugin.json"
 grep -qF '"name":"locked"' <<<"$(AI_PROFILE="$built" "$distro/bin/agent-distro" --list --json)"

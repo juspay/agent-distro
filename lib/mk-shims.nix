@@ -3,7 +3,7 @@
 # `<stateDirectory>/current/bin/<name>` when an update has landed, else the
 # package's own command. `profile` is exported as AI_PROFILE unless the
 # environment already sets one, so it is the fallback a repository's own
-# agent-distro.nix still overrides.
+# profile still overrides.
 { pkgs, package, stateDirectory, profile ? null }:
 let
   inherit (pkgs) lib;

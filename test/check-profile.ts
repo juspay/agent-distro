@@ -1,12 +1,13 @@
 /**
  * The profile in effect without a VM or a real nix: discovery up to the git
- * root, the stack and how it composes, references and their offline fallback, the evaluation's
- * isolation, cache and upkeep, nixpkgs fetched only for packages, the
- * no-compile policy for packages, and the launch that uses it all. There is no
- * built-in profile: an empty stack resolves to none. A fake nix on PATH logs
- * every call; evaluate.nix itself runs in the VM tests.
+ * root, the stack and how it composes, references and their offline fallback,
+ * the packages evaluation's isolation, cache and upkeep, nixpkgs fetched only
+ * for packages, the no-compile policy for packages, and the launch that uses it
+ * all. There is no built-in profile: an empty stack resolves to none. A profile
+ * is a `plugin.json`; an `agent-distro.nix` is the migration error. A fake nix
+ * on PATH logs every call; evaluate-packages.nix itself runs in the VM tests.
  *
- * Usage: node check-profile.ts SRC
+ * Usage: node check-profile.ts SRC [SCHEMA]
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -18,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-const [src] = process.argv.slice(2);
+const [src, schemaPath] = process.argv.slice(2);
 const profile = await import(join(src, 'profile/resolve.ts'));
 const listing = await import(join(src, 'listing.ts'));
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
@@ -29,13 +30,12 @@ const BASH = process.env.SHELL || 'bash';
 const temporary = () => mkdtempSync(join(tmpdir(), 'profile-'));
 
 /**
- * A nix that answers from files: `eval` prints `<file>.json` beside the
- * profile it is asked about (its packages null when they are not empty and
- * no nixpkgs was given), keeping its arguments and environment in
- * `<bin>/eval.json`; `flake prefetch` maps a reference to
+ * A nix that answers from files: `eval` prints the packages for the attribute
+ * paths it is asked about, from `<bin>/packages.json`, keeping its arguments
+ * and environment in `<bin>/eval.json`; `flake prefetch` maps a reference to
  * `<bin>/refs/<reference>` (a JSON answer), and fails printing no error for
- * `silent:`; `build --dry-run` lists the
- * derivations in `<bin>/miss`; `build --no-link` creates the package's output.
+ * `silent:`; `build --dry-run` lists the derivations in `<bin>/miss`;
+ * `build --no-link` creates the package's output.
  */
 const bin = temporary();
 const log = join(bin, 'log');
@@ -46,15 +46,17 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');
 const bin = ${JSON.stringify(bin)};
 if (args[0] === 'eval') {
-  // import "evaluate.nix" (builtins.fromJSON "<JSON, with \\$ for $>")
+  // import "evaluate-packages.nix" (builtins.fromJSON "<JSON, with \\$ for $>")
   const expr = args[args.indexOf('--expr') + 1];
   const literal = expr.slice(expr.indexOf('(builtins.fromJSON ') + 19, -1).replaceAll('\\$', '$');
   const given = JSON.parse(JSON.parse(literal));
   fs.writeFileSync(path.join(bin, 'eval.json'), JSON.stringify({ args, given, env: process.env }));
-  if (!fs.existsSync(given.file + '.json')) { console.error('error: undefined variable'); process.exit(1); }
-  const answer = JSON.parse(fs.readFileSync(given.file + '.json', 'utf8'));
-  if (given.nixpkgs === null && answer.packages?.length) answer.packages = null;
-  process.stdout.write(JSON.stringify(answer));
+  // A profile's packages: attribute paths, answered from <bin>/packages.json.
+  if (!Array.isArray(given.attributes)) { console.error('unexpected: ' + expr); process.exit(1); }
+  const table = JSON.parse(fs.readFileSync(path.join(bin, 'packages.json'), 'utf8'));
+  const missing = given.attributes.filter((attribute) => !(attribute in table));
+  if (missing.length) { console.error('error: profile package: nixpkgs has no attribute ' + missing[0]); process.exit(1); }
+  process.stdout.write(JSON.stringify(given.attributes.map((attribute) => table[attribute])));
 } else if (args[0] === 'flake' && args[1] === 'prefetch') {
   const answer = path.join(bin, 'refs', encodeURIComponent(args.at(-1)));
   if (args.at(-1).startsWith('silent:')) { console.log('fetching\\nhalfway'); process.exit(3); }
@@ -74,6 +76,8 @@ if (args[0] === 'eval') {
 chmodSync(join(bin, 'nix'), 0o755);
 mkdirSync(join(bin, 'refs'));
 mkdirSync(join(bin, 'outs'));
+// What the fake nix answers a profile's `packages` with; a test replaces it.
+writeFileSync(join(bin, 'packages.json'), '{}');
 process.env.PATH = `${bin}:${process.env.PATH}`;
 const calls = (what: string) => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter((line) => line.startsWith(what)).length : 0);
 
@@ -103,19 +107,38 @@ function stderrOf(body: () => void): string {
   return written;
 }
 
-/** An `agent-distro.nix` and what the fake nix evaluates it to. */
-function profileFile(directory: string, evaluated: Record<string, unknown>, text = '{ }') {
+/**
+ * A `plugin.json` a launch reads as a profile: a supported `$schema` and a
+ * name. Discovery skips one that is not (an unrelated manifest in a
+ * repository), so a test that wants discovery to find one writes this.
+ */
+const validManifest = (name = 'manifest') => JSON.stringify({ $schema: SCHEMA, name });
+
+/**
+ * A profile directory: its `plugin.json`, as a manifest with whatever the
+ * extension namespace adds. Returns the manifest's path.
+ */
+function manifestProfile(directory: string, options: {
+  name?: string; description?: string; extension?: object; manifest?: Record<string, unknown>;
+} = {}) {
   mkdirSync(directory, { recursive: true });
-  const file = join(directory, 'agent-distro.nix');
-  writeFileSync(file, text);
-  writeFileSync(file + '.json', JSON.stringify({
-    description: '', plugins: [], env: {}, settings: {}, deprecated: [], packages: [], ...evaluated,
-  }));
+  const file = join(directory, 'plugin.json');
+  const manifest: Record<string, unknown> = {
+    $schema: SCHEMA, name: options.name ?? 'from-manifest', description: options.description ?? 'From a manifest',
+    ...options.manifest,
+  };
+  if (options.extension) manifest.extensions = { [profile.EXTENSION]: options.extension };
+  writeFileSync(file, JSON.stringify(manifest, null, 2));
   return file;
 }
 
-function plugin(name: string): string {
-  const root = join(temporary(), name);
+/** What the fake nix answers a profile's `packages` evaluation with, by attribute. */
+function packageAttributes(table: Record<string, unknown>) {
+  writeFileSync(join(bin, 'packages.json'), JSON.stringify(table));
+}
+
+function plugin(name: string, parent: string = temporary()): string {
+  const root = join(parent, name);
   mkdirSync(join(root, 'skills/hello'), { recursive: true });
   writeFileSync(join(root, 'plugin.json'), JSON.stringify({ $schema: SCHEMA, name }));
   writeFileSync(join(root, 'skills/hello/SKILL.md'), '---\nname: hello\ndescription: Hello\n---\n');
@@ -156,32 +179,56 @@ const resolve = (selection: object, env: NodeJS.ProcessEnv = {}) =>
   profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: temporary(), ...env });
 
 test('discovery goes from the working directory up to the git root, and no further', () => {
-  const outer = temporary();
-  writeFileSync(join(outer, 'agent-distro.nix'), '{ }');
-  const repo = join(outer, 'repo');
-  mkdirSync(join(repo, '.git'), { recursive: true });
+  const repo = temporary();
+  mkdirSync(join(repo, '.git'));
   mkdirSync(join(repo, 'a/b'), { recursive: true });
-  // A file above the repository is not the repository's.
+  // No profile file yet.
   assert.equal(profile.discover(join(repo, 'a/b')), null);
-  writeFileSync(join(repo, 'agent-distro.nix'), '{ }');
-  assert.equal(profile.discover(join(repo, 'a/b')), join(repo, 'agent-distro.nix'));
+  writeFileSync(join(repo, 'plugin.json'), validManifest());
+  assert.equal(profile.discover(join(repo, 'a/b')), join(repo, 'plugin.json'));
   // The nearest wins.
-  writeFileSync(join(repo, 'a/agent-distro.nix'), '{ }');
-  assert.equal(profile.discover(join(repo, 'a/b')), join(repo, 'a/agent-distro.nix'));
+  writeFileSync(join(repo, 'a/plugin.json'), validManifest());
+  assert.equal(profile.discover(join(repo, 'a/b')), join(repo, 'a/plugin.json'));
   // Outside any repository there is none, even beside the working directory.
-  assert.equal(profile.discover(outer), null);
+  const outside = temporary();
+  writeFileSync(join(outside, 'plugin.json'), validManifest());
+  assert.equal(profile.discover(outside), null);
   // A worktree's `.git` is a file.
   const worktree = temporary();
   writeFileSync(join(worktree, '.git'), 'gitdir: elsewhere\n');
-  writeFileSync(join(worktree, 'agent-distro.nix'), '{ }');
-  assert.equal(profile.discover(worktree), join(worktree, 'agent-distro.nix'));
+  writeFileSync(join(worktree, 'plugin.json'), validManifest());
+  assert.equal(profile.discover(worktree), join(worktree, 'plugin.json'));
+  // A `plugin.json` that is not an Agent Plugin — an unrelated manifest — is
+  // not a profile: discovery skips it.
+  const foreign = temporary();
+  mkdirSync(join(foreign, '.git'));
+  writeFileSync(join(foreign, 'plugin.json'), JSON.stringify({ name: 'grafana', schemaVersion: 39 }));
+  assert.equal(profile.discover(foreign), null);
+  // An `agent-distro.nix` is returned for the caller to refuse, not skipped.
+  writeFileSync(join(foreign, 'agent-distro.nix'), '{ }');
+  assert.equal(profile.discover(join(foreign, 'nested')), join(foreign, 'agent-distro.nix'));
+  // A profile file that cannot be read is skipped too, not a failure: an
+  // EACCES, or a race with deletion, must not fail every launch there. Only a
+  // user whose reads can be denied (not root) can show it.
+  if (process.getuid?.() !== 0) {
+    const unreadable = temporary();
+    mkdirSync(join(unreadable, '.git'));
+    const at = join(unreadable, 'plugin.json');
+    writeFileSync(at, validManifest());
+    chmodSync(at, 0o000);
+    try {
+      assert.equal(profile.discover(unreadable), null);
+    } finally {
+      chmodSync(at, 0o644);
+    }
+  }
 });
 
 test('the stack: a positional profile alone, else every AI_PROFILE entry and the repository', () => {
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
-  const file = join(repo, 'agent-distro.nix');
-  writeFileSync(file, '{ }');
+  const file = join(repo, 'plugin.json');
+  writeFileSync(file, validManifest());
   const outside = temporary();
   const select = (positional: string | undefined, cwd: string | undefined, env: NodeJS.ProcessEnv = {}) =>
     profile.select(positional, cwd, env);
@@ -228,23 +275,29 @@ test('a repository\'s profile composes over AI_PROFILE', () => {
   const mine = plugin('mine');
   const teamPackage = stored('team-tool');
   const repoPackage = stored('repo-tool');
+  packageAttributes({ 'team-tool': teamPackage, 'repo-tool': repoPackage });
   const elsewhere = temporary();
-  profileFile(elsewhere, {
-    name: 'elsewhere', description: 'Team', plugins: [team], env: PROFILE_ENV, settings: PROFILE_SETTINGS, packages: [teamPackage],
+  manifestProfile(elsewhere, {
+    name: 'elsewhere', description: 'Team',
+    extension: { plugins: [team], packages: ['team-tool'], env: PROFILE_ENV, settings: PROFILE_SETTINGS },
   });
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
-  const file = profileFile(repo, { name: 'repo', description: 'Repo', plugins: [mine], packages: [repoPackage] });
+  const file = manifestProfile(repo, {
+    name: 'repo', description: 'Repo', extension: { plugins: [mine], packages: ['repo-tool'] },
+  });
   const env = { XDG_CACHE_HOME: temporary(), AI_PROFILE: elsewhere };
   const inEffect = (positional: string | undefined, cwd: string, environment: NodeJS.ProcessEnv = env) =>
     profile.resolveProfile(info, profile.select(positional, cwd, environment), environment);
-  // Plugins and packages are both, the user's first; the repository sets no
-  // env or settings, so the user's are in effect.
+  // Plugins and packages are both, the user's first (each profile's own
+  // directory is its first plugin); the repository sets no env or settings, so
+  // the user's are in effect.
   const composed = inEffect(undefined, repo);
   assert.deepEqual(composed, {
     name: 'repo', description: 'Repo', source: 'repository', origin: file,
     over: { name: 'elsewhere', description: 'Team', source: 'variable', origin: elsewhere },
-    plugins: [team, mine], env: PROFILE_ENV, settings: PROFILE_SETTINGS,
+    plugins: [realpathSync(elsewhere), realpathSync(team), realpathSync(repo), realpathSync(mine)],
+    env: PROFILE_ENV, settings: PROFILE_SETTINGS,
     paths: [teamPackage.bin, repoPackage.bin],
   });
   // Handed to the launcher as JSON, and accepted there.
@@ -257,16 +310,19 @@ test('a repository\'s profile composes over AI_PROFILE', () => {
   // where they overlap, and their plugins accumulate in that order.
   const skills = plugin('skills');
   const gateway = temporary();
-  profileFile(gateway, {
-    name: 'gateway', description: 'Gateway', plugins: [skills],
-    env: { LITELLM_BASE_URL: 'https://gateway.test', ONLY_HERE: 'yes' },
-    settings: { omp: { modelRoles: { default: 'litellm/xl' } } },
+  manifestProfile(gateway, {
+    name: 'gateway', description: 'Gateway', extension: {
+      plugins: [skills],
+      env: { LITELLM_BASE_URL: 'https://gateway.test', ONLY_HERE: 'yes' },
+      settings: { omp: { modelRoles: { default: 'litellm/xl' } } },
+    },
   });
   const stacked = inEffect(undefined, temporary(), { XDG_CACHE_HOME: env.XDG_CACHE_HOME, AI_PROFILE: `${elsewhere} ${gateway}` });
   assert.deepEqual(stacked, {
     name: 'gateway', description: 'Gateway', source: 'variable', origin: gateway,
     over: { name: 'elsewhere', description: 'Team', source: 'variable', origin: elsewhere },
-    plugins: [team, skills], env: { ...PROFILE_ENV, LITELLM_BASE_URL: 'https://gateway.test', ONLY_HERE: 'yes' },
+    plugins: [realpathSync(elsewhere), realpathSync(team), realpathSync(gateway), realpathSync(skills)],
+    env: { ...PROFILE_ENV, LITELLM_BASE_URL: 'https://gateway.test', ONLY_HERE: 'yes' },
     settings: { omp: { modelRoles: { default: 'litellm/xl' } } }, paths: [teamPackage.bin],
   });
   assert.equal(listing.nameText(stacked), 'elsewhere + gateway');
@@ -274,17 +330,21 @@ test('a repository\'s profile composes over AI_PROFILE', () => {
     `from AI_PROFILE=${gateway} over AI_PROFILE=${elsewhere}`);
   // The middle one is named in between: three entries, `a b repo`.
   const middle = temporary();
-  profileFile(middle, { name: 'middle', description: 'Middle' });
+  manifestProfile(middle, { name: 'middle', description: 'Middle' });
   const triple = inEffect(undefined, repo, { XDG_CACHE_HOME: env.XDG_CACHE_HOME, AI_PROFILE: `${elsewhere} ${middle}` });
   assert.equal(listing.nameText(triple), 'elsewhere + middle + repo');
   assert.equal(listing.sourceText(triple),
     `from ${file} over AI_PROFILE=${middle} over AI_PROFILE=${elsewhere}`);
-  assert.deepEqual(triple.plugins, [team, mine]);
+  assert.deepEqual(triple.plugins,
+    [realpathSync(elsewhere), realpathSync(team), realpathSync(middle), realpathSync(repo), realpathSync(mine)]);
   // The repository's own env wins variable by variable, its own settings
   // harness by harness: the team's `omp` under the repository's `opencode`.
   const ownEnv = { LITELLM_BASE_URL: 'https://repo.test' };
   const ownSettings = { opencode: { model: 'litellm/large' } };
-  profileFile(repo, { name: 'repo', description: 'Repo', plugins: [mine], env: ownEnv, settings: ownSettings }, '{ env = { }; }');
+  manifestProfile(repo, {
+    name: 'repo', description: 'Repo',
+    extension: { plugins: [mine], env: ownEnv, settings: ownSettings },
+  });
   const own = inEffect(undefined, repo);
   assert.deepEqual(own.env, { ...PROFILE_ENV, ...ownEnv });
   assert.deepEqual(own.settings, { ...PROFILE_SETTINGS, ...ownSettings });
@@ -292,58 +352,80 @@ test('a repository\'s profile composes over AI_PROFILE', () => {
   // beneath it.
   const alone = inEffect(undefined, repo, { XDG_CACHE_HOME: env.XDG_CACHE_HOME });
   assert.equal(alone.over, undefined);
-  assert.deepEqual(alone.plugins, [mine]);
+  assert.deepEqual(alone.plugins, [realpathSync(repo), realpathSync(mine)]);
   assert.equal(listing.nameText(alone), 'repo');
   assert.equal(listing.sourceText(alone), `from ${file}`);
   // Outside the repository, AI_PROFILE alone.
   const variable = inEffect(undefined, temporary());
   assert.deepEqual([variable.name, variable.source, variable.over, variable.plugins, variable.env, variable.settings],
-    ['elsewhere', 'variable', undefined, [team], PROFILE_ENV, PROFILE_SETTINGS]);
+    ['elsewhere', 'variable', undefined, [realpathSync(elsewhere), realpathSync(team)], PROFILE_ENV, PROFILE_SETTINGS]);
   // A positional profile is that one, exactly: nothing beneath it.
   assert.deepEqual(inEffect(repo, repo), {
     name: 'repo', description: 'Repo', source: 'positional', origin: repo,
-    plugins: [mine], env: ownEnv, settings: ownSettings, paths: [],
+    plugins: [realpathSync(repo), realpathSync(mine)], env: ownEnv, settings: ownSettings, paths: [],
   });
 });
 
-test('each profile of the stack is cached on its own, and a second launch evaluates nothing', () => {
+test('each profile of the stack is cached on its own, and a second launch reads nothing again', () => {
   const elsewhere = temporary();
-  profileFile(elsewhere, { name: 'elsewhere' });
+  manifestProfile(elsewhere, { name: 'elsewhere' });
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
-  profileFile(repo, { name: 'repo' });
+  manifestProfile(repo, { name: 'repo' });
   const cache = temporary();
   const env = { XDG_CACHE_HOME: cache, AI_PROFILE: elsewhere };
   const stack = profile.select(undefined, repo, env);
   const start = calls('eval');
   profile.resolveProfile(info, stack, env);
-  assert.equal(calls('eval') - start, 2, 'one evaluation per file');
+  assert.equal(calls('eval') - start, 0, 'no packages: nothing to evaluate');
   assert.equal(readdirSync(join(cache, 'agent-distro/profiles')).length, 2, 'one entry per file');
   assert.equal(profile.resolveProfile(info, stack, env).name, 'repo');
-  assert.equal(calls('eval') - start, 2, 'both cached');
 });
 
 test('a profile of the stack that cannot be read is named as the user gave it', () => {
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
-  const file = profileFile(repo, { name: 'repo' });
+  const file = manifestProfile(repo, { name: 'repo' });
   const inEffect = (cwd: string, env: NodeJS.ProcessEnv) =>
     profile.resolveProfile(info, profile.select(undefined, cwd, env), { XDG_CACHE_HOME: temporary(), ...env });
   assert.throws(() => inEffect(repo, { AI_PROFILE: 'github:no/team' }),
     /^Error: AI_PROFILE=github:no\/team \(entry 1 of 1\): cannot fetch github:no\/team:/);
   // In a stack, the entry that failed and its place are both named.
-  const good = profileFile(temporary(), { name: 'good' });
+  const good = manifestProfile(temporary(), { name: 'good' });
   assert.throws(() => inEffect(repo, { AI_PROFILE: `${good} github:no/team` }),
     /^Error: AI_PROFILE=github:no\/team \(entry 2 of 2\): cannot fetch github:no\/team:/);
-  const broken = temporary();
-  mkdirSync(join(broken, '.git'));
-  const brokenFile = join(broken, 'agent-distro.nix');
-  writeFileSync(brokenFile, '{');
-  const elsewhere = temporary();
-  profileFile(elsewhere, { name: 'elsewhere' });
-  assert.throws(() => inEffect(broken, { AI_PROFILE: elsewhere }),
-    (error: Error) => error.message.startsWith(`${brokenFile}: cannot evaluate ${brokenFile}`) && !error.message.includes('AI_PROFILE'));
   assert.ok(existsSync(file));
+  assert.ok(existsSync(good));
+});
+
+test('an agent-distro.nix is refused wherever it is found, naming the file and saying to migrate', () => {
+  const directory = temporary();
+  const legacy = join(directory, 'agent-distro.nix');
+  writeFileSync(legacy, '{ name = "legacy"; }');
+  const refused = (body: () => unknown, file: string = legacy) => assert.throws(body, (error: Error) =>
+    error.message.includes(`${file}: agent-distro.nix is no longer read`)
+    && error.message.includes('a profile is a plugin.json')
+    && error.message.includes('extensions."asia.nixos.agent-distro"')
+    && error.message.includes('agent-distro.nixos.asia/#profiles')
+    && error.message.includes('agent-distro.schema.json'));
+  // A positional selector…
+  refused(() => resolve({ source: 'positional', origin: directory }));
+  // …an AI_PROFILE entry, named with its place…
+  refused(() => profile.resolveProfile(info, [{ source: 'variable', origin: directory, entry: { position: 1, count: 1 } }],
+    { XDG_CACHE_HOME: temporary() }));
+  // …and the repository a launch starts in, even where a plugin.json is beside it.
+  const repo = temporary();
+  mkdirSync(join(repo, '.git'));
+  const repoLegacy = join(repo, 'agent-distro.nix');
+  writeFileSync(repoLegacy, '{ name = "legacy"; }');
+  refused(() => profile.resolveProfile(info, profile.select(undefined, repo, {}), { XDG_CACHE_HOME: temporary() }), repoLegacy);
+  writeFileSync(join(repo, 'plugin.json'), validManifest());
+  refused(() => profile.resolveProfile(info, profile.select(undefined, repo, {}), { XDG_CACHE_HOME: temporary() }), repoLegacy);
+  // An explicitly named file is refused too, as is a file that is not a profile
+  // at all.
+  refused(() => resolve({ source: 'positional', origin: legacy }));
+  assert.throws(() => resolve({ source: 'positional', origin: writeFileSync(join(directory, 'other.nix'), '{ }') || join(directory, 'other.nix') }),
+    /: .*other\.nix is not a plugin\.json/);
 });
 
 test('a reference that is not one is refused, naming the entry and its place in the stack', () => {
@@ -351,7 +433,7 @@ test('a reference that is not one is refused, naming the entry and its place in 
     /AI_PROFILE=nonesuch \(entry 2 of 3\): not a reference: a path starting with \/\, \.\/ or \.\.\/, or a flake reference such as github:owner\/repo/);
   assert.throws(() => resolve({ source: 'variable', origin: 'nonesuch' }),
     /^Error: AI_PROFILE=nonesuch: not a reference/);
-  assert.throws(() => resolve({ source: 'positional', origin: './missing' }), /profile \.\/missing: no agent-distro\.nix at/);
+  assert.throws(() => resolve({ source: 'positional', origin: './missing' }), /profile \.\/missing: no plugin\.json at/);
 });
 
 test('a built profile is read where it lies: its profile.json, its plugins and its bin', () => {
@@ -391,11 +473,12 @@ test('a built profile is read where it lies: its profile.json, its plugins and i
 test('a path reference, as the directory or the file; plugin paths stay where they are', () => {
   const own = plugin('own');
   const directory = temporary();
-  const file = profileFile(directory, { name: 'mine', description: 'Mine', plugins: [own] });
+  const file = manifestProfile(directory, { name: 'mine', description: 'Mine', extension: { plugins: [own] } });
   for (const origin of [directory, file]) {
     const resolved = resolve({ source: 'positional', origin });
     assert.deepEqual(resolved, {
-      name: 'mine', description: 'Mine', source: 'positional', origin, plugins: [own],
+      name: 'mine', description: 'Mine', source: 'positional', origin,
+      plugins: [realpathSync(directory), realpathSync(own)],
       env: {}, settings: {}, paths: [],
     });
     assert.ok(profile.isResolved(resolved));
@@ -410,16 +493,125 @@ test('a path reference, as the directory or the file; plugin paths stay where th
   }
 });
 
+test('a directory with a plugin.json is a profile: the plugin, plus its extension', () => {
+  const directory = temporary();
+  const extra = plugin('extra', directory);
+  manifestProfile(directory, {
+    name: 'from-manifest', description: 'From a manifest',
+    extension: { plugins: ['./extra'], env: PROFILE_ENV, settings: PROFILE_SETTINGS },
+  });
+  const resolved = resolve({ source: 'positional', origin: directory });
+  // The plugin root is always the first plugin and is never listed; `./extra`
+  // is relative to it.
+  assert.deepEqual(resolved, {
+    name: 'from-manifest', description: 'From a manifest', source: 'positional', origin: directory,
+    plugins: [realpathSync(directory), join(realpathSync(directory), 'extra')],
+    env: PROFILE_ENV, settings: PROFILE_SETTINGS, paths: [],
+  });
+  assert.equal(realpathSync(extra), resolved.plugins[1]);
+  assert.ok(profile.isResolved(JSON.parse(JSON.stringify(resolved))));
+});
+
+test('the extension is optional: the plugin alone is a valid profile', () => {
+  const directory = temporary();
+  manifestProfile(directory, { name: 'solo', manifest: { description: undefined } });
+  assert.deepEqual(resolve({ source: 'positional', origin: directory }), {
+    name: 'solo', description: '', source: 'positional', origin: directory,
+    plugins: [realpathSync(directory)], env: {}, settings: {}, paths: [],
+  });
+});
+
+test('a manifest that is not a plugin.json profile names what is wrong', () => {
+  const directory = temporary();
+  writeFileSync(join(directory, 'plugin.json'), JSON.stringify({ name: 'no-schema' }));
+  assert.throws(() => resolve({ source: 'positional', origin: directory }),
+    /invalid Agent Plugin: `\$schema` is missing/);
+  // Named explicitly, an invalid manifest says so; discovery only walks past
+  // one that is not a profile at all (the next test).
+  const bad = temporary();
+  writeFileSync(join(bad, 'plugin.json'), JSON.stringify({ name: 'x' }));
+  assert.throws(() => resolve({ source: 'positional', origin: bad }),
+    /plugin\.json: invalid Agent Plugin: `\$schema` is missing/);
+});
+
+test('a profile\'s packages are nixpkgs attribute paths, evaluated restricted, once', () => {
+  const mcp = stored('mcp-nixos-1.0');
+  packageAttributes({ 'mcp-nixos': mcp });
+  const directory = temporary();
+  manifestProfile(directory, { name: 'packaged', extension: { packages: ['mcp-nixos'] } });
+  const evaluations = calls('eval');
+  assert.deepEqual(resolve({ source: 'positional', origin: directory }).paths, [mcp.bin]);
+  // One evaluation with nixpkgs: the extension names the paths, so there is
+  // nothing to learn before fetching it.
+  assert.equal(calls('eval') - evaluations, 1);
+  assert.deepEqual(lastEvaluation().given.attributes, ['mcp-nixos']);
+  // An attribute nixpkgs does not have is an error naming it, in the
+  // launcher's words. (test-mk-profile.nix covers the real expression.)
+  const unknown = temporary();
+  manifestProfile(unknown, { name: 'unknown', extension: { packages: ['nope'] } });
+  assert.throws(() => resolve({ source: 'positional', origin: unknown }),
+    /cannot evaluate its asia\.nixos\.agent-distro `packages`:\nerror: profile package: nixpkgs has no attribute nope/);
+});
+
+test('the extension takes four members, and an unknown one is named', () => {
+  const directory = temporary();
+  manifestProfile(directory, { name: 'bad', extension: { nope: true } });
+  assert.throws(() => resolve({ source: 'positional', origin: directory }),
+    /`asia\.nixos\.agent-distro` has no member `nope`; it takes plugins, packages, env, settings/);
+  for (const [extension, message] of [
+    [{ plugins: [1] }, /`asia\.nixos\.agent-distro\.plugins` must be an array of strings/],
+    [{ packages: 'mcp-nixos' }, /`asia\.nixos\.agent-distro\.packages` must be an array of strings/],
+    [{ env: 'X' }, /`env` must be an attribute set/],
+    [{ env: { 'BAD NAME': 'x' } }, /`BAD NAME` is not an environment variable name/],
+    [{ settings: { pi: { } } }, /`pi` is not a harness whose configuration a profile sets \(omp, opencode\)/],
+  ] as const) {
+    assert.throws(() => resolve({ source: 'positional', origin: manifestProfile(temporary(), { name: 'bad', extension }) }), message);
+  }
+});
+
+test('a directory with no profile file names what is missing', () => {
+  assert.throws(() => resolve({ source: 'positional', origin: temporary() }),
+    /: no plugin\.json at /);
+});
+
+test('a profile is cached by content', () => {
+  const hello = stored('hello-1.0');
+  packageAttributes({ hello });
+  const directory = temporary();
+  const file = manifestProfile(directory, { name: 'cached-manifest', extension: { packages: ['hello'] } });
+  const cache = temporary();
+  const env = { XDG_CACHE_HOME: cache };
+  const selection = { source: 'positional', origin: directory };
+  const evaluations = () => calls('eval');
+  const start = evaluations();
+  assert.deepEqual(profile.resolveProfile(info, [selection], env).paths, [hello.bin]);
+  assert.equal(evaluations() - start, 1);
+  // A second launch reads the cache: nothing is evaluated.
+  assert.equal(profile.resolveProfile(info, [selection], env).name, 'cached-manifest');
+  assert.equal(evaluations() - start, 1);
+  // New contents are a new entry, under a new key.
+  writeFileSync(file, JSON.stringify({
+    $schema: SCHEMA, name: 'cached-manifest', description: 'edited',
+    extensions: { [profile.EXTENSION]: { packages: ['hello'] } },
+  }));
+  assert.equal(profile.resolveProfile(info, [selection], env).description, 'edited');
+  assert.equal(evaluations() - start, 2);
+  assert.equal(readdirSync(join(cache, 'agent-distro/profiles')).length, 2);
+});
+
 test('flake references are fetched: the profile and its plugin references, every launch', () => {
   const tree = temporary();
-  const file = profileFile(join(tree, 'sub'), { name: 'fetched', plugins: ['git+file:///plugins?dir=one', '/abs/plugin'] });
+  const file = manifestProfile(join(tree, 'sub'), {
+    name: 'fetched', extension: { plugins: ['git+file:///plugins?dir=one', '/abs/plugin'] },
+  });
   reference('git+file:///profiles?dir=sub', tree, 'sub');
   reference('git+file:///plugins?dir=one', '/nix/store/11111111111111111111111111111111-source', 'one');
   const cache = temporary();
   const before = calls('flake prefetch');
   for (let i = 0; i < 2; i++) {
     const resolved = profile.resolveProfile(info, [{ source: 'variable', origin: 'git+file:///profiles?dir=sub' }], { XDG_CACHE_HOME: cache });
-    assert.deepEqual(resolved.plugins, ['/nix/store/11111111111111111111111111111111-source/one', '/abs/plugin']);
+    assert.deepEqual(resolved.plugins,
+      [realpathSync(join(tree, 'sub')), '/nix/store/11111111111111111111111111111111-source/one', '/abs/plugin']);
   }
   assert.equal(calls('flake prefetch') - before, 4, 'the profile and its plugin reference, at each launch');
   // Offline, nix would fail downloading the global registry, which only an
@@ -436,9 +628,9 @@ test('flake references are fetched: the profile and its plugin references, every
     /AI_PROFILE=silent:x \(entry 1 of 1\): cannot fetch silent:x: nix exited with code 3 and printed no error; its last output: halfway$/);
 });
 
-test('the evaluation is cached per content and evaluator, and swept when unused', async () => {
+test('the read is cached per content and evaluator, and swept when unused', async () => {
   const directory = temporary();
-  const file = profileFile(directory, { name: 'cached' });
+  const file = manifestProfile(directory, { name: 'cached' });
   const cache = temporary();
   const env = { XDG_CACHE_HOME: cache };
   const selection = { source: 'positional', origin: directory };
@@ -446,94 +638,50 @@ test('the evaluation is cached per content and evaluator, and swept when unused'
   const start = evaluations();
   profile.resolveProfile(info, [selection], env);
   profile.resolveProfile(info, [selection], env);
-  assert.equal(evaluations() - start, 1, 'read once');
+  assert.equal(evaluations() - start, 0, 'no packages: nothing evaluated');
   const profiles = join(cache, 'agent-distro/profiles');
   const [first] = readdirSync(profiles);
-  // New contents are a new evaluation, under a new key.
-  writeFileSync(file, '{ name = "cached"; }');
-  writeFileSync(file + '.json', JSON.stringify({
-    name: 'edited', description: '', plugins: [], env: {}, settings: {}, deprecated: [], packages: [],
-  }));
+  // New contents are a new read, under a new key.
+  writeFileSync(file, JSON.stringify({ $schema: SCHEMA, name: 'edited' }));
   assert.equal(profile.resolveProfile(info, [selection], env).name, 'edited');
-  assert.equal(evaluations() - start, 2);
   assert.equal(readdirSync(profiles).length, 2);
-  // A corrupt entry is evaluated again rather than failing the launch.
-  const [current] = readdirSync(profiles).filter((name) => name !== first);
-  writeFileSync(join(profiles, current, 'profile.json'), '{');
+  // A corrupt entry is read again rather than failing the launch.
+  writeFileSync(join(profiles, first, 'profile.json'), '{');
   assert.equal(profile.resolveProfile(info, [selection], env).name, 'edited');
-  assert.equal(evaluations() - start, 3);
   // What no launch used for STALE_DAYS goes when something new is cached.
   const old = new Date(Date.now() - 15 * DAY);
   utimesSync(join(profiles, first), old, old);
-  writeFileSync(file, '{ name = "again"; }');
+  writeFileSync(file, JSON.stringify({ $schema: SCHEMA, name: 'again' }));
   profile.resolveProfile(info, [selection], env);
   assert.ok(!readdirSync(profiles).includes(first), 'the stale entry is removed');
   assert.equal(readdirSync(profiles).length, 2);
-  // Another agent-distro build — the same evaluator tree, elsewhere — reuses
-  // the entry: nothing of a launch's own build shapes the value, so a commit
-  // touching src/ does not re-evaluate every profile.
+  // Another agent-distro build — the same evaluators, elsewhere — reuses the
+  // entry: nothing of a launch's own build shapes the value, so a commit
+  // touching src/ does not re-read every profile.
   const copy = join(temporary(), 'src');
   cpSync(src, copy, { recursive: true });
   // Its dependencies, beside it as in the runtime tree.
   symlinkSync(join(src, '../node_modules'), join(copy, '../node_modules'));
   const other = await import(join(copy, 'profile/resolve.ts'));
   other.resolveProfile(info, [selection], env);
-  assert.equal(evaluations() - start, 4, 'the same evaluator is the same key');
-  // A changed evaluator is not the same key: the shape it produces may differ.
+  // A changed packages evaluator is not the same key: the shape it produces may differ.
   // The copy came from the store, so it is read-only until asked otherwise.
-  const evaluator = join(copy, 'profile/evaluate.nix');
+  const evaluator = join(copy, 'profile/evaluate-packages.nix');
   chmodSync(evaluator, 0o644);
   writeFileSync(evaluator, readFileSync(evaluator, 'utf8') + '\n# changed\n');
   other.resolveProfile(info, [selection], env);
-  assert.equal(evaluations() - start, 5, 'a new evaluate.nix evaluates afresh');
 });
 
-test('a file that is not a profile names what is wrong', () => {
-  const broken = temporary();
-  writeFileSync(join(broken, 'agent-distro.nix'), '{');
-  assert.throws(() => resolve({ source: 'positional', origin: broken }), /cannot evaluate .*agent-distro\.nix:\nerror: undefined variable/);
-  for (const [evaluated, message] of [
-    [{ name: 'a b' }, /`name` must be one word without \//],
-    [{ name: 'g', env: 'LITELLM_BASE_URL' }, /`env` must be an attribute set/],
-    [{ name: 'g', env: { 'BAD NAME': 'x' } }, /`BAD NAME` is not an environment variable name/],
-    [{ name: 'g', env: { KEY: 1 } }, /`KEY` must be a string, or `\{ secret = true; \}` with an optional `hint`/],
-    [{ name: 'g', env: { KEY: { secret: false } } }, /`KEY` must be a string, or `\{ secret = true; \}`/],
-    [{ name: 'g', env: { KEY: { secret: true, hint: 1 } } }, /`KEY\.hint` must be a string/],
-    [{ name: 'g', settings: { pi: { } } }, /`pi` is not a harness whose configuration a profile sets \(omp, opencode\)/],
-    [{ name: 'g', settings: { omp: 'roles' } }, /`omp` must be an attribute set/],
-    [{ name: 'g', plugins: [1] }, /is not a profile/],
-  ] as const) {
-    assert.throws(() => resolve({ source: 'positional', origin: profileFile(temporary(), evaluated) }), message);
-  }
-});
-
-test('a profile that still carries `gateway` is warned about at every launch', () => {
-  const directory = temporary();
-  // evaluate.nix reports it as deprecated (the VM tests run that); here the
-  // resolver is what has to say so, from the cached evaluation as well.
-  profileFile(directory, { name: 'old', deprecated: ['gateway'] });
-  const env = { XDG_CACHE_HOME: temporary() };
-  const selection = { source: 'positional', origin: directory };
-  // A severity word is coloured on a terminal, as the sandbox's stderr is.
-  const warns = () =>
-    stderrOf(() => profile.resolveProfile(info, [selection], env)).replace(/\x1b\[[0-9;]*m/g, '');
-  assert.match(warns(), /^agent-distro profile: warning: `gateway` is no longer read; see https:\/\/agent-distro\.nixos\.asia\/#profiles$/m);
-  // The first launch evaluated the file; this one is served from the cache, so
-  // a warning emitted only at evaluation time would never be seen again.
-  const second = warns();
-  assert.match(second, /`gateway` is no longer read/);
-  assert.doesNotMatch(second, /evaluating/);
-});
-
-test('packages come from the binary cache or the launch stops naming them', () => {
+test('a profile whose packages come from the binary cache, or the launch stops naming them', () => {
   const store = temporary();
   const out = join(store, 'pkg-1.0');
   const drvPath = join(store, 'pkg-1.0.drv');
   writeFileSync(drvPath, '');
   writeFileSync(join(bin, 'outs', encodeURIComponent(`${drvPath}^*`)), out);
   const package_ = { name: 'pkg-1.0', drvPath, out, bin: join(out, 'bin') };
+  packageAttributes({ 'pkg': package_ });
   const directory = temporary();
-  profileFile(directory, { name: 'packaged', packages: [package_] });
+  manifestProfile(directory, { name: 'packaged', extension: { packages: ['pkg'] } });
   const cache = temporary();
   const env = { XDG_CACHE_HOME: cache };
   const selection = { source: 'positional', origin: directory };
@@ -560,18 +708,18 @@ test('packages come from the binary cache or the launch stops naming them', () =
   } finally {
     rmSync(join(bin, 'miss'));
   }
-  // A collected derivation is evaluated again to get it back.
+  // A collected derivation is read again to get it back.
   rmSync(drvPath);
   const evaluations = calls('eval');
   assert.deepEqual(profile.resolveProfile(info, [selection], env).paths, [join(out, 'bin')]);
-  // Twice: once to learn it has packages, once with nixpkgs.
-  assert.equal(calls('eval') - evaluations, 2);
+  assert.equal(calls('eval') - evaluations, 1);
   assert.equal(builds() - before, 2);
 });
 
-test('a profile is evaluated restricted, without network or the user\'s environment', () => {
+test('a profile\'s packages are evaluated restricted, without network or the user\'s environment', () => {
+  packageAttributes({ 'hello': stored('hello-1.0') });
   const directory = temporary();
-  const file = profileFile(directory, { name: 'isolated' });
+  const file = manifestProfile(directory, { name: 'isolated', extension: { packages: ['hello'] } });
   const config = process.env.NIX_CONFIG;
   process.env.SECRET = 'hunter2';
   process.env.NIX_CONFIG = 'access-tokens = github.com=secret';
@@ -585,7 +733,7 @@ test('a profile is evaluated restricted, without network or the user\'s environm
     else process.env.NIX_CONFIG = config;
   }
   const { args, given, env } = lastEvaluation();
-  assert.deepEqual(given, { file, nixpkgs: null, system: 'x86_64-linux' });
+  assert.deepEqual(given.attributes, ['hello']);
   assert.equal(env.SECRET, undefined, 'the user\'s variables stay out');
   assert.equal(env.NIX_CONFIG, 'extra-experimental-features = nix-command flakes', 'and so does their NIX_CONFIG');
   assert.ok(env.PATH, 'nix still has what it needs');
@@ -594,7 +742,8 @@ test('a profile is evaluated restricted, without network or the user\'s environm
   assert.equal(option('allowed-uris'), '');
   assert.equal(option('nix-path'), '');
   const allowed = args.flatMap((arg: string, i: number) => (arg === '-I' ? [args[i + 1]] : []));
-  assert.deepEqual(allowed, [directory, join(src, 'profile')], 'its directory and evaluate.nix, nothing else');
+  assert.deepEqual(allowed, [join(src, 'profile'), info.nixpkgs], 'evaluate-packages.nix and nixpkgs, nothing else');
+  assert.ok(existsSync(file));
 });
 
 test('nixpkgs is fetched by its locked reference, and only for a profile with packages', () => {
@@ -606,34 +755,35 @@ test('nixpkgs is fetched by its locked reference, and only for a profile with pa
   const fetches = () => calls(`flake prefetch --option flake-registry  --json ${nixpkgs}`);
   const before = fetches();
   const bare = temporary();
-  profileFile(bare, { name: 'bare' });
+  packageAttributes({});
+  manifestProfile(bare, { name: 'bare' });
   profile.resolveProfile(referenced, [{ source: 'positional', origin: bare }], env);
   assert.equal(fetches(), before, 'no packages, no nixpkgs');
   const out = temporary();
   mkdirSync(join(out, 'bin'));
+  packageAttributes({ 'p': { name: 'p', drvPath: join(out, 'p.drv'), out, bin: join(out, 'bin') } });
   const packaged = temporary();
-  profileFile(packaged, { name: 'packaged', packages: [{ name: 'p', drvPath: join(out, 'p.drv'), out, bin: join(out, 'bin') }] });
+  manifestProfile(packaged, { name: 'packaged', extension: { packages: ['p'] } });
   const evaluations = calls('eval');
   assert.deepEqual(profile.resolveProfile(referenced, [{ source: 'positional', origin: packaged }], env).paths, [join(out, 'bin')]);
   assert.equal(fetches() - before, 1);
-  assert.equal(calls('eval') - evaluations, 2, 'once to learn it has packages, once with nixpkgs');
-  const { args, given } = lastEvaluation();
-  assert.equal(given.nixpkgs, tree);
-  assert.ok(args.includes(tree), 'nixpkgs is readable to the evaluation');
+  assert.equal(calls('eval') - evaluations, 1);
+  assert.equal(lastEvaluation().given.nixpkgs, tree);
+  assert.ok(lastEvaluation().args.includes(tree), 'nixpkgs is readable to the evaluation');
   // Its tree already in the store: used as it is, never fetched.
-  const stored = temporary();
-  profile.resolveProfile({ ...referenced, nixpkgsPath: stored }, [{ source: 'positional', origin: packaged }], { XDG_CACHE_HOME: temporary() });
+  const storedTree = temporary();
+  profile.resolveProfile({ ...referenced, nixpkgsPath: storedTree }, [{ source: 'positional', origin: packaged }], { XDG_CACHE_HOME: temporary() });
   assert.equal(fetches() - before, 1);
-  assert.equal(lastEvaluation().given.nixpkgs, stored);
+  assert.equal(lastEvaluation().given.nixpkgs, storedTree);
   // Gone from the store: fetched.
-  profile.resolveProfile({ ...referenced, nixpkgsPath: join(stored, 'gone') }, [{ source: 'positional', origin: packaged }], { XDG_CACHE_HOME: temporary() });
+  profile.resolveProfile({ ...referenced, nixpkgsPath: join(storedTree, 'gone') }, [{ source: 'positional', origin: packaged }], { XDG_CACHE_HOME: temporary() });
   assert.equal(fetches() - before, 2);
   assert.equal(lastEvaluation().given.nixpkgs, tree);
 });
 
 test('without network, a reference uses its last store path, and says so', () => {
   const tree = temporary();
-  profileFile(tree, { name: 'remembered', plugins: ['git+file:///offline-plugin'] });
+  manifestProfile(tree, { name: 'remembered', extension: { plugins: ['git+file:///offline-plugin'] } });
   const pluginTree = temporary();
   reference('git+file:///offline-profile', tree);
   reference('git+file:///offline-plugin', pluginTree);
@@ -642,7 +792,6 @@ test('without network, a reference uses its last store path, and says so', () =>
   // The first launch says what keeps it waiting; a cached one says nothing.
   const first = stderrOf(() => profile.resolveProfile(info, [selection], env));
   assert.match(first, /^agent-distro profile: fetching git\+file:\/\/\/offline-profile …$/m);
-  assert.match(first, /^agent-distro profile: evaluating .*agent-distro\.nix …$/m);
   assert.equal(stderrOf(() => profile.resolveProfile(info, [selection], env)), '');
   // Nix can no longer fetch either.
   rmSync(join(bin, 'refs', encodeURIComponent('git+file:///offline-profile')));
@@ -652,7 +801,7 @@ test('without network, a reference uses its last store path, and says so', () =>
     resolved = profile.resolveProfile(info, [selection], env);
   });
   assert.equal(resolved.name, 'remembered');
-  assert.deepEqual(resolved.plugins, [pluginTree]);
+  assert.deepEqual(resolved.plugins, [tree, pluginTree]);
   assert.match(noted, new RegExp(`AI_PROFILE=git\\+file:///offline-profile \\(entry 1 of 1\\): cannot fetch git\\+file:///offline-profile; using ${tree}, from the last launch that could`));
   assert.match(noted, /cannot fetch git\+file:\/\/\/offline-plugin; using /);
   // --list --json too, its JSON intact on stdout.
@@ -675,15 +824,21 @@ test('a launch uses the profile in effect: its plugins, env, settings and packag
   const repo = temporary();
   mkdirSync(join(repo, '.git'));
   const env = { LITELLM_BASE_URL: 'https://gateway.test', LITELLM_API_KEY: { secret: true, hint: "it's here" } };
-  profileFile(repo, { name: 'repo', plugins: [own], env, settings: { omp: { modelRoles: { default: 'litellm/large' } } } });
+  manifestProfile(repo, {
+    name: 'repo', description: 'The repository',
+    extension: { plugins: [own], env, settings: { omp: { modelRoles: { default: 'litellm/large' } } } },
+  });
   // A repository that sets nothing, and a team profile that does.
   const bare = temporary();
   mkdirSync(join(bare, '.git'));
-  const bareOwn = plugin('bare');
-  profileFile(bare, { name: 'bare', plugins: [bareOwn] });
+  const bareOwn = plugin('bare-own');
+  manifestProfile(bare, { name: 'bare', description: 'Bare', extension: { plugins: [bareOwn] } });
   const team = plugin('team');
   const elsewhere = temporary();
-  profileFile(elsewhere, { name: 'elsewhere', plugins: [team], env: { TEAM_URL: 'https://team.test' }, settings: { omp: { task: { showResolvedModelBadge: true } } } });
+  manifestProfile(elsewhere, {
+    name: 'elsewhere', description: 'Elsewhere',
+    extension: { plugins: [team], env: { TEAM_URL: 'https://team.test' }, settings: { omp: { task: { showResolvedModelBadge: true } } } },
+  });
   const args = join(temporary(), 'args.json');
   writeFileSync(args, JSON.stringify({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', info }));
   let noticed = '';
@@ -713,8 +868,9 @@ test('a launch uses the profile in effect: its plugins, env, settings and packag
   // settings, which the profile keeps for OMP. The one line a plain launch
   // prints names the profile and the website.
   const [launched, secrets, settings, value, team_, handed] = launch(join(repo));
-  assert.match(noticed, /^agent-distro profile: using repo \(from .*agent-distro\.nix\) · https:\/\/agent-distro\.nixos\.asia$/m);
-  assert.match(launched, /^--plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out$/);
+  assert.match(noticed, /^agent-distro profile: using repo \(from .*plugin\.json\) · https:\/\/agent-distro\.nixos\.asia$/m);
+  // The repository's own directory is its first plugin, then the one it names.
+  assert.equal((launched.match(/--plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out/g) ?? []).length, 2, launched);
   assert.equal(secrets, "LITELLM_API_KEY=it's here");
   assert.equal(settings, '', 'settings are the harness\'s own: this one has none');
   assert.equal(value, 'https://gateway.test');
@@ -735,12 +891,13 @@ test('a launch uses the profile in effect: its plugins, env, settings and packag
   // Over AI_PROFILE: the team's plugin, then the repository's, and the team's
   // environment, which the repository does not replace.
   const [stacked, , , , stackedTeam] = launch(bare, { AI_PROFILE: elsewhere });
-  assert.match(noticed, new RegExp(`^agent-distro profile: using elsewhere \\+ bare \\(from \\S+/agent-distro\\.nix over AI_PROFILE=${elsewhere}\\) · `, 'm'));
-  const translated = stacked.match(/^--plugin-dir (\S+\/sha256-\S+\/out) --plugin-dir (\S+\/sha256-\S+\/out)$/);
-  assert.ok(translated, stacked);
-  // Each translation records the plugin it came from.
+  assert.match(noticed, new RegExp(`^agent-distro profile: using elsewhere \\+ bare \\(from \\S+/plugin\\.json over AI_PROFILE=${elsewhere}\\) · `, 'm'));
+  // The team's own directory and plugin, then the repository's: four
+  // `--plugin-dir`s, each translation recording the plugin it came from.
+  const dirs = stacked.split(' ').filter((word) => word.startsWith('/') && word.endsWith('/out'));
+  assert.equal(dirs.length, 4, stacked);
   const rootOf = (out: string) => JSON.parse(readFileSync(join(out, '../description.json'), 'utf8')).root;
-  assert.deepEqual(translated.slice(1).map(rootOf), [team, bareOwn].map((root) => realpathSync(root)));
+  assert.deepEqual(dirs.map(rootOf), [elsewhere, team, bare, bareOwn].map((root) => realpathSync(root)));
   assert.equal(stackedTeam, 'https://team.test');
   // The picker's resolution wins over the repository's, and is used as handed.
   const evaluations = calls('eval');
@@ -782,3 +939,14 @@ test('a built profile\'s description is used by the runtime that wrote it, and n
   assert.equal(other.status, 1);
   assert.match(other.stderr, /invalid Agent Plugin: plugin\.json is missing/);
 });
+
+// The member list lives in three places — resolve.ts, lib/mk-profile.nix and
+// the published schema — so the schema is checked against the one the resolver
+// validates. test/flake.nix passes the schema's path.
+if (schemaPath !== undefined) {
+  test('the published schema names exactly the extension members the resolver takes', () => {
+    const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
+    assert.deepEqual(Object.keys(schema.properties).sort(), [...profile.EXTENSION_MEMBERS].sort());
+    assert.equal(schema.additionalProperties, false, 'the schema admits exactly those members');
+  });
+}

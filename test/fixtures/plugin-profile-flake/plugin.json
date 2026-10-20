@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "plugin-profile-flake",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": ["github:juspay/skills"]
+    }
+  }
+}

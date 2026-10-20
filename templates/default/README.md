@@ -1,12 +1,20 @@
 # My coding-agent distribution
 
-This repository is a profile: `agent-distro.nix` names its plugins, packages,
-the environment every launch exports and the settings its harnesses default,
-and the repository itself is an Agent Plugins directory (`plugin.json`,
-`skills/<name>/SKILL.md`, optionally `mcp.json`). There is no flake here and
-nothing to build or register: agent-distro reads these files when a harness
-starts. Edit `agent-distro.nix` to name your distribution, add skills under
-`skills/`, and optionally point OMP and OpenCode at a model gateway.
+This repository is a profile, and it is an [Agent
+Plugin](https://agent-plugins.org/specification/): `plugin.json` names it — its
+`name` and `description` are the profile's — and `skills/<name>/SKILL.md` holds
+the skills, with MCP servers in `mcp.json`. The directory is the profile's first
+plugin. There is no flake here and nothing to build or register: agent-distro
+reads it when a harness starts.
+
+`plugin.json` may also carry `extensions."asia.nixos.agent-distro"`, the shape
+this template shows empty: `plugins` for more plugin directories (paths
+beginning with `./`) or flake references, `packages` for nixpkgs attribute paths
+put on `PATH`, and `env` and `settings`. See
+[Profiles](https://agent-distro.nixos.asia/#profiles).
+
+Edit `plugin.json` to name your distribution, add skills under `skills/`, and
+optionally point OMP and OpenCode at a model gateway.
 
 ## Use it from any agent-distro
 

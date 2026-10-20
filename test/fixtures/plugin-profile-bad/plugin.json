@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "plugin-profile-bad",
+  "description": "A plugin.json profile with an extension member no launch reads",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "nope": true
+    }
+  }
+}

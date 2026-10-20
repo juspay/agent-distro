@@ -32,14 +32,16 @@ let
   }).activationPackage;
   # A profile by reference, with the shims exporting the reference as
   # AI_PROFILE; a store path, so the VM needs no network.
-  referencedProfile = pkgs.writeTextDir "agent-distro.nix" ''
-    { name = "referenced"; description = "Referenced"; plugins = [ ]; }
-  '';
+  referencedProfile = pkgs.writeTextDir "plugin.json" (builtins.toJSON {
+    "$schema" = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+    name = "referenced"; description = "Referenced";
+  });
   switchedProfile = switched { profiles = [ "${referencedProfile}" ]; };
   # Another profile, for the commands whose AI_PROFILE must win over the shim's.
-  ownProfile = pkgs.writeTextDir "agent-distro.nix" ''
-    { name = "own"; description = "The user's own"; plugins = [ ]; }
-  '';
+  ownProfile = pkgs.writeTextDir "plugin.json" (builtins.toJSON {
+    "$schema" = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+    name = "own"; description = "The user's own";
+  });
   switchedFlake = switched { flake = "path:/home/testuser/other-flake"; };
   original = switched { };
   # A cache the system config does not list: the daemon would ignore it.

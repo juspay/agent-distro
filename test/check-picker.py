@@ -19,13 +19,15 @@ import time
 LISTING = json.loads(sys.argv[1])
 ROWS = LISTING['harnesses']
 NAMES = [row['name'] for row in ROWS]
-# A profile to name positionally or in AI_PROFILE: a directory holding an
-# `agent-distro.nix`, which is all a profile is.
+# A profile to name positionally or in AI_PROFILE: a directory holding its
+# `plugin.json`.
 PROFILES = tempfile.mkdtemp(prefix='picker-profiles-')
 OTHER = os.path.join(PROFILES, 'other')
 os.makedirs(OTHER)
-with open(os.path.join(OTHER, 'agent-distro.nix'), 'w') as handle:
-    handle.write('{ name = "chosen"; description = "Chosen on the command line"; plugins = [ ]; }\n')
+with open(os.path.join(OTHER, 'plugin.json'), 'w') as handle:
+    handle.write(json.dumps({
+        '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+        'name': 'chosen', 'description': 'Chosen on the command line'}))
 DOWN = b'\x1b[B'
 RIGHT = b'\x1b[C'
 ESCAPE = b'\x1b'
@@ -154,7 +156,14 @@ def flow(keys):
     return [(LAUNCH, keys)]
 
 
-def version(harness):
+def version(harness, profile=False):
+    """What `harness --version` prints, as a launch prints it. A profile in
+    effect starts the harness with the profile's own directory as a plugin
+    root, and OMP then prints the bare version rather than `<name>/<version>`;
+    `profile=True` is that output, read from the listing, for a run that has
+    one in effect."""
+    if profile:
+        return next(row['version'] for row in ROWS if row['name'] == harness).encode()
     return subprocess.check_output(
         ['agent-distro', '--version'],
         env=dict(os.environ, AGENT_DISTRO_SETTINGS='0', AI_HARNESS=harness),
@@ -266,10 +275,10 @@ for row, harness in enumerate(ROWS):
     picked = run(flow(DOWN * row + b'\r'), expected)
     assert harness['version'].encode() in picked.drawn, picked.drawn
     assert picked.choice == harness['name'], picked.choice
-    run([], expected, args=[OTHER, harness['name'], '--version'])
+    run([], version(harness['name'], profile=True), args=[OTHER, harness['name'], '--version'])
     run([], expected, args=[harness['name'], '--version'])
     # A profile in AI_PROFILE, alone: the header names it and where it came from.
-    narrowed = run([(LAUNCH, b'\r')], version(NAMES[0]), {'AI_PROFILE': OTHER})
+    narrowed = run([(LAUNCH, b'\r')], version(NAMES[0], profile=True), {'AI_PROFILE': OTHER})
     assert b'agent-distro \xc2\xb7 chosen' in narrowed.drawn, narrowed.drawn
     assert f'from AI_PROFILE={OTHER}'.encode() in narrowed.drawn, narrowed.drawn
 
@@ -279,29 +288,33 @@ with tempfile.TemporaryDirectory() as work:
     repo = os.path.join(work, 'repo')
     os.makedirs(os.path.join(repo, '.git'))
     os.makedirs(os.path.join(repo, 'nested', 'deep'))
-    with open(os.path.join(repo, 'agent-distro.nix'), 'w') as handle:
-        handle.write('{ name = "repo"; description = "Found in the repository"; plugins = [ ]; }\n')
+    with open(os.path.join(repo, 'plugin.json'), 'w') as handle:
+        handle.write(json.dumps({
+            '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+            'name': 'repo', 'description': 'Found in the repository'}))
     other = os.path.join(work, 'other')
     os.makedirs(other)
-    with open(os.path.join(other, 'agent-distro.nix'), 'w') as handle:
-        handle.write('{ name = "chosen"; description = "Chosen on the command line"; plugins = [ ]; }\n')
+    with open(os.path.join(other, 'plugin.json'), 'w') as handle:
+        handle.write(json.dumps({
+            '$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+            'name': 'chosen', 'description': 'Chosen on the command line'}))
     nested = os.path.join(repo, 'nested', 'deep')
-    found = run(flow(b'\r'), version(NAMES[0]), cwd=nested)
+    found = run(flow(b'\r'), version(NAMES[0], profile=True), cwd=nested)
     assert b'agent-distro \xc2\xb7 repo' in found.drawn, found.drawn
     assert b'Found in the repository' in found.drawn, found.drawn
     assert found.choice == NAMES[0], found.choice
     listed = json.loads(subprocess.check_output(['agent-distro', '--list', '--json'], cwd=nested))
     assert listed['profile'] == {'name': 'repo', 'description': 'Found in the repository', 'source': 'repository',
-                                 'origin': os.path.join(repo, 'agent-distro.nix')}, listed
+                                 'origin': os.path.join(repo, 'plugin.json')}, listed
     # The positional selector wins over the repository; a relative path starts with ./.
-    chosen = run(flow(b'\r'), version(NAMES[0]), args=['../../../other', '--version'], cwd=nested, size=(24, 120))
+    chosen = run(flow(b'\r'), version(NAMES[0], profile=True), args=['../../../other', '--version'], cwd=nested, size=(24, 120))
     assert b'agent-distro \xc2\xb7 chosen' in chosen.drawn, chosen.drawn
     assert b'chosen as ../../../other' in chosen.drawn, chosen.drawn
-    run([], version(NAMES[1]), args=[other, NAMES[1], '--version'], cwd=nested)
+    run([], version(NAMES[1], profile=True), args=[other, NAMES[1], '--version'], cwd=nested)
 
 # Environment selectors win over consumed positional selectors.
 run([], version(NAMES[0]), {'AI_HARNESS': NAMES[0]}, args=[NAMES[-1], '--version'])
-run([], version(NAMES[0]), {'AI_HARNESS': NAMES[0]}, args=[OTHER, NAMES[-1], '--version'])
+run([], version(NAMES[0], profile=True), {'AI_HARNESS': NAMES[0]}, args=[OTHER, NAMES[-1], '--version'])
 run([], version(NAMES[0]), {'AI_HARNESS': NAMES[0]})
 run([], ('valid values: ' + ', '.join(NAMES)).encode(), {'AI_HARNESS': 'bad'}, status=1)
 run([], b'AI_PROFILE=nonesuch (entry 1 of 1): not a reference', {'AI_PROFILE': 'nonesuch'}, status=1)
@@ -411,9 +424,9 @@ with tempfile.TemporaryDirectory() as state:
 
     # Naming the profile still shows the chooser, so its selection is remembered.
     narrowed = run([(LAUNCH, b'/no-matches'), (b'no matches', ESCAPE + b'\r')],
-                   version(NAMES[0]), args=[OTHER, '--version'], state=state)
+                   version(NAMES[0], profile=True), args=[OTHER, '--version'], state=state)
     assert narrowed.choice == NAMES[0], narrowed.choice
     for args, extra in [([OTHER, NAMES[-1], '--version'], {}),
                         (['--version'], {'AI_HARNESS': NAMES[-1]})]:
-        direct = run([], version(NAMES[-1]), extra, args=args, state=state)
+        direct = run([], version(NAMES[-1], profile=OTHER in args), extra, args=args, state=state)
         assert direct.choice == NAMES[0], direct.choice

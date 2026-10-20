@@ -1,12 +1,16 @@
 /**
  * The profile in effect for one launch.
  *
- * A profile is an `agent-distro.nix` in any git repository, or one built by
+ * A profile is a `plugin.json` in any git repository — the directory is then
+ * the profile and its first plugin, and `extensions."asia.nixos.agent-distro"`
+ * adds `plugins`, `packages`, `env` and `settings` — or one built by
  * `agent-distro.lib.mkProfile`: a store path holding
  * `share/agent-distro/profile.json`, its plugins under
- * `share/agent-distro/plugins/<index>/`, and its `packages` in `bin/`. The one
+ * `share/agent-distro/plugins/<index>/`, and its `packages` in `bin/`. An
+ * `agent-distro.nix` is not read at all: finding one is the migration error
+ * (`migration`), whatever named it. The one
  * in effect is the picker's leading positional selector, exactly; else the
- * stack, bottom to top, of the `agent-distro.nix` found from the working
+ * stack, bottom to top, of the profile found from the working
  * directory up to the git root over every AI_PROFILE entry, each composed over
  * the one beneath (`merge`). A launch with none — `AI_PROFILE` unset or empty,
  * and no repository — has no profile at all, and nothing is added to the
@@ -20,8 +24,8 @@
  * `nix flake prefetch`. An entry that is neither is an error naming it and its
  * position in the stack.
  *
- * Each file is evaluated once per content and agent-distro build by
- * evaluate.nix, and cached under
+ * Each file is read once per content and agent-distro build — with
+ * evaluate-packages.nix for its `packages` — and cached under
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/profiles/<key>/profile.json`;
  * what no launch has used for STALE_DAYS is removed when something new is
  * cached. Its plugin references and packages are resolved at every launch,
@@ -37,17 +41,18 @@
  * its `reader` is this launcher's runtime tree (`runtimeReader`); otherwise
  * the roots are read as any launch-time profile's are.
  *
- * A repository's Nix is untrusted: opening a terminal in a clone evaluates
- * it. Nix evaluates it restricted (no network, no files beyond its own
- * directory, nixpkgs and evaluate.nix) and with only the variables nix itself
- * needs, so it can neither read the user's secrets nor send them anywhere.
+ * Reading a profile's JSON is not running it: a repository cannot reach the
+ * user's secrets by being opened. Its `packages` are evaluated restricted (no
+ * network, no environment, nothing beyond nixpkgs), but its plugins and their
+ * MCP servers, and its `env` and `settings`, reach the harnesses at launch —
+ * only open terminals in repositories you trust.
  *
  * Each reference's last store path is remembered under
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/references/`, so a launch
  * without network uses what is already in the store, and says so.
  *
- * What can keep a launch waiting says so as it starts (src/log.ts `slow`): an
- * evaluation the cache misses, a reference fetched for the first time, a
+ * What can keep a launch waiting says so as it starts (src/log.ts `slow`): a
+ * read the cache misses, a reference fetched for the first time, a
  * package fetched from the binary cache. Every nix command, and every cache
  * hit or miss, is logged at debug.
  */
@@ -57,13 +62,36 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isName, SOURCES, type InEffect, type Source } from '../listing.ts';
 import { classifyReference, prefetchArgs, prefetchedTree } from './reference.ts';
 import { cacheRootIfAny, isStrings, LaunchError, printable, sha256, sweep, writeAtomic } from '../plugin/launch.ts';
+import { Fatal, PLUGIN_SCHEMAS, readManifest, type Manifest } from '../plugin/read.ts';
 import { log, slow, SITE } from '../log.ts';
 import { wouldCompile } from '../update/update.ts';
 import { isFile, isDirectory, lexists, realpath } from '../util.ts';
 
+/**
+ * The Nix profile file this no longer reads: finding one is the migration
+ * error, which names it (`migration`).
+ */
 export const FILE = 'agent-distro.nix';
+/** The Agent Plugins manifest a profile is. */
+export const MANIFEST = 'plugin.json';
+/**
+ * The `plugin.json` extension namespace a profile's fields beyond the manifest
+ * live in: `plugins`, `packages`, `env` and `settings`.
+ */
+export const EXTENSION = 'asia.nixos.agent-distro';
+/** The only members `EXTENSION` takes; anything else is an error naming it. */
+export const EXTENSION_MEMBERS: readonly string[] = ['plugins', 'packages', 'env', 'settings'];
 /** The variable a profile reference falls back to: a whitespace-separated stack. */
 export const VARIABLE = 'AI_PROFILE';
+
+/**
+ * Why a repository that still carries `FILE` must migrate, `file` being where
+ * it is: the fields of that file are the extension's now.
+ */
+export function migration(file: string): string {
+  return `${file}: ${FILE} is no longer read — a profile is a ${MANIFEST}. Move its fields into `
+    + `\`extensions."${EXTENSION}"\` (see ${SITE}/#profiles; schema ${SITE}/agent-distro.schema.json)`;
+}
 
 /**
  * The runtime tree this launcher runs from, as a built profile's `reader`
@@ -128,17 +156,18 @@ export type Resolved = InEffect & {
   descriptions?: Described[];
 };
 
-/** A cached evaluation of one file: references unresolved, packages unbuilt. */
+/** A cached read of one profile: references unresolved, packages unbuilt. */
 type Evaluated = {
   name: string;
   description: string;
   plugins: string[];
   env: ProfileEnv;
   settings: Settings;
-  /** Attributes this build no longer reads; each is warned about once per launch. */
-  deprecated: string[];
   packages: { name: string; drvPath: string; out: string; bin: string }[];
 };
+
+/** One package a profile names: its output and the commands' directory. */
+type Package = Evaluated['packages'][number];
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -204,21 +233,61 @@ export function isResolved(value: unknown): value is Resolved {
     && (value.descriptions === undefined || isDescriptions(value.descriptions));
 }
 
+/** One package a profile names, as the value of its `packages` holds it. */
+const isPackage = (value: unknown): value is Package =>
+  isObject(value) && isString(value.name) && isString(value.drvPath) && isString(value.out) && isString(value.bin);
+
 function isEvaluated(value: unknown): value is Evaluated {
   return isObject(value) && isName(value.name) && isString(value.description) && isStrings(value.plugins)
-    && envProblem(value.env) === null && settingsProblem(value.settings) === null && isStrings(value.deprecated)
-    && Array.isArray(value.packages)
-    && value.packages.every((p) => isObject(p) && isString(p.name) && isString(p.drvPath) && isString(p.out) && isString(p.bin));
+    && envProblem(value.env) === null && settingsProblem(value.settings) === null
+    && Array.isArray(value.packages) && value.packages.every(isPackage);
 }
 
 /**
- * The `agent-distro.nix` nearest `cwd`, at or below the git root that holds
- * it; null outside a git repository or when none is found.
+ * Whether `file` is a `plugin.json` a launch may read as a profile on
+ * discovery: valid JSON whose `$schema` is a supported Agent Plugins version.
+ * An unrelated `plugin.json` in a repository — Grafana's, say — must not make
+ * every launch in it fail, so discovery only takes one that says what it is.
+ */
+function isManifest(file: string): boolean {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    // Unreadable or not JSON — EACCES, or a race with deletion between the
+    // `isFile` and this read, as much as a syntax error: discovery skips it
+    // rather than fail every launch in the repository.
+    log.profile.debug(`${file}: not read as a profile: ${(error as Error).message}`);
+    return false;
+  }
+  const schema = isObject(value) ? value.$schema : undefined;
+  if (!isString(schema) || !Object.hasOwn(PLUGIN_SCHEMAS, schema)) {
+    log.profile.debug(`${file}: \`$schema\` ${JSON.stringify(schema ?? null)} is not an Agent Plugins version; not read as a profile`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The profile file nearest `cwd`, at or below the git root that holds it: a
+ * directory's `plugin.json` when that is an Agent Plugin manifest, else its
+ * `FILE` — which the caller refuses with `migration`; null outside a git
+ * repository or when there is neither.
  */
 export function discover(cwd: string): string | null {
   let found: string | null = null;
   for (let directory = cwd; ; directory = dirname(directory)) {
-    if (found === null && isFile(join(directory, FILE))) found = join(directory, FILE);
+    if (found === null) {
+      const nix = join(directory, FILE);
+      const manifest = join(directory, MANIFEST);
+      if (isFile(nix)) {
+        found = nix;
+      } else if (isFile(manifest)) {
+        // `isManifest` logs, at debug, a `plugin.json` that is not an Agent
+        // Plugin — Grafana's, say — and discovery walks past it.
+        if (isManifest(manifest)) found = manifest;
+      }
+    }
     // `.git` is a directory in a clone and a file in a worktree or submodule.
     if (lexists(join(directory, '.git'))) return found;
     if (dirname(directory) === directory) return null;
@@ -398,56 +467,103 @@ function fetched(reference: string, what: string, cache: string | null): string 
   }
 }
 
-const EVALUATE = join(import.meta.dirname, 'evaluate.nix');
+/** The evaluator of a profile's `packages` (EXTENSION's). */
+const EVALUATE_PACKAGES = join(import.meta.dirname, 'evaluate-packages.nix');
+// The manifest parser and the packages evaluator shape a profile's value, so
+// both are part of its cache key.
+const READER = join(import.meta.dirname, '../plugin/read.ts');
 
 /**
- * Evaluate `file`, without network or the user's environment (restrict-eval
- * also empties getEnv), and reading nothing beyond its directory,
- * evaluate.nix and nixpkgs. --impure is only for reading the checkout in
- * place, outside the store; restrict-eval bounds it. Without nixpkgs, a
- * profile with packages evaluates them to null: only then is nixpkgs fetched
- * and the file evaluated again.
+ * Evaluate a profile's `packages`: nixpkgs attribute paths, against the nixpkgs
+ * the launcher holds — its store path while that is there, else its locked
+ * reference, fetched — for `system`, restricted (no network, no user
+ * environment, nothing beyond nixpkgs and this evaluator) and never compiling.
+ * An attribute nixpkgs does not have is an error naming it. The extension names
+ * the attribute paths themselves, so nixpkgs is resolved up front and the list
+ * is evaluated once.
  */
-export function evaluate(file: string, info: Info, cache: string | null, what: string): Evaluated {
-  const run = (nixpkgs: string | null): unknown => JSON.parse(nix(['eval', '--json', '--impure',
+function evaluatePackages(attributes: string[], info: Info, cache: string | null, what: string): Package[] {
+  const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
+  const nixpkgs = isAbsolute(info.nixpkgs) ? info.nixpkgs
+    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
+  const value: unknown = JSON.parse(nix(['eval', '--json', '--impure',
     '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
-    ...[dirname(file), dirname(EVALUATE), ...(nixpkgs === null ? [] : [nixpkgs])].flatMap((path) => ['-I', path]),
-    '--expr', `import ${JSON.stringify(EVALUATE)} (${nixJSON({ file, nixpkgs, system: info.system })})`],
-  `${what}: cannot evaluate ${file}`, nixEnvironment(true)));
-  let value = run(null);
-  if (isObject(value) && value.packages === null) {
-    const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
-    value = run(isAbsolute(info.nixpkgs) ? info.nixpkgs : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache));
+    ...[dirname(EVALUATE_PACKAGES), nixpkgs].flatMap((path) => ['-I', path]),
+    '--expr', `import ${JSON.stringify(EVALUATE_PACKAGES)} (${nixJSON({ attributes, nixpkgs, system: info.system })})`],
+  `${what}: cannot evaluate its ${EXTENSION} \`packages\``, nixEnvironment(true)));
+  if (!Array.isArray(value) || !value.every(isPackage)) {
+    throw new LaunchError(`${what}: its ${EXTENSION} \`packages\` did not evaluate`);
   }
-  if (isObject(value)) {
-    if (!isName(value.name)) throw new LaunchError(`${what}: ${file}: \`name\` must be one word without /`);
-    validate(`${what}: ${file}`, value);
+  return value;
+}
+
+/** Fail on any `EXTENSION` member that is not one of `EXTENSION_MEMBERS`. */
+function extensionMembers(extension: Record<string, unknown>, at: string): Record<string, unknown> {
+  for (const key of Object.keys(extension)) {
+    if (!EXTENSION_MEMBERS.includes(key)) {
+      throw new LaunchError(`${at}: \`${EXTENSION}\` has no member \`${key}\`; it takes ${EXTENSION_MEMBERS.join(', ')}`);
+    }
   }
-  if (!isEvaluated(value)) throw new LaunchError(`${what}: ${file} is not a profile`);
+  return extension;
+}
+
+/** One `EXTENSION` list member: absent is empty, anything but strings an error. */
+function stringList(value: unknown, at: string, member: string): string[] {
+  if (value === undefined) return [];
+  if (!isStrings(value)) throw new LaunchError(`${at}: \`${EXTENSION}.${member}\` must be an array of strings`);
   return value;
 }
 
 /**
- * The cached evaluation of `file`, evaluating it first when absent or when
- * `again`. Keyed by the file's path (its relative paths are relative to it),
- * its contents, the evaluator that shapes the value, and what the value
- * depends on: the system, and the nixpkgs a profile with `packages` was
- * evaluated against.
+ * The value of a profile: the manifest names it, its own directory is its
+ * first plugin (and is never listed), and `EXTENSION` adds `plugins`,
+ * `packages`, `env` and `settings`. Read with the plugin reader's manifest
+ * parser — the one parser for `plugin.json`.
  */
-function evaluated(file: string, info: Info, cache: string | null, what: string, again: boolean): Evaluated {
+export function profileValue(file: string, info: Info, cache: string | null, what: string): Evaluated {
+  const root = realpath(dirname(file));
+  const at = `${what}: ${file}`;
+  let manifest: Manifest;
+  try {
+    manifest = readManifest(root, (message) => log.profile.debug(`${at}: ${message}`));
+  } catch (error) {
+    if (!(error instanceof Fatal)) throw error;
+    throw new LaunchError(`${at}: invalid Agent Plugin: ${error.message}`);
+  }
+  const extension = manifest.extensions?.[EXTENSION];
+  const members = extension === undefined ? {} : extensionMembers(extension, at);
+  const plugins = stringList(members.plugins, at, 'plugins');
+  const attributes = stringList(members.packages, at, 'packages');
+  const value = {
+    name: manifest.name,
+    description: manifest.description ?? '',
+    plugins: [root, ...plugins.map((entry) => (entry.startsWith('./') ? join(root, entry) : entry))],
+    env: members.env ?? {},
+    settings: members.settings ?? {},
+    packages: attributes.length
+      ? slow(log.profile, `evaluating the packages of ${file}`, () => evaluatePackages(attributes, info, cache, at))
+      : [],
+  };
+  validate(at, value);
+  if (!isEvaluated(value)) throw new LaunchError(`${at} is not a profile`);
+  return value;
+}
+
+/**
+ * The cached value under `key` in the profiles cache, computed when it is
+ * absent, when `again`, or when it is not a `isValue`; shared by both profile
+ * files (the cache stores them side by side, keyed alike).
+ */
+function cached<T>(
+  cache: string | null, key: string, again: boolean,
+  isValue: (value: unknown) => value is T, compute: () => T,
+): T {
   const profiles = cache === null ? null : join(cache, 'profiles');
-  // `runtime: import.meta.dirname` here would re-evaluate every profile in
-  // every repository on every commit that touches src/ — which a scheduled
-  // update makes a daily event, for a value only evaluate.nix shapes.
-  const key = sha256(JSON.stringify({
-    file, content: sha256(readFileSync(file)), evaluator: sha256(readFileSync(EVALUATE)),
-    nixpkgs: info.nixpkgs, system: info.system,
-  }));
   const path = profiles === null ? null : join(profiles, key, 'profile.json');
   if (path !== null && !again && existsSync(path)) {
     try {
       const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
-      if (isEvaluated(value)) {
+      if (isValue(value)) {
         const now = new Date();
         utimesSync(dirname(path), now, now);
         log.profile.debug(`cache hit: ${path}`);
@@ -458,12 +574,31 @@ function evaluated(file: string, info: Info, cache: string | null, what: string,
     }
   }
   log.profile.debug(path === null ? 'no cache: evaluating' : `cache ${again ? 'bypassed' : 'miss'}: ${path}`);
-  const value = slow(log.profile, `evaluating ${file}`, () => evaluate(file, info, cache, what));
+  const value = compute();
   if (path !== null && profiles !== null) {
     writeAtomic(path, JSON.stringify(value, null, 2) + '\n');
     sweep(profiles, (name) => name !== key);
   }
   return value;
+}
+
+/**
+ * The cached value of a profile, read first when absent or when `again`. Keyed
+ * by the file's path (its relative paths are relative to it), its contents, the
+ * reader and packages evaluator that shape the value, and what the value
+ * depends on: the system, and the nixpkgs a profile with `packages` was
+ * evaluated against.
+ */
+function evaluated(file: string, info: Info, cache: string | null, what: string, again: boolean): Evaluated {
+  // `runtime: import.meta.dirname` here would re-read every plugin.json in
+  // every repository on every commit that touches src/, for a value only the
+  // manifest, the reader and evaluate-packages.nix shape.
+  const key = sha256(JSON.stringify({
+    file, content: sha256(readFileSync(file)),
+    evaluator: sha256(readFileSync(READER) + readFileSync(EVALUATE_PACKAGES)),
+    nixpkgs: info.nixpkgs, system: info.system,
+  }));
+  return cached(cache, key, again, isEvaluated, () => profileValue(file, info, cache, what));
 }
 
 /** Build the packages not in the store, from the binary cache only; their PATH directories. */
@@ -488,11 +623,24 @@ function realise(profile: Evaluated, what: string): string[] {
   return profile.packages.map((p) => p.bin);
 }
 
-/** The profile file a path reference names: the file, or the one in that directory. */
-function fileAt(path: string, what: string): string {
-  const file = isDirectory(path) ? join(path, FILE) : path;
-  if (!isFile(file)) throw new LaunchError(`${what}: no ${FILE} at ${path}`);
-  return file;
+/**
+ * The `plugin.json` `path` names: the file itself, or the one in that
+ * directory. An `agent-distro.nix` is the migration error, whatever named it;
+ * null when the path names no profile at all.
+ */
+export function findProfile(path: string, what: string): string | null {
+  // A repository's own profile is named by its file, which the migration
+  // sentence already carries; anything else keeps the label that named it.
+  const named = (file: string) => (what === file ? migration(file) : `${what}: ${migration(file)}`);
+  if (isFile(path)) {
+    if (basename(path) === MANIFEST) return path;
+    if (basename(path) === FILE) throw new LaunchError(named(path));
+    throw new LaunchError(`${what}: ${path} is not a ${MANIFEST}`);
+  }
+  const nix = join(path, FILE);
+  if (isFile(nix)) throw new LaunchError(named(nix));
+  const manifest = join(path, MANIFEST);
+  return isFile(manifest) ? manifest : null;
 }
 
 /** A profile built by `agent-distro.lib.mkProfile`, as its store path holds it. */
@@ -588,7 +736,7 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
       + 'reference such as github:owner/repo');
   }
   const { source, origin } = selection;
-  // A built profile is read where it lies; a repository's is evaluated.
+  // A built profile is read where it lies; a repository's plugin.json is read.
   const built = 'path' in kind ? builtProfile(kind.path) : null;
   if (built) {
     const matching = built.reader === runtimeReader;
@@ -604,18 +752,15 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
   }
   const cache = cacheRootIfAny(env, what);
   if (cache === null) {
-    log.profile.warn(`${what}: XDG_CACHE_HOME and HOME are unset; profiles are evaluated without a cache`);
+    log.profile.warn(`${what}: XDG_CACHE_HOME and HOME are unset; profiles are read without a cache`);
   }
-  const file = fileAt('path' in kind ? kind.path : fetched(kind.flake, what, cache), what);
+  const directory = 'path' in kind ? kind.path : fetched(kind.flake, what, cache);
+  const file = findProfile(directory, what);
+  if (file === null) throw new LaunchError(`${what}: no ${MANIFEST} at ${directory}`);
   let profile = evaluated(file, info, cache, what, false);
-  // A package's derivation can be collected with its output; evaluate afresh to get it back.
+  // A package's derivation can be collected with its output; read afresh to get it back.
   if (profile.packages.some((p) => !existsSync(p.out) && !existsSync(p.drvPath))) {
     profile = evaluated(file, info, cache, what, true);
-  }
-  for (const name of profile.deprecated) {
-    // The evaluation is cached per content, so this is what keeps the warning
-    // in front of a profile written for an older agent-distro.
-    log.profile.warn(`\`${name}\` is no longer read; see ${SITE}/#profiles`);
   }
   const paths = realise(profile, what);
   const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, what, cache)));

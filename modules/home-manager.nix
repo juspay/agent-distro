@@ -75,11 +75,11 @@ in
         whitespace-separated and composed left to right, later entries winning.
         A string is a profile reference, read when a harness starts: a flake
         reference such as the example, or an absolute path to a repository with
-        an agent-distro.nix. Anything else — a path, or a flake input
+        its plugin.json. Anything else — a path, or a flake input
         (`inputs.skills`, with `flake = false`) — is built by lib.mkProfile and
         read from the store, pinned and offline.
 
-        A repository's own agent-distro.nix composes over them where a harness
+        A repository's own profile composes over them where a harness
         starts inside one, and is the only profile in effect where none is
         listed. The environment's own AI_PROFILE, where it is set, wins over
         this.

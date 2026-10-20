@@ -505,20 +505,13 @@ test('the CLI resolves AI_PROFILE itself, as a direct launch does', () => {
   const root = temporary();
   const profileDir = join(root, 'smoke');
   mkdirSync(profileDir, { recursive: true });
-  writeFileSync(join(profileDir, 'agent-distro.nix'), '{ name = "smoke"; description = "read at launch"; }');
-  // The one `nix eval` the resolver makes, answered by a stub: no store, no
-  // network, no real nixpkgs. What it prints is `evaluate.nix`'s own shape,
-  // which src/profile/resolve.ts checks (`isEvaluated`).
-  const entry = join(root, 'evaluated.json');
-  writeFileSync(entry, JSON.stringify({
-    name: 'smoke', description: 'read at launch', plugins: [],
-    env: { SMOKE_MARK: 'here' }, settings: {}, deprecated: [], packages: [],
+  writeFileSync(join(profileDir, 'plugin.json'), JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+    name: 'smoke', description: 'read at launch',
+    extensions: { 'asia.nixos.agent-distro': { env: { SMOKE_MARK: 'here' } } },
   }));
-  const bin = join(root, 'bin');
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, 'nix'), `#!/bin/sh\ncat ${entry}\n`, { mode: 0o755 });
 
-  const result = run('', { AI_PROFILE: profileDir, PATH: `${bin}:${process.env.PATH}` });
+  const result = run('', { AI_PROFILE: profileDir });
   assert.equal(result.status, 0, result.stderr);
   // The profile reached the shell the launcher evaluates: its `env` is
   // exported there, and the launch names it on stderr.

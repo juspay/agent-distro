@@ -63,9 +63,9 @@ const listing = (harnesses = HARNESSES): Listing => ({ harnesses });
 const IN_EFFECT = [
   undefined,
   { name: 'juspay', description: 'Juspay skills + Kolu, via Juspay\'s LiteLLM gateway', source: 'repository',
-    origin: '/home/someone/src/github.com/juspay/a-rather-long-repository-name/agent-distro.nix' },
+    origin: '/home/someone/src/github.com/juspay/a-rather-long-repository-name/plugin.json' },
   { name: 'ekala', description: 'Ekala\'s Nix development skills', source: 'positional', origin: 'github:ekala-project/ekala-ai-skills' },
-  { name: 'repo', description: 'The repository\'s own tools', source: 'repository', origin: '/home/someone/src/repo/agent-distro.nix',
+  { name: 'repo', description: 'The repository\'s own tools', source: 'repository', origin: '/home/someone/src/repo/plugin.json',
     over: { name: 'juspay', description: 'Juspay skills + Kolu', source: 'variable', origin: 'github:juspay/skills' } },
 ] as const;
 // What the header names, and what the profile row says it came from. With no
