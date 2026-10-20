@@ -2,8 +2,17 @@
 
 # agent-distro
 
-**Your team's coding agents, in one command.** Package your skills, MCP servers,
-and harness settings once, and run them in every harness.
+**An Agent Plugin in your repository is all the setup your coding agents need.**
+agent-distro runs Oh My Pi, Claude Code, Codex, OpenCode and Pi, and each picks up
+the repository's `plugin.json` — skills, MCP servers, packages, environment,
+harness settings — the moment you launch it there.
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "my-repo"
+}
+```
 
 ```sh
 nix run github:juspay/agent-distro

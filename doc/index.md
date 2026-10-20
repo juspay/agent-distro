@@ -1,14 +1,41 @@
 ---
 title: agent-distro
-description: "Your team's coding agents, in one command. Package your skills, MCP servers and harness settings once, and run them in every harness."
+description: "An Agent Plugin in your repository is all the setup your coding agents need. agent-distro runs Oh My Pi, Claude Code, Codex, OpenCode and Pi, and each picks up the repository's plugin.json — skills, MCP servers, packages, environment, harness settings — the moment you launch it there."
 ---
 
 ## Quick start
 
+**1. In a repository with a `plugin.json`.**
+
+```sh
+nix run github:juspay/agent-distro
+```
+
+That is the whole setup. The repository's `plugin.json` is the profile: its skills, MCP
+servers, packages, environment and harness settings are in effect for that launch. The
+minimal manifest is five lines:
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "my-repo"
+}
+```
+
+**2. A team's profile, by reference.**
+
+```sh
+nix run github:juspay/agent-distro -- github:juspay/skills
+```
+
+A profile is an Agent Plugin; name one and it is composed over the repository's own, as
+[Profiles](#profiles) describes.
+
+**3. The chooser.**
+
 ```sh
 nix run github:juspay/agent-distro                            # pick from the list
 AI_HARNESS=claude nix run github:juspay/agent-distro          # skip the list
-nix run github:juspay/agent-distro -- github:juspay/skills    # with a profile from any repository
 ```
 
 To keep the agents installed and updated, see [Install and keep updated](#install). To give your agents a team's skills, MCP servers and settings, see [Profiles](#profiles).
@@ -499,6 +526,37 @@ its Nix file by accident.
 
 [^plugin-dir]: Each is a `plugin.json` manifest, with optional `skills/<name>/SKILL.md` and `mcp.json`. A path in the extension is relative to the plugin root and begins with `./`; a flake reference string is read at launch, or locked once when `mkProfile` builds the profile (impurely; see [Library](#library)).
 [^bare-command]: An MCP server that a plugin declares by bare command, such as `"command": "mcp-nixos"`, is found on `PATH`. List its package here and it is built, or fetched from a binary cache, so the server starts at once instead of being downloaded when the agent first asks for it, and every user runs the version the profile pinned.
+
+### From APM
+
+APM wrote a dependency list to `apm.yml` and installed it into each client's directory. A
+profile is the repository's `plugin.json`, read at launch; nothing is generated.
+
+Before, a plugin dependency in `apm.yml`:
+
+```yaml
+dependencies:
+  apm:
+    - juspay/kolu/agent-plugin
+```
+
+After, the same plugin in the profile's `extensions."asia.nixos.agent-distro".plugins`:
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "my-repo",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": ["github:juspay/kolu?dir=agent-plugin"]
+    }
+  }
+}
+```
+
+`apm install` and its generated `.claude/`, `.agents/` and other client directories become
+nothing: agent-distro points each harness at the plugin when it launches, so no per-client
+copy is committed or regenerated.
 
 ### Run with a profile
 
