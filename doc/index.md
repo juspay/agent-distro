@@ -793,15 +793,15 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 - **Runner.** CI is [odu](https://github.com/juspay/odu): `nix run --accept-flake-config github:juspay/odu -- run` runs the `ci` recipe and everything it depends on — one `<recipe>@<platform>` commit status per node, on the Linux and macOS lane hosts of `~/.config/odu/hosts.json`.
 - **Sharding.** The VM tests spread over up to 8 Linux hosts,[^shards] since each wrapper check boots a machine of its own.
 - **Required checks.** `just protect --dry-run` prints the contexts main's ruleset requires; `just protect` sets them, from what the pipeline and `cache.yml` say they are.[^protect]
-- **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
-- **Report.** The update report reads resolved versions and each harness's release-note metadata.
+- **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root lock and the sub-flake locks.
+- **Report.** The update report reads resolved versions, each harness's release-note metadata, the npins pins and every lock's own inputs — the root's and the sub-flakes', `test/`'s Home Manager and Juspay sources among them. A run whose tree holds a change the report cannot name fails, rather than open a pull request whose body calls it "unchanged".
 - **Cache.** `cache.yml` pushes realised paths to the OSS cache,[^attic-token] and publishes the package's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository, through the `publish-closure` action it shares with kolu ([juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)) ([The binary cache](#binary-cache)).
 - **Merge gate.** The daily update PR enables auto-merge, so it lands once every context the ruleset requires is green.[^auto-merge]
 - **Consumers.** They run `nix flake update agent-distro`.
 
 For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake update`, and then `bash test/update-lock.sh`.
 
-[^update-sources]: It discovers npins directories under `harnesses/` and `lib/`, re-pins each npm tarball pinned there (`yaml`, `opencode-plugin-litellm`) to the newest release of its major version, and runs each harness's `update.py`.
+[^update-sources]: It discovers npins directories under `harnesses/`, `lib/` and `test/`, re-pins each npm tarball pinned there (`yaml`, `opencode-plugin-litellm`) to the newest release of its major version, and runs each harness's `update.py`.
 [^shards]: `test` carries `[metadata("odu:shard=8")]`: odu gives each shard `ODU_SHARD_INDEX` and `ODU_SHARD_TOTAL`, and the recipe builds its own slice of `./test`'s checks. With neither variable set it runs them all in one `nix flake check`.
 [^protect]: `odu protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
 [^attic-token]: `ATTIC_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret.

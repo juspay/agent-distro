@@ -1,8 +1,9 @@
-"""Print where every harness and shared npins pin is, as one JSON object; never fetch.
+"""Print where every npins pin is, as one JSON object; never fetch.
 
-npins' file format stays in here. What comes out is what a reader of the
-update calls a pin's position: the release it is on, or a short revision when
-it follows a branch.
+`harnesses/`, `lib/` and `test/` each own the pins beside them. npins' file
+format stays in here. What comes out is what a reader of the update calls a
+pin's position: the release it is on, or a short revision when it follows a
+branch.
 """
 import json
 from pathlib import Path
@@ -25,7 +26,9 @@ def position(pin):
 def main():
     pins = {}
     for sources in [*Path('harnesses').glob('*/npins/sources.json'),
-                    *Path('lib').glob('npins/sources.json')]:
+                    *Path('lib').glob('npins/sources.json'),
+                    *Path('lib').glob('*/npins/sources.json'),
+                    *Path('test').glob('npins/sources.json')]:
         owner = sources.parent.parent.name
         for name, pin in json.loads(sources.read_text())['pins'].items():
             pins[f'{owner}/{name}'] = position(pin)

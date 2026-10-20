@@ -40,10 +40,13 @@ class UpdateFlakeTests(unittest.TestCase):
                 'Path(__file__).with_name("custom-pin.txt").write_text("updated\\n")\n')
             (root / 'lib/npins').mkdir(parents=True)
             (root / 'lib/helper/npins').mkdir(parents=True)
+            # The test flake's own pins, which the fixtures live in.
+            (root / 'test/npins').mkdir(parents=True)
             (root / 'pin-calls').unlink()
             subprocess.run(['bash', str(SCRIPTS / 'update-sources.sh')], cwd=root, env=env, check=True)
             self.assertEqual(set((root / 'pin-calls').read_text().splitlines()), {
-                'harnesses/team/npins', 'harnesses/new-agent/npins', 'lib/npins', 'lib/helper/npins'})
+                'harnesses/team/npins', 'harnesses/new-agent/npins', 'lib/npins', 'lib/helper/npins',
+                'test/npins'})
             self.assertEqual((harness / 'custom-pin.txt').read_text(), 'updated\n')
 
     def test_yaml_repin_stays_on_its_major(self):
@@ -147,14 +150,43 @@ class UpdateFlakeTests(unittest.TestCase):
                                 ('profiles/ignored', {'type': 'Git', 'revision': 'c' * 40}),
                                 ('harnesses/new-agent', {'type': 'GitRelease', 'version': 'v3',
                                                         'repository': {'type': 'GitHub', 'owner': 'example', 'repo': 'agent'}}),
-                                ('lib', {'type': 'Git', 'revision': 'b' * 40})]:
+                                ('lib', {'type': 'Git', 'revision': 'b' * 40}),
+                                ('test', {'type': 'Git', 'revision': 'd' * 40})]:
                 path = root / folder / 'npins/sources.json'
                 path.parent.mkdir(parents=True)
                 path.write_text(json.dumps({'pins': {'source': pin}, 'version': 8}))
             result = subprocess.check_output(['python3', str(SCRIPTS / 'read-pins.py')], cwd=root, text=True)
             self.assertEqual(json.loads(result), {
                 'team/source': {'at': 'aaaaaaa'}, 'lib/source': {'at': 'bbbbbbb'},
+                'test/source': {'at': 'ddddddd'},
                 'new-agent/source': {'at': 'v3', 'notes': 'https://github.com/example/agent/releases/tag/v3'}})
+
+    def test_locks_report_own_inputs_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def write(lock, nodes, inputs):
+                path = root / lock
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({'nodes': {**nodes, 'root': {'inputs': inputs}},
+                                            'root': 'root', 'version': 7}))
+
+            def github(owner, repo, rev):
+                return {'locked': {'type': 'github', 'owner': owner, 'repo': repo, 'rev': rev * 40}}
+
+            # The root lock, as this repository has it: nixpkgs and nothing else.
+            write('flake.lock', {'nixpkgs': github('NixOS', 'nixpkgs', 'f')}, {'nixpkgs': 'nixpkgs'})
+            # The test flake, which owns inputs of its own: a path input and a
+            # follow are not pins (the follow is the root's, not reported twice).
+            write('test/flake.lock', {'agent-distro': {'locked': {'type': 'path', 'path': '..'}},
+                                      'home-manager': github('nix-community', 'home-manager', 'a'),
+                                      'kolu': github('juspay', 'kolu', 'b')},
+                  {'agent-distro': 'agent-distro', 'home-manager': 'home-manager', 'kolu': 'kolu',
+                   'nixpkgs': ['agent-distro', 'nixpkgs']})
+            result = subprocess.check_output(['python3', str(SCRIPTS / 'read-locks.py')], cwd=root, text=True)
+            self.assertEqual(json.loads(result), {
+                'flake/nixpkgs': {'at': 'fffffff'}, 'test/home-manager': {'at': 'aaaaaaa'},
+                'test/kolu': {'at': 'bbbbbbb'}})
 
     def test_report_discovers_orders_and_links_harnesses(self):
         for changed in [False, True]:
@@ -166,8 +198,11 @@ class UpdateFlakeTests(unittest.TestCase):
                 metadata = {name: {'title': title, 'order': order, 'releaseNotes': f'https://example.invalid/{name}/{after[name]}'}
                             for name, title, order in [('z-first', 'First', 0), ('a-second', 'Second', 1), ('new', 'New', 2)]}
                 env = dict(os.environ, VERSIONS_BEFORE=json.dumps(before), VERSIONS_AFTER=json.dumps(after),
-                           HARNESS_META=json.dumps(metadata), PINS_BEFORE='{"team/source":{"at":"aaaaaaa"}}',
-                           PINS_AFTER='{"team/source":{"at":"bbbbbbb"}}',
+                           HARNESS_META=json.dumps(metadata),
+                           PINS_BEFORE=json.dumps({'team/source': {'at': 'aaaaaaa'}}),
+                           PINS_AFTER=json.dumps({'team/source': {'at': 'bbbbbbb'}}),
+                           LOCKS_BEFORE=json.dumps({'flake/nixpkgs': {'at': 'ccccccc'}}),
+                           LOCKS_AFTER=json.dumps({'flake/nixpkgs': {'at': 'ddddddd'}}),
                            GITHUB_SERVER_URL='https://github.com', GITHUB_REPOSITORY='example/distro',
                            GITHUB_RUN_ID='123', RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(root / 'outputs'))
                 subprocess.run(['python3', str(SCRIPTS / 'describe-flake-update.py')], env=env, check=True)
@@ -179,8 +214,37 @@ class UpdateFlakeTests(unittest.TestCase):
                 self.assertIn('New added → 3.0', outputs['pr-title'])
                 self.assertIn('https://example.invalid/new/3.0', body)
                 self.assertIn('team/source aaaaaaa → bbbbbbb', outputs['pr-title'])
+                self.assertIn('flake/nixpkgs ccccccc → ddddddd', outputs['pr-title'])
                 self.assertIn('lock moved', body)
                 self.assertIn('https://github.com/example/distro/actions/runs/123', body)
+                # A pin and a lock moved in both readings, so the run has
+                # something to open a pull request for either way.
+                self.assertEqual(outputs['changed'], 'true')
+
+    def test_report_says_nothing_changed_when_nothing_did(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'flake-update.log').write_text('nothing to do\n')
+            versions = {'omp': '1.0'}
+            metadata = {'omp': {'title': 'Oh My Pi', 'order': 0,
+                                'releaseNotes': 'https://example.invalid/omp/1.0'}}
+            pins = {'omp/oh-my-pi': {'at': 'v1.0'}}
+            locks = {'flake/nixpkgs': {'at': 'aaaaaaa'}}
+            env = dict(os.environ, VERSIONS_BEFORE=json.dumps(versions), VERSIONS_AFTER=json.dumps(versions),
+                       HARNESS_META=json.dumps(metadata), PINS_BEFORE=json.dumps(pins),
+                       PINS_AFTER=json.dumps(pins), LOCKS_BEFORE=json.dumps(locks),
+                       LOCKS_AFTER=json.dumps(locks), GITHUB_SERVER_URL='https://github.com',
+                       GITHUB_REPOSITORY='example/distro', GITHUB_RUN_ID='1', RUNNER_TEMP=str(root),
+                       GITHUB_OUTPUT=str(root / 'outputs'))
+            subprocess.run(['python3', str(SCRIPTS / 'describe-flake-update.py')], env=env, check=True)
+            outputs = dict(line.split('=', 1) for line in (root / 'outputs').read_text().splitlines())
+            self.assertEqual(outputs['changed'], 'false')
+            # A title with nothing to name: the workflow opens no pull request.
+            self.assertEqual(outputs['pr-title'], 'chore(flake): update inputs')
+            body = Path(outputs['pr-body-path']).read_text()
+            self.assertIn('**Oh My Pi unchanged (`1.0`)**', body)
+            self.assertIn('- `omp/oh-my-pi` unchanged (`v1.0`)', body)
+            self.assertIn('- `flake/nixpkgs` unchanged (`aaaaaaa`)', body)
 
 
 if __name__ == '__main__':

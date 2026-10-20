@@ -26,13 +26,15 @@ jobs:
         with:
           github_access_token: ${{ github.token }}
 
-      - name: Read the pinned package versions
+      - name: Read the versions and pins before the update
         id: versions-before
         run: |
           versions=$(bash .github/scripts/read-versions.sh)
           pins=$(python3 .github/scripts/read-pins.py)
+          locks=$(python3 .github/scripts/read-locks.py)
           echo "versions=$versions" >> "$GITHUB_OUTPUT"
           echo "pins=$pins" >> "$GITHUB_OUTPUT"
+          echo "locks=$locks" >> "$GITHUB_OUTPUT"
 
       - name: Advance directory-local sources
         run: bash .github/scripts/update-sources.sh
@@ -43,10 +45,12 @@ jobs:
         run: |
           nix flake update --log-format raw 2>&1 | tee "$RUNNER_TEMP/flake-update.log"
           versions=$(bash .github/scripts/read-versions.sh)
-          echo "versions=$versions" >> "$GITHUB_OUTPUT"
           pins=$(python3 .github/scripts/read-pins.py)
+          locks=$(python3 .github/scripts/read-locks.py)
           metadata=$(nix eval --json .#harnessMeta --apply "meta: meta (builtins.fromJSON ''$versions'')")
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
           echo "pins=$pins" >> "$GITHUB_OUTPUT"
+          echo "locks=$locks" >> "$GITHUB_OUTPUT"
           echo "metadata=$metadata" >> "$GITHUB_OUTPUT"
 
       - name: Update the sub-flake locks after the root lock
@@ -60,10 +64,44 @@ jobs:
           HARNESS_META: ${{ steps.lock.outputs.metadata }}
           PINS_BEFORE: ${{ steps.versions-before.outputs.pins }}
           PINS_AFTER: ${{ steps.lock.outputs.pins }}
+          LOCKS_BEFORE: ${{ steps.versions-before.outputs.locks }}
+          LOCKS_AFTER: ${{ steps.lock.outputs.locks }}
         run: python3 .github/scripts/describe-flake-update.py
+
+      # The report names every pin the run can move — the npins pins, each
+      # lock's inputs and the harness versions those resolve to — and `add-paths`
+      # below is everything the pull request would carry. So a tree this report
+      # cannot account for is a change no reader covers, and one that would
+      # reach the pull request as "unchanged": fail instead. This is what makes
+      # the `changed` gate on that step safe to rely on.
+      - name: Check the report names every change
+        env:
+          CHANGED: ${{ steps.report.outputs.changed }}
+        run: |
+          paths=(flake.nix flake.lock test/flake.lock doc/flake.lock harnesses lib/npins)
+          if [ -n "$(git status --porcelain -- "${paths[@]}")" ]; then
+            tree=changed
+          else
+            tree=unchanged
+          fi
+          if [ "$CHANGED" = true ]; then
+            reported=changed
+          else
+            reported=unchanged
+          fi
+          if [ "$reported" != "$tree" ]; then
+            echo "the update left the tree $tree while the report says $reported:" >&2
+            git status --porcelain -- "${paths[@]}" >&2
+            git diff -- "${paths[@]}" >&2
+            exit 1
+          fi
 
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         id: update
+        # Nothing moved, so there is nothing to review. `create-pull-request`
+        # would open none without a diff either; the check above is what makes
+        # it safe to skip on the report instead — the report names the tree.
+        if: steps.report.outputs.changed == 'true'
         with:
           branch: flake-update
           delete-branch: true

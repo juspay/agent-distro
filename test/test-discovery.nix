@@ -45,9 +45,8 @@ pkgs.runCommand "harness-discovery" { nativeBuildInputs = [ pkgs.nix ]; } ''
         nixpkgs = nixpkgsInput;
         agent-distro = distro // { outPath = root; };
         home-manager = {};
-        # Never read: only the checks' names are.
-        juspay-skills = \"/nonexistent\";
-        kolu = \"/nonexistent\";
+        # Never read: only the checks' names are. (The Juspay fixtures are npins
+        # pins, not flake inputs, so nothing here stands in for them.)
       };
     in assert builtins.elem \"discovery-stub\" launchers.package.passthru.commands;
        assert builtins.any (row: row.name == \"discovery-stub\" && row.title == \"Discovery Stub\") launchers.picker.listing.harnesses;

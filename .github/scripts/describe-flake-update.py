@@ -1,4 +1,9 @@
-"""Format the update PR from resolved versions; never fetch or change a pin."""
+"""Format the update PR from resolved versions; never fetch or change a pin.
+
+What it also answers is whether anything moved at all: the workflow opens the
+pull request on `changed` alone, so a run whose report has nothing to name
+opens none.
+"""
 import json
 import os
 from pathlib import Path
@@ -14,10 +19,11 @@ def describe(name, before, after, release_url):
 
 
 def describe_pins(before, after):
-    """One line per directory-local pin, keyed `<directory>/<pin>`.
+    """One line per pin, keyed `<directory>/<pin>`.
 
-    `npins update` moves pins; the two reads always see the same ones. Where a
-    pin is — a release or a short revision — is read-pins.py's to say.
+    `npins update` moves npins pins and `nix flake update` each lock's inputs,
+    the root's and the sub-flakes' alike. Where a pin is — a release, a
+    revision, a lock's rev — is read-pins.py's and read-locks.py's to say.
     """
     changes, lines = [], []
     for pin, old in sorted(before.items()):
@@ -43,7 +49,8 @@ def main():
         changes.extend(changed)
         notes.append(note)
     pin_changes, pin_note = describe_pins(
-        json.loads(env["PINS_BEFORE"]), json.loads(env["PINS_AFTER"]),
+        {**json.loads(env["PINS_BEFORE"]), **json.loads(env["LOCKS_BEFORE"])},
+        {**json.loads(env["PINS_AFTER"]), **json.loads(env["LOCKS_AFTER"])},
     )
     changes.extend(pin_changes)
     notes.append(pin_note)
@@ -63,7 +70,7 @@ def main():
         "approves the ones GitHub holds back for automation-created pull requests.\n"
     )
     with Path(env["GITHUB_OUTPUT"]).open("a") as output:
-        output.write(f"pr-title={title}\npr-body-path={body}\n")
+        output.write(f"pr-title={title}\npr-body-path={body}\nchanged={str(bool(changes)).lower()}\n")
 
 
 if __name__ == "__main__":

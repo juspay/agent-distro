@@ -5,18 +5,24 @@
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "agent-distro/nixpkgs";
     nixpkgs.follows = "agent-distro/nixpkgs";
-    # The Juspay profile's sources, for a test profile built from them and for
-    # a fixture copy of its plugin.json read at launch.
-    juspay-skills = { url = "github:juspay/skills"; flake = false; };
-    kolu = { url = "github:juspay/kolu"; flake = false; };
   };
-  outputs = { nixpkgs, agent-distro, home-manager, juspay-skills, kolu, ... }:
+  outputs = { nixpkgs, agent-distro, home-manager, ... }:
     let
       inherit (nixpkgs) lib;
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-      # Kolu's plugin as kolu ships it: a directory inside a store path.
-      koluPlugin = "${kolu}/agent-plugin";
+      # The Juspay profile's sources, for a test profile built from them and for
+      # a fixture copy of its plugin.json read at launch: npins pins, like the
+      # harnesses'. kolu's `.gitattributes` export-ignores directories, so the
+      # same revision of it hashes differently as a `github:` flake input
+      # depending on whether nix fetched the tarball or the git tree, and a lock
+      # written by one is refused by the other. A tarball pin is the same
+      # everywhere.
+      npins = import ./npins;
+      juspay-skills = npins.juspay-skills;
+      kolu = npins.kolu;
+      # Kolu's plugin as kolu ships it: the repository root, an Agent Plugin.
+      koluPlugin = "${kolu}";
       # A team's profile as a repository would carry one: its skills, and the
       # LiteLLM gateway it points OMP and OpenCode at, written with `env` and
       # `settings`. test/support/gateway-fixture.py serves that gateway.
