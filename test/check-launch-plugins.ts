@@ -249,6 +249,13 @@ test('a description a built profile holds is used instead of reading the root', 
   assert.deepEqual(result.plugins.map((p: any) => p.name), ['from-the-description']);
 });
 
+test("a profile's plugin that is not a directory fails naming the profile", () => {
+  const missing = join(temporary(), 'missing');
+  assert.throws(() => launch.resolve('claude', claude, claudeArgs(), '', { XDG_CACHE_HOME: temporary() },
+    () => {}, [missing], [], 'profile github:o/skills'),
+  (error: Error) => error.message === `profile github:o/skills: ${missing} is not a directory`);
+});
+
 test('the shell a launcher evaluates', () => {
   const env = {
     LITELLM_BASE_URL: 'https://gateway.example',

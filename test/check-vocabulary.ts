@@ -92,8 +92,9 @@ assert.equal(reference.classifyReference('./p', { home: '/h' }), null);
 assert.deepEqual(reference.prefetchArgs('github:o/r'), ['flake', 'prefetch', '--option', 'flake-registry', '', '--json', 'github:o/r']);
 assert.deepEqual(reference.prefetchArgs('nixpkgs/x'), ['flake', 'prefetch', '--json', 'nixpkgs/x']);
 assert.deepEqual(reference.prefetchedTree({ storePath: '/nix/store/a-src', locked: { rev: 'r1', dir: 'sub' } }),
-  { path: '/nix/store/a-src/sub', rev: 'r1' });
-assert.deepEqual(reference.prefetchedTree({ storePath: '/nix/store/a-src', original: { dir: 'o' } }), { path: '/nix/store/a-src/o' });
+  { path: '/nix/store/a-src/sub', dir: 'sub', rev: 'r1' });
+assert.deepEqual(reference.prefetchedTree({ storePath: '/nix/store/a-src', original: { dir: 'o' } }),
+  { path: '/nix/store/a-src/o', dir: 'o' });
 assert.equal(reference.prefetchedTree({ locked: {} }), null);
 assert.equal(reference.prefetchedTree(null), null);
 

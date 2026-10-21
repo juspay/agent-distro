@@ -22,6 +22,7 @@ import { test } from 'node:test';
 const [src, schemaPath] = process.argv.slice(2);
 const profile = await import(join(src, 'profile/resolve.ts'));
 const listing = await import(join(src, 'listing.ts'));
+const { LaunchError } = await import(join(src, 'plugin/launch.ts'));
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
 const DAY = 24 * 60 * 60 * 1000;
 // The shell launchers run in; a build has it as SHELL, not on PATH.
@@ -81,10 +82,14 @@ writeFileSync(join(bin, 'packages.json'), '{}');
 process.env.PATH = `${bin}:${process.env.PATH}`;
 const calls = (what: string) => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter((line) => line.startsWith(what)).length : 0);
 
-/** A fetchable reference: `nix flake prefetch` answers it with `directory`'s tree. */
-function reference(name: string, storePath: string, dir?: string) {
-  writeFileSync(join(bin, 'refs', encodeURIComponent(name)),
-    JSON.stringify({ storePath, locked: dir ? { dir } : {}, original: dir ? { dir } : {} }));
+/**
+ * A fetchable reference: `nix flake prefetch` answers it with the tree at
+ * `storePath`, its `dir` and the revision it was locked to.
+ */
+function reference(name: string, storePath: string, dir?: string, rev?: string) {
+  writeFileSync(join(bin, 'refs', encodeURIComponent(name)), JSON.stringify({
+    storePath, locked: { ...(dir ? { dir } : {}), ...(rev ? { rev } : {}) }, original: dir ? { dir } : {},
+  }));
 }
 
 const info = { nixpkgs: '/nix/store/00000000000000000000000000000000-nixpkgs', system: 'x86_64-linux' };
@@ -389,11 +394,11 @@ test('a profile of the stack that cannot be read is named as the user gave it', 
   const inEffect = (cwd: string, env: NodeJS.ProcessEnv) =>
     profile.resolveProfile(info, profile.select(undefined, cwd, env), { XDG_CACHE_HOME: temporary(), ...env });
   assert.throws(() => inEffect(repo, { AI_PROFILE: 'github:no/team' }),
-    /^Error: AI_PROFILE=github:no\/team \(entry 1 of 1\): cannot fetch github:no\/team:/);
+    /^Error: AI_PROFILE=github:no\/team \(entry 1 of 1\): cannot fetch:/);
   // In a stack, the entry that failed and its place are both named.
   const good = manifestProfile(temporary(), { name: 'good' });
   assert.throws(() => inEffect(repo, { AI_PROFILE: `${good} github:no/team` }),
-    /^Error: AI_PROFILE=github:no\/team \(entry 2 of 2\): cannot fetch github:no\/team:/);
+    /^Error: AI_PROFILE=github:no\/team \(entry 2 of 2\): cannot fetch:/);
   assert.ok(existsSync(file));
   assert.ok(existsSync(good));
 });
@@ -605,13 +610,14 @@ test('flake references are fetched: the profile and its plugin references, every
     name: 'fetched', extension: { plugins: ['git+file:///plugins?dir=one', '/abs/plugin'] },
   });
   reference('git+file:///profiles?dir=sub', tree, 'sub');
-  reference('git+file:///plugins?dir=one', '/nix/store/11111111111111111111111111111111-source', 'one');
+  const plugins = temporary();
+  plugin('one', plugins);
+  reference('git+file:///plugins?dir=one', plugins, 'one');
   const cache = temporary();
   const before = calls('flake prefetch');
   for (let i = 0; i < 2; i++) {
     const resolved = profile.resolveProfile(info, [{ source: 'variable', origin: 'git+file:///profiles?dir=sub' }], { XDG_CACHE_HOME: cache });
-    assert.deepEqual(resolved.plugins,
-      [realpathSync(join(tree, 'sub')), '/nix/store/11111111111111111111111111111111-source/one', '/abs/plugin']);
+    assert.deepEqual(resolved.plugins, [realpathSync(join(tree, 'sub')), join(plugins, 'one'), '/abs/plugin']);
   }
   assert.equal(calls('flake prefetch') - before, 4, 'the profile and its plugin reference, at each launch');
   // Offline, nix would fail downloading the global registry, which only an
@@ -622,10 +628,10 @@ test('flake references are fetched: the profile and its plugin references, every
   assert.equal(calls('flake prefetch --json my-registry/sub'), 1, 'an indirect reference keeps the registry');
   assert.ok(existsSync(file));
   assert.throws(() => resolve({ source: 'variable', origin: 'github:no/such', entry: { position: 1, count: 1 } }),
-    /AI_PROFILE=github:no\/such \(entry 1 of 1\): cannot fetch github:no\/such:\nerror: cannot fetch/);
+    /AI_PROFILE=github:no\/such \(entry 1 of 1\): cannot fetch:\nerror: cannot fetch/);
   // Nix failing without a word still says how it failed.
   assert.throws(() => resolve({ source: 'variable', origin: 'silent:x', entry: { position: 1, count: 1 } }),
-    /AI_PROFILE=silent:x \(entry 1 of 1\): cannot fetch silent:x: nix exited with code 3 and printed no error; its last output: halfway$/);
+    /AI_PROFILE=silent:x \(entry 1 of 1\): cannot fetch: nix exited with code 3 and printed no error; its last output: halfway$/);
 });
 
 test('the read is cached per content and evaluator, and swept when unused', async () => {
@@ -779,6 +785,38 @@ test('nixpkgs is fetched by its locked reference, and only for a profile with pa
   profile.resolveProfile({ ...referenced, nixpkgsPath: join(storedTree, 'gone') }, [{ source: 'positional', origin: packaged }], { XDG_CACHE_HOME: temporary() });
   assert.equal(fetches() - before, 2);
   assert.equal(lastEvaluation().given.nixpkgs, tree);
+  // One that cannot be fetched is named once, in the label.
+  assert.throws(() => profile.resolveProfile({ ...info, nixpkgs: 'github:no/nixpkgs' }, [{ source: 'positional', origin: packaged }],
+    { XDG_CACHE_HOME: temporary() }), /: nixpkgs github:no\/nixpkgs for its packages: cannot fetch:\nerror: cannot fetch$/);
+});
+
+test('a plugin reference whose dir is not in the fetched tree fails naming the profile, the reference and the dir', () => {
+  const tree = temporary();
+  manifestProfile(tree, { name: 'stale', extension: { plugins: ['git+file:///moved?dir=missing'] } });
+  reference('git+file:///stale-profile', tree);
+  const pluginTree = temporary();
+  plugin('elsewhere', pluginTree);
+  reference('git+file:///moved?dir=missing', pluginTree, 'missing', '4cad7d5e0f1a2b3c4d5e6f708192a3b4c5d6e7f8');
+  const selection = { source: 'positional', origin: 'git+file:///stale-profile' };
+  const cache = temporary();
+  let thrown: unknown;
+  try {
+    profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache });
+  } catch (error) {
+    thrown = error;
+  }
+  assert.ok(thrown instanceof LaunchError, `not a LaunchError: ${thrown}`);
+  assert.equal((thrown as Error).message, 'profile git+file:///stale-profile: plugin git+file:///moved?dir=missing: '
+    + 'the tree at rev 4cad7d5 has no directory missing');
+  // Without a revision, the same; never the repository's root instead.
+  reference('git+file:///moved?dir=missing', pluginTree, 'missing');
+  assert.throws(() => profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache }),
+    /: plugin git\+file:\/\/\/moved\?dir=missing: the tree has no directory missing$/);
+  // Nor the last launch's store path, still there: the reference was fetched, and is wrong.
+  plugin('missing', pluginTree);
+  profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache });
+  reference('git+file:///moved?dir=missing', temporary(), 'missing');
+  assert.throws(() => profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache }), /the tree has no directory missing$/);
 });
 
 test('without network, a reference uses its last store path, and says so', () => {
@@ -802,8 +840,8 @@ test('without network, a reference uses its last store path, and says so', () =>
   });
   assert.equal(resolved.name, 'remembered');
   assert.deepEqual(resolved.plugins, [tree, pluginTree]);
-  assert.match(noted, new RegExp(`AI_PROFILE=git\\+file:///offline-profile \\(entry 1 of 1\\): cannot fetch git\\+file:///offline-profile; using ${tree}, from the last launch that could`));
-  assert.match(noted, /cannot fetch git\+file:\/\/\/offline-plugin; using /);
+  assert.match(noted, new RegExp(`AI_PROFILE=git\\+file:///offline-profile \\(entry 1 of 1\\): cannot fetch; using ${tree}, from the last launch that could`));
+  assert.match(noted, /: plugin git\+file:\/\/\/offline-plugin: cannot fetch; using /);
   // --list --json too, its JSON intact on stdout.
   const infoFile = join(temporary(), 'info.json');
   writeFileSync(infoFile, JSON.stringify(info));
@@ -811,12 +849,12 @@ test('without network, a reference uses its last store path, and says so', () =>
     { encoding: 'utf8', cwd: temporary(), env: { PATH: process.env.PATH, ...env, AI_PROFILE: 'git+file:///offline-profile' } });
   assert.equal(listed.status, 0, listed.stderr);
   assert.equal(JSON.parse(listed.stdout).profile.name, 'remembered');
-  assert.match(listed.stderr, /cannot fetch git\+file:\/\/\/offline-profile; using /);
+  assert.match(listed.stderr, /AI_PROFILE=git\+file:\/\/\/offline-profile \(entry 1 of 1\): cannot fetch; using /);
   // Gone from the store: nothing to fall back to.
   rmSync(tree, { recursive: true });
-  assert.throws(() => profile.resolveProfile(info, [selection], env), /cannot fetch git\+file:\/\/\/offline-profile:\nerror: cannot fetch/);
+  assert.throws(() => profile.resolveProfile(info, [selection], env), /offline-profile \(entry 1 of 1\): cannot fetch:\nerror: cannot fetch/);
   // Never fetched: likewise.
-  assert.throws(() => resolve({ source: 'variable', origin: 'git+file:///never' }), /cannot fetch git\+file:\/\/\/never:\nerror: cannot fetch/);
+  assert.throws(() => resolve({ source: 'variable', origin: 'git+file:///never' }), /AI_PROFILE=git\+file:\/\/\/never: cannot fetch:\nerror: cannot fetch/);
 });
 
 test('a launch uses the profile in effect: its plugins, env, settings and packages', () => {

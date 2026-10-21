@@ -13,7 +13,12 @@
  *  not made real) or a flake reference. */
 export type Reference = { path: string } | { flake: string };
 
-const join = (base: string, rest: string) => (rest === '' ? base : `${base.replace(/\/+$/, '')}/${rest}`);
+function join(base: string, rest: string) {
+  if (rest === '') return base;
+  let end = base.length;
+  while (end > 0 && base[end - 1] === '/') end--;
+  return `${base.slice(0, end)}/${rest}`;
+}
 
 /**
  * What `reference` names, or null when it names nothing — a word with no `/`
@@ -48,10 +53,12 @@ export function prefetchArgs(flake: string): string[] {
 
 /**
  * What `nix flake prefetch --json` answered: the reference's directory in the
- * store — the fetched tree, and its `dir` within it — and the revision it was
- * locked to, when it has one. Null for an answer that names no store path.
+ * store — the fetched tree, and its `dir` within it — that `dir`, when it has
+ * one, and the revision it was locked to, when it has one. Null for an answer
+ * that names no store path. Nix never looks for `dir` in the tree, so `path`
+ * may name nothing.
  */
-export function prefetchedTree(answer: unknown): { path: string; rev?: string } | null {
+export function prefetchedTree(answer: unknown): { path: string; dir?: string; rev?: string } | null {
   if (typeof answer !== 'object' || answer === null) return null;
   const value = answer as {
     storePath?: unknown;
@@ -61,8 +68,10 @@ export function prefetchedTree(answer: unknown): { path: string; rev?: string } 
   if (typeof value.storePath !== 'string' || !value.storePath.startsWith('/')) return null;
   const dir = value.locked?.dir ?? value.original?.dir;
   const rev = value.locked?.rev;
+  const within = typeof dir === 'string' && dir !== '';
   return {
-    path: typeof dir === 'string' && dir !== '' ? join(value.storePath, dir) : value.storePath,
+    path: within ? join(value.storePath, dir) : value.storePath,
+    ...(within ? { dir } : {}),
     ...(typeof rev === 'string' ? { rev } : {}),
   };
 }
