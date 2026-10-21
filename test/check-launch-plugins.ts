@@ -19,6 +19,7 @@ import {
   chmodSync, cpSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readdirSync, readFileSync,
   readlinkSync, symlinkSync, utimesSync, writeFileSync,
 } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
@@ -147,13 +148,23 @@ test('a top-level .git is not part of the key', () => {
   assert.notEqual(launch.cacheKey(root), key);
 });
 
-test('a FIFO fails the hash at once, naming it', () => {
-  const root = plugin('fifo');
-  const made = spawnSync('mkfifo', [join(root, 'pipe')]);
-  assert.equal(made.status, 0, String(made.stderr));
-  const result = run(root);
-  assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /pipe is not a regular file, directory or symlink/);
+test('a socket or FIFO is left out of the hash, and the plugin still launches', async () => {
+  const root = plugin('sock');
+  const before = launch.narHash(root);
+  // A live socket, as odu keeps `.ci/odu.sock` in the checkout it runs from.
+  const server = createServer();
+  await new Promise<void>((done) => server.listen(join(root, 's.sock'), done));
+  try {
+    assert.equal(launch.narHash(root), before);
+    const made = spawnSync('mkfifo', [join(root, 'pipe')]);
+    assert.equal(made.status, 0, String(made.stderr));
+    assert.equal(launch.narHash(root), before);
+    assert.equal(resolve(root, temporary()).plugins[0].name, 'sock');
+    const result = run(root);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    server.close();
+  }
 });
 
 test('a checkout is keyed by content and path, and translated again after an edit', () => {
