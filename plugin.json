@@ -2,10 +2,9 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "agent-distro",
   "description": "agent-distro maintainers: odu, to run this repository's CI",
-  "//": "Goes bare (github:juspay/odu) once odu #128 lands.",
   "extensions": {
     "asia.nixos.agent-distro": {
-      "plugins": ["github:juspay/odu?dir=agent-plugin"]
+      "plugins": ["github:juspay/odu"]
     }
   }
 }
