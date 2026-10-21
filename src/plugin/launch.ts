@@ -464,11 +464,12 @@ export function sweep(directory: string, which: (name: string) => boolean = () =
  * effect, come before the variable's, and the last of a name wins. `described`
  * are the descriptions a built profile of the stack already holds, by root
  * (src/profile/resolve.ts `Described`): a plugin whose root they cover is not
- * read again.
+ * read again. `from` names the profile in effect, in errors about its plugins
+ * and as where each came from.
  */
 export function resolve<A>(
   harness: string, adapter: Adapter<A>, args: A, value: string | undefined, env: NodeJS.ProcessEnv, report: Report,
-  own: string[] = [], described: Described[] = [],
+  own: string[] = [], described: Described[] = [], from = 'profile',
 ): Launch<A> {
   const known = new Map<string, Description>();
   for (const { root, description: path } of described) {
@@ -484,7 +485,7 @@ export function resolve<A>(
   }
   let names = [...own, ...entries(value)];
   // Nothing to load needs no cache, so it cannot fail for want of one.
-  const label = own.length > 0 ? 'profile' : VARIABLE;
+  const label = own.length > 0 ? from : VARIABLE;
   let cache = names.length > 0 ? cacheRootIfAny(env, label) : null;
   if (names.length > 0 && cache === null) {
     // No cache to translate into: the launch starts without the plugins rather
@@ -495,7 +496,7 @@ export function resolve<A>(
   }
   const byName = new Map<string, LaunchPlugin>();
   for (const [i, entry] of names.entries()) {
-    const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? 'profile' : VARIABLE,
+    const plugin = translate(entry, harness, adapter, args, cache!, report, i < own.length ? from : VARIABLE,
       known.get(realpath(entry)));
     // The last of a name wins, in its own position.
     byName.delete(plugin.name);
@@ -577,8 +578,7 @@ function describe<A>(
   }
   log.profile.debug(profile ? `profile ${nameText(profile)}, ${sourceText(profile)}` : 'no profile in effect');
   for (const plugin of launch.plugins) {
-    const from = plugin.from === 'profile' ? `profile ${profile?.name ?? ''}` : plugin.from;
-    log.plugin.debug(`${plugin.description.root}: from ${from}, as ${plugin.name}, translated at ${plugin.translation}`);
+    log.plugin.debug(`${plugin.description.root}: from ${plugin.from}, as ${plugin.name}, translated at ${plugin.translation}`);
   }
   for (const path of profile?.paths ?? []) log.profile.debug(`PATH gains ${path}`);
   if (opted) log.profile.debug('AGENT_DISTRO_SETTINGS=0: no environment or settings from the profile');
@@ -604,7 +604,7 @@ export async function main(argsPath: string): Promise<number> {
     logger = log.plugin;
     const { adapter } = await import(`../harness/${args.harness}.ts`) as { adapter: Adapter };
     const launch = resolve(args.harness, adapter, args, process.env[VARIABLE], process.env, report,
-      profile?.plugins ?? [], profile?.descriptions ?? []);
+      profile?.plugins ?? [], profile?.descriptions ?? [], profile ? `profile ${profile.origin}` : undefined);
     logger = log.harness(args.harness);
     const launched = adapter.launch(launch);
     // `AGENT_DISTRO_SETTINGS=0` is plugins only: the profile sets nothing, and

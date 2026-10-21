@@ -414,11 +414,19 @@ function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironme
  * within it. Nix downloads the global flake registry before fetching any
  * reference, so without network even a git+file: one would fail; only an
  * indirect reference (no `scheme:`, such as `nixpkgs/nixos-unstable`) is
- * looked up in it, so the others skip it.
+ * looked up in it, so the others skip it. Nix never looks for `dir`, so a
+ * tree without it is an error here, naming the revision fetched.
  */
 export function prefetch(reference: string, what: string): string {
+  return withDir(prefetched(reference, what), what);
+}
+
+type Tree = { path: string; dir?: string; rev?: string };
+
+/** What nix fetched `reference` to, `dir` unchecked. */
+function prefetched(reference: string, what: string): Tree {
   const text = nix(prefetchArgs(reference), `${what}: cannot fetch ${reference}`);
-  let tree: { path: string } | null;
+  let tree: Tree | null;
   try {
     tree = prefetchedTree(JSON.parse(text));
   } catch (error) {
@@ -426,7 +434,15 @@ export function prefetch(reference: string, what: string): string {
     tree = null;
   }
   if (tree === null) throw new LaunchError(`${what}: nix flake prefetch gave no store path for ${reference}`);
-  return tree.path;
+  return tree;
+}
+
+/** `tree`'s path, failing when its `dir` is not a directory of the fetched tree. */
+function withDir({ path, dir, rev }: Tree, what: string): string {
+  if (dir !== undefined && !isDirectory(path)) {
+    throw new LaunchError(`${what}: the tree${rev ? ` at rev ${rev.slice(0, 7)}` : ''} has no directory ${dir}`);
+  }
+  return path;
 }
 
 /** The store path `reference` last fetched to, or '' when there is none. */
@@ -445,7 +461,7 @@ function remembered(memory: string): string {
  * fetch (say, offline past the tarball TTL), the last one, if still in the
  * store, with a warning. A reference whose last store path is still there is
  * most likely fresh in nix's own cache, so only one that is not says it is
- * being fetched.
+ * being fetched. A `dir` the fetched tree lacks is an error either way.
  */
 function fetched(reference: string, what: string, cache: string | null): string {
   // No cache: fetched once per launch, which is all a launch needs.
@@ -453,11 +469,10 @@ function fetched(reference: string, what: string, cache: string | null): string 
   const memory = join(cache, 'references', sha256(reference));
   const last = remembered(memory);
   const stored = isAbsolute(last) && existsSync(last);
+  let tree: Tree;
   try {
-    const fetch = () => prefetch(reference, what);
-    const path = stored ? fetch() : slow(log.profile, `fetching ${reference}`, fetch);
-    writeAtomic(memory, path + '\n');
-    return path;
+    const fetch = () => prefetched(reference, what);
+    tree = stored ? fetch() : slow(log.profile, `fetching ${reference}`, fetch);
   } catch (error) {
     if (!(error instanceof LaunchError)) throw error;
     if (!stored) throw error;
@@ -465,6 +480,10 @@ function fetched(reference: string, what: string, cache: string | null): string 
     log.profile.debug(error.message);
     return last;
   }
+  // Fetched, but without its `dir`: an error, not the last launch's tree.
+  const path = withDir(tree, what);
+  writeAtomic(memory, path + '\n');
+  return path;
 }
 
 /** The evaluator of a profile's `packages` (EXTENSION's). */
@@ -763,7 +782,7 @@ function resolveOne(info: Info, selection: Selection, env: NodeJS.ProcessEnv): R
     profile = evaluated(file, info, cache, what, true);
   }
   const paths = realise(profile, what);
-  const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, what, cache)));
+  const plugins = profile.plugins.map((entry) => (entry.startsWith('/') ? entry : fetched(entry, `${what}: plugin ${entry}`, cache)));
   return {
     name: profile.name, description: profile.description, source, origin,
     plugins, env: profile.env, settings: profile.settings, paths,

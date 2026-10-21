@@ -1,6 +1,7 @@
 /**
- * Whether a profile's packages are in the binary cache, for this machine: the
- * launcher's no-compile policy (resolve.ts) run ahead of time.
+ * Whether a profile's packages are in the binary cache, for this machine, and
+ * whether its plugin references resolve to plugins: the launcher's no-compile
+ * policy and its fetch of each reference (resolve.ts) run ahead of time.
  *
  * Usage: node check-cli.ts INFO_JSON CACHES_JSON [profile]
  *
@@ -10,16 +11,18 @@
  * profile defaults to the working directory, and may name a directory holding
  * a `plugin.json`, or the file itself. An `agent-distro.nix` is the migration
  * error (resolve.ts).
- * One line per package; exits 1 if any is not cached or cannot be told, 2 on
- * bad arguments or a missing profile.
+ * One line per package, then one per plugin reference — fetched afresh, never
+ * the last launch's tree, and a directory holding a `plugin.json`; exits 1 if
+ * any package is not cached or cannot be told or any reference does not
+ * resolve, 2 on bad arguments or a missing profile.
  */
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { log } from '../log.ts';
 import { cacheRoot, LaunchError, printable } from '../plugin/launch.ts';
 import { wouldCompile } from '../update/update.ts';
-import { isSystemError } from '../util.ts';
-import { findProfile, MANIFEST, nixEnvironment, profileValue, type Info } from './resolve.ts';
+import { isFile, isSystemError } from '../util.ts';
+import { findProfile, MANIFEST, nixEnvironment, prefetch, profileValue, type Info } from './resolve.ts';
 
 type Caches = { substituters: string[]; trustedPublicKeys: string[] };
 
@@ -43,12 +46,9 @@ function run(argv: string[]): number {
   const options = ['--option', 'substituters', caches.substituters.join(' '),
     '--option', 'trusted-public-keys', caches.trustedPublicKeys.join(' ')];
 
-  const { packages } = profileValue(file, info, cacheRoot(process.env, what), what);
-  if (packages.length === 0) {
-    process.stdout.write(`${what}: no packages\n`);
-    return 0;
-  }
+  const { packages, plugins } = profileValue(file, info, cacheRoot(process.env, what), what);
   let failed = false;
+  if (packages.length === 0) process.stdout.write(`${what}: no packages\n`);
   for (const { name, drvPath } of packages) {
     const plan = wouldCompile('nix', `${drvPath}^*`, options, nixEnvironment());
     if ('unknown' in plan) {
@@ -59,6 +59,19 @@ function run(argv: string[]): number {
       failed = true;
     } else {
       process.stdout.write(`${name}: cached\n`);
+    }
+  }
+  // A path is the machine's own; only a reference names the same plugin everywhere.
+  for (const reference of plugins.filter((entry) => !entry.startsWith('/'))) {
+    const at = `${what}: plugin ${reference}`;
+    try {
+      const path = prefetch(reference, at);
+      if (!isFile(join(path, MANIFEST))) throw new LaunchError(`${at}: no ${MANIFEST} at ${path}`);
+      process.stdout.write(`${reference}: ok\n`);
+    } catch (error) {
+      if (!(error instanceof LaunchError)) throw error;
+      process.stdout.write(`${error.message}\n`);
+      failed = true;
     }
   }
   return failed ? 1 : 0;

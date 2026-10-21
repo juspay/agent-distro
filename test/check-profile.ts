@@ -22,6 +22,7 @@ import { test } from 'node:test';
 const [src, schemaPath] = process.argv.slice(2);
 const profile = await import(join(src, 'profile/resolve.ts'));
 const listing = await import(join(src, 'listing.ts'));
+const { LaunchError } = await import(join(src, 'plugin/launch.ts'));
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
 const DAY = 24 * 60 * 60 * 1000;
 // The shell launchers run in; a build has it as SHELL, not on PATH.
@@ -81,10 +82,14 @@ writeFileSync(join(bin, 'packages.json'), '{}');
 process.env.PATH = `${bin}:${process.env.PATH}`;
 const calls = (what: string) => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter((line) => line.startsWith(what)).length : 0);
 
-/** A fetchable reference: `nix flake prefetch` answers it with `directory`'s tree. */
-function reference(name: string, storePath: string, dir?: string) {
-  writeFileSync(join(bin, 'refs', encodeURIComponent(name)),
-    JSON.stringify({ storePath, locked: dir ? { dir } : {}, original: dir ? { dir } : {} }));
+/**
+ * A fetchable reference: `nix flake prefetch` answers it with the tree at
+ * `storePath`, its `dir` and the revision it was locked to.
+ */
+function reference(name: string, storePath: string, dir?: string, rev?: string) {
+  writeFileSync(join(bin, 'refs', encodeURIComponent(name)), JSON.stringify({
+    storePath, locked: { ...(dir ? { dir } : {}), ...(rev ? { rev } : {}) }, original: dir ? { dir } : {},
+  }));
 }
 
 const info = { nixpkgs: '/nix/store/00000000000000000000000000000000-nixpkgs', system: 'x86_64-linux' };
@@ -605,13 +610,14 @@ test('flake references are fetched: the profile and its plugin references, every
     name: 'fetched', extension: { plugins: ['git+file:///plugins?dir=one', '/abs/plugin'] },
   });
   reference('git+file:///profiles?dir=sub', tree, 'sub');
-  reference('git+file:///plugins?dir=one', '/nix/store/11111111111111111111111111111111-source', 'one');
+  const plugins = temporary();
+  plugin('one', plugins);
+  reference('git+file:///plugins?dir=one', plugins, 'one');
   const cache = temporary();
   const before = calls('flake prefetch');
   for (let i = 0; i < 2; i++) {
     const resolved = profile.resolveProfile(info, [{ source: 'variable', origin: 'git+file:///profiles?dir=sub' }], { XDG_CACHE_HOME: cache });
-    assert.deepEqual(resolved.plugins,
-      [realpathSync(join(tree, 'sub')), '/nix/store/11111111111111111111111111111111-source/one', '/abs/plugin']);
+    assert.deepEqual(resolved.plugins, [realpathSync(join(tree, 'sub')), join(plugins, 'one'), '/abs/plugin']);
   }
   assert.equal(calls('flake prefetch') - before, 4, 'the profile and its plugin reference, at each launch');
   // Offline, nix would fail downloading the global registry, which only an
@@ -779,6 +785,35 @@ test('nixpkgs is fetched by its locked reference, and only for a profile with pa
   profile.resolveProfile({ ...referenced, nixpkgsPath: join(storedTree, 'gone') }, [{ source: 'positional', origin: packaged }], { XDG_CACHE_HOME: temporary() });
   assert.equal(fetches() - before, 2);
   assert.equal(lastEvaluation().given.nixpkgs, tree);
+});
+
+test('a plugin reference whose dir is not in the fetched tree fails naming the profile, the reference and the dir', () => {
+  const tree = temporary();
+  manifestProfile(tree, { name: 'stale', extension: { plugins: ['git+file:///moved?dir=missing'] } });
+  reference('git+file:///stale-profile', tree);
+  const pluginTree = temporary();
+  plugin('elsewhere', pluginTree);
+  reference('git+file:///moved?dir=missing', pluginTree, 'missing', '4cad7d5e0f1a2b3c4d5e6f708192a3b4c5d6e7f8');
+  const selection = { source: 'positional', origin: 'git+file:///stale-profile' };
+  const cache = temporary();
+  let thrown: unknown;
+  try {
+    profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache });
+  } catch (error) {
+    thrown = error;
+  }
+  assert.ok(thrown instanceof LaunchError, `not a LaunchError: ${thrown}`);
+  assert.equal((thrown as Error).message, 'profile git+file:///stale-profile: plugin git+file:///moved?dir=missing: '
+    + 'the tree at rev 4cad7d5 has no directory missing');
+  // Without a revision, the same; never the repository's root instead.
+  reference('git+file:///moved?dir=missing', pluginTree, 'missing');
+  assert.throws(() => profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache }),
+    /: plugin git\+file:\/\/\/moved\?dir=missing: the tree has no directory missing$/);
+  // Nor the last launch's store path, still there: the reference was fetched, and is wrong.
+  plugin('missing', pluginTree);
+  profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache });
+  reference('git+file:///moved?dir=missing', temporary(), 'missing');
+  assert.throws(() => profile.resolveProfile(info, [selection], { XDG_CACHE_HOME: cache }), /the tree has no directory missing$/);
 });
 
 test('without network, a reference uses its last store path, and says so', () => {

@@ -703,7 +703,7 @@ nix run github:juspay/agent-distro#check-profile                       # the wor
 nix run github:juspay/agent-distro#check-profile -- path/to/profile    # its plugin.json
 ```
 
-It runs the launcher's own policy, against agent-distro's nixpkgs and caches, and prints one line per package; it exits 1 if any is not cached, or cannot be told. It checks for the machine it runs on, so run it in CI once per platform.
+It runs the launcher's own policy, against agent-distro's nixpkgs and caches, and prints one line per package; it exits 1 if any is not cached, or cannot be told. It also fetches each plugin reference and fails on one that does not resolve to a plugin directory (say, a `?dir=` the repository no longer has). It checks for the machine it runs on, so run it in CI once per platform.
 
 ## Harnesses
 
