@@ -422,7 +422,7 @@ export function prefetch(reference: string, what: string): string {
   return withDir(prefetched(reference, what), what);
 }
 
-type Tree = { path: string; dir?: string; rev?: string };
+type Tree = NonNullable<ReturnType<typeof prefetchedTree>>;
 
 /** What nix fetched `reference` to, `dir` unchecked. */
 function prefetched(reference: string, what: string): Tree {
