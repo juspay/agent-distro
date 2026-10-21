@@ -415,7 +415,8 @@ function nix(args: string[], what: string, env: NodeJS.ProcessEnv = nixEnvironme
  * reference, so without network even a git+file: one would fail; only an
  * indirect reference (no `scheme:`, such as `nixpkgs/nixos-unstable`) is
  * looked up in it, so the others skip it. Nix never looks for `dir`, so a
- * tree without it is an error here, naming the revision fetched.
+ * tree without it is an error here, naming the revision fetched. `what` names
+ * the reference being fetched, so no message repeats it.
  */
 export function prefetch(reference: string, what: string): string {
   return withDir(prefetched(reference, what), what);
@@ -425,7 +426,7 @@ type Tree = { path: string; dir?: string; rev?: string };
 
 /** What nix fetched `reference` to, `dir` unchecked. */
 function prefetched(reference: string, what: string): Tree {
-  const text = nix(prefetchArgs(reference), `${what}: cannot fetch ${reference}`);
+  const text = nix(prefetchArgs(reference), `${what}: cannot fetch`);
   let tree: Tree | null;
   try {
     tree = prefetchedTree(JSON.parse(text));
@@ -433,7 +434,7 @@ function prefetched(reference: string, what: string): Tree {
     log.profile.debug(`nix flake prefetch printed unreadable JSON: ${(error as Error).message}`);
     tree = null;
   }
-  if (tree === null) throw new LaunchError(`${what}: nix flake prefetch gave no store path for ${reference}`);
+  if (tree === null) throw new LaunchError(`${what}: nix flake prefetch gave no store path`);
   return tree;
 }
 
@@ -476,7 +477,7 @@ function fetched(reference: string, what: string, cache: string | null): string 
   } catch (error) {
     if (!(error instanceof LaunchError)) throw error;
     if (!stored) throw error;
-    log.profile.warn(`${what}: cannot fetch ${reference}; using ${last}, from the last launch that could`);
+    log.profile.warn(`${what}: cannot fetch; using ${last}, from the last launch that could`);
     log.profile.debug(error.message);
     return last;
   }
@@ -504,7 +505,7 @@ const READER = join(import.meta.dirname, '../plugin/read.ts');
 function evaluatePackages(attributes: string[], info: Info, cache: string | null, what: string): Package[] {
   const stored = info.nixpkgsPath && existsSync(info.nixpkgsPath) ? info.nixpkgsPath : undefined;
   const nixpkgs = isAbsolute(info.nixpkgs) ? info.nixpkgs
-    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs for its packages`, cache);
+    : stored ?? fetched(info.nixpkgs, `${what}: nixpkgs ${info.nixpkgs} for its packages`, cache);
   const value: unknown = JSON.parse(nix(['eval', '--json', '--impure',
     '--option', 'restrict-eval', 'true', '--option', 'allowed-uris', '', '--option', 'nix-path', '',
     ...[dirname(EVALUATE_PACKAGES), nixpkgs].flatMap((path) => ['-I', path]),

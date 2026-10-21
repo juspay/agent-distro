@@ -210,5 +210,5 @@ test('a plugin reference that is not a plugin, or cannot be fetched, fails', () 
   assert.equal(result.status, 1, result.err);
   const lines = result.out.split('\n');
   assert.equal(lines[1], `${directory}: plugin github:o/bare: no plugin.json at ${bare}`);
-  assert.match(lines[2], /: plugin github:o\/gone: cannot fetch github:o\/gone:/);
+  assert.match(lines.slice(2, 4).join('\n'), /: plugin github:o\/gone: cannot fetch:\nerror: cannot fetch github:o\/gone$/);
 });
