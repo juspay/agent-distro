@@ -13,7 +13,12 @@
  *  not made real) or a flake reference. */
 export type Reference = { path: string } | { flake: string };
 
-const join = (base: string, rest: string) => (rest === '' ? base : `${base.replace(/\/+$/, '')}/${rest}`);
+function join(base: string, rest: string) {
+  if (rest === '') return base;
+  let end = base.length;
+  while (end > 0 && base[end - 1] === '/') end--;
+  return `${base.slice(0, end)}/${rest}`;
+}
 
 /**
  * What `reference` names, or null when it names nothing — a word with no `/`
