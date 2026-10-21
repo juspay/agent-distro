@@ -177,11 +177,20 @@ function narNode(hash: ReturnType<typeof createHash>, path: Buffer, skip: Buffer
       const names = readdirSync(path, { encoding: 'buffer' }).sort(Buffer.compare);
       for (const name of names) {
         if (skip && name.equals(skip)) continue;
+        const entry = Buffer.concat([path, SLASH, name]);
+        // A socket, FIFO or device is no part of a plugin, and opening one
+        // can fail (a socket) or block; leave it out before opening it.
+        const kind = lstatSync(entry);
+        if (!kind.isFile() && !kind.isDirectory() && !kind.isSymbolicLink()) {
+          log.plugin.debug(`${printable(entry.toString())}: not a regular file, directory or symlink; not hashed`);
+          continue;
+        }
         put('entry', '(', 'name', name, 'node');
-        narNode(hash, Buffer.concat([path, SLASH, name]), null);
+        narNode(hash, entry, null);
         put(')');
       }
     } else {
+      // Its type changed after the directory listed it as a file, directory or symlink.
       throw new LaunchError(`${VARIABLE}: ${printable(path.toString())} is not a regular file, directory or `
         + 'symlink, so the plugin cannot be hashed');
     }
@@ -194,7 +203,9 @@ function narNode(hash: ReturnType<typeof createHash>, path: Buffer, skip: Buffer
 /**
  * SHA-256 of the directory's NAR serialization, as `nix-hash --type sha256`
  * prints it. `skipGit` leaves out a top-level `.git`, which no translation
- * reads.
+ * reads. A socket, FIFO or device is left out too: NAR has no node for one
+ * (nix-hash refuses it), no plugin consists of one, and a checkout may hold a
+ * live one, such as `.ci/odu.sock` while odu runs there.
  */
 export function narHash(path: string, { skipGit = false } = {}): string {
   const hash = createHash('sha256');
