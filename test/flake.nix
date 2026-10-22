@@ -15,8 +15,8 @@
       inherit (nixpkgs) lib;
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-      # Kolu's plugin as kolu ships it: a directory inside a store path.
-      koluPlugin = "${kolu}/agent-plugin";
+      # Kolu's plugin as kolu ships it: the repository root, a store path.
+      koluPlugin = "${kolu}";
       # A team's profile as a repository would carry one: its skills, and the
       # LiteLLM gateway it points OMP and OpenCode at, written with `env` and
       # `settings`. test/support/gateway-fixture.py serves that gateway.
