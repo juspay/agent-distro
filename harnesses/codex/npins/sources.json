@@ -9,9 +9,9 @@
       },
       "branch": "main",
       "submodules": false,
-      "revision": "8dc8656b82ed75c9f76002f1368415b1e8471264",
-      "url": "https://github.com/sadjow/codex-cli-nix/archive/8dc8656b82ed75c9f76002f1368415b1e8471264.tar.gz",
-      "hash": "sha256-co1yWucHy1/uQbwm+PSUTlPRrL1PengYmBzsdG83HcQ="
+      "revision": "9cc2ad979387e317b7a2319ed4a1de6200abd21c",
+      "url": "https://github.com/sadjow/codex-cli-nix/archive/9cc2ad979387e317b7a2319ed4a1de6200abd21c.tar.gz",
+      "hash": "sha256-sXAt43h6NSVmPLkr+VTkrfykZHzVX04LT589vGpZYfw="
     }
   },
   "version": 8
