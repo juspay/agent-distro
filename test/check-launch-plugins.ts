@@ -6,7 +6,7 @@
  * the argument object only the launcher writes. How the stack composes into
  * that one profile is check-profile.ts's.
  *
- * Usage: node check-launch-plugins.ts SRC STORE_PLUGIN STORE_SUBDIRECTORY_PLUGIN NIX_HASH PROMPT_SECRETS_NIX
+ * Usage: node check-launch-plugins.ts SRC STORE_PLUGIN STORE_SUBDIRECTORY_PLUGIN PROMPT_SECRETS_NIX
  *
  * STORE_PLUGIN is a plugin that is a store path of its own, and
  * STORE_SUBDIRECTORY_PLUGIN one inside a larger store path, as kolu ships it.
@@ -24,8 +24,9 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 
-const [src, storePlugin, storeSubdirectoryPlugin, nixHash, promptSecrets] = process.argv.slice(2);
+const [src, storePlugin, storeSubdirectoryPlugin, promptSecrets] = process.argv.slice(2);
 const launch = await import(join(src, 'plugin/launch.ts'));
+const { readPlugin } = await import(join(src, 'plugin/read.ts'));
 const { adapter: claude } = await import(join(src, 'harness/claude.ts'));
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
 const CLI = join(src, 'plugin/launch-cli.mjs');
@@ -53,6 +54,12 @@ function describedPlugin(root: string) {
   }));
   return { root, description };
 }
+
+/** The cache key of the plugin at `root`, as a launch computes it. */
+const keyOf = (root: string) => launch.cacheKey(root, readPlugin(root));
+
+/** A store path is keyed by its path alone: no description is looked at. */
+const NOTHING = {} as never;
 
 const info = { nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
 const claudeArgs = () => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', ...info });
@@ -96,14 +103,14 @@ function published(cache: string, key: string) {
 }
 
 test('a store path is its own key, without hashing', () => {
-  assert.equal(launch.cacheKey(storePlugin), 'store-' + storePlugin.slice('/nix/store/'.length));
-  assert.match(launch.cacheKey(storeSubdirectoryPlugin), /^store-[a-z0-9]{32}-[^/]+%2F[^/]+$/);
+  assert.equal(launch.cacheKey(storePlugin, NOTHING), 'store-' + storePlugin.slice('/nix/store/'.length));
+  assert.match(launch.cacheKey(storeSubdirectoryPlugin, NOTHING), /^store-[a-z0-9]{32}-[^/]+%2F[^/]+$/);
   // Nothing under the path is read: an absent one keys the same way.
-  assert.equal(launch.cacheKey('/nix/store/00000000000000000000000000000000-absent/plugin'),
+  assert.equal(launch.cacheKey('/nix/store/00000000000000000000000000000000-absent/plugin', NOTHING),
     'store-00000000000000000000000000000000-absent%2Fplugin');
   const cache = temporary();
   const [translated] = resolve(storeSubdirectoryPlugin, cache).plugins;
-  assert.equal(translated.key, launch.cacheKey(storeSubdirectoryPlugin));
+  assert.equal(translated.key, launch.cacheKey(storeSubdirectoryPlugin, NOTHING));
   assert.ok(translated.translation.startsWith(join(cacheDir(cache), 'plugins', translated.key, 'claude') + '/'));
 });
 
@@ -113,52 +120,72 @@ test('a long store path still makes one file name, distinct per path', () => {
     `/nix/store/${name}/agent-plugin/${'d'.repeat(40)}/sub`,
     `/nix/store/${name}/agent-plugin/${'d'.repeat(40)}/other`,
     `/nix/store/00000000000000000000000000000000-x/${'é'.repeat(80)}`,
-  ].map(launch.cacheKey);
+  ].map((root) => launch.cacheKey(root, NOTHING));
   for (const key of keys) assert.ok(Buffer.byteLength(key) <= 255, key);
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys[0].startsWith('store-00000000000000000000000000000000-n') && keys[0].includes('#'), keys[0]);
   // Short paths keep their readable form.
-  assert.ok(!launch.cacheKey(storeSubdirectoryPlugin).includes('#'));
+  assert.ok(!launch.cacheKey(storeSubdirectoryPlugin, NOTHING).includes('#'));
 });
 
-test('the content hash is the NAR hash nix-hash computes, odd names included', () => {
-  const root = plugin('nar');
-  writeFileSync(join(root, 'tool'), '#!/bin/sh\n');
-  chmodSync(join(root, 'tool'), 0o755);
-  mkdirSync(join(root, 'empty'));
-  symlinkSync('skills/hello', join(root, 'link'));
-  symlinkSync('/absent/target', join(root, 'dangling'));
-  writeFileSync(join(root, 'space and "quote"'), '');
-  // A file name that is not UTF-8.
-  writeFileSync(Buffer.concat([Buffer.from(root + '/caf'), Buffer.from([0xe9])]), 'latin-1');
-  const expected = spawnSync(nixHash, ['--type', 'sha256', '--base16', root], { encoding: 'utf8' });
-  assert.equal(expected.status, 0, expected.stderr);
-  assert.equal(launch.narHash(root), expected.stdout.trim());
-  assert.match(launch.cacheKey(root), /^sha256-[0-9a-f]{64}$/);
-});
-
-test('a top-level .git is not part of the key', () => {
-  const root = plugin('git');
+test('only what a translation reads is keyed: the rest of the tree costs nothing', () => {
+  const cache = temporary();
+  const root = plugin('rest');
+  const first = resolve(root, cache).plugins[0];
+  // A checkout holds all of this beside its plugin; none of it is read.
+  mkdirSync(join(root, 'node_modules', 'x'), { recursive: true });
+  writeFileSync(join(root, 'node_modules', 'x', 'index.js'), 'module.exports = 1;\n');
+  chmodSync(join(root, 'node_modules', 'x', 'index.js'), 0o755);
+  mkdirSync(join(root, 'build', 'dist'), { recursive: true });
+  writeFileSync(join(root, 'build', 'dist', 'bundle.js'), 'built\n');
   mkdirSync(join(root, '.git'));
   writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n');
-  const key = launch.cacheKey(root);
-  writeFileSync(join(root, '.git', 'FETCH_HEAD'), 'fetched');
-  assert.equal(launch.cacheKey(root), key);
-  writeFileSync(join(root, 'skills/hello/SKILL.md'), 'changed');
-  assert.notEqual(launch.cacheKey(root), key);
+  // odu writes its run log here while a run is live.
+  mkdirSync(join(root, '.ci'));
+  writeFileSync(join(root, '.ci', 'run.log'), 'line\n');
+  writeFileSync(join(root, 'README.md'), '# plugin\n');
+  assert.equal(keyOf(root), first.key);
+  const again = resolve(root, cache).plugins[0];
+  assert.equal(again.key, first.key);
+  assert.equal(again.translation, first.translation, 'not translated again');
 });
 
-test('a socket or FIFO is left out of the hash, and the plugin still launches', async () => {
+test('a skill file, the manifest and the MCP config each key a translation', () => {
+  const root = plugin('read-set');
+  writeFileSync(join(root, 'mcp.json'), JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
+    mcpServers: { docs: { type: 'sse', url: 'https://example.test/sse' } },
+  }));
+  const key = keyOf(root);
+  assert.match(key, /^sha256-[0-9a-f]{64}$/);
+  // copySkills copies a skill file's mode, so the mode is read too.
+  chmodSync(join(root, 'skills/hello/SKILL.md'), 0o755);
+  const afterMode = keyOf(root);
+  assert.notEqual(afterMode, key);
+  writeFileSync(join(root, 'skills/hello/SKILL.md'), '---\nname: hello\ndescription: Edited\n---\n');
+  const afterSkill = keyOf(root);
+  assert.notEqual(afterSkill, afterMode);
+  writeFileSync(join(root, 'plugin.json'), JSON.stringify({ $schema: SCHEMA, name: 'read-set', version: '2.0.0' }));
+  const afterManifest = keyOf(root);
+  assert.notEqual(afterManifest, afterSkill);
+  writeFileSync(join(root, 'mcp.json'), JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
+    mcpServers: { docs: { type: 'sse', url: 'https://example.test/other' } },
+  }));
+  assert.notEqual(keyOf(root), afterManifest);
+});
+
+test('a socket or FIFO beside the plugin is not read, and the plugin still launches', async () => {
   const root = plugin('sock');
-  const before = launch.narHash(root);
+  const before = keyOf(root);
   // A live socket, as odu keeps `.ci/odu.sock` in the checkout it runs from.
   const server = createServer();
   await new Promise<void>((done) => server.listen(join(root, 's.sock'), done));
   try {
-    assert.equal(launch.narHash(root), before);
+    assert.equal(keyOf(root), before);
     const made = spawnSync('mkfifo', [join(root, 'pipe')]);
     assert.equal(made.status, 0, String(made.stderr));
-    assert.equal(launch.narHash(root), before);
+    assert.equal(keyOf(root), before);
     assert.equal(resolve(root, temporary()).plugins[0].name, 'sock');
     const result = run(root);
     assert.equal(result.status, 0, result.stderr);
@@ -188,7 +215,7 @@ test('a checkout is keyed by content and path, and translated again after an edi
 test('relative, trailing-slash and symlinked entries resolve to their directory', () => {
   const cache = temporary();
   const root = plugin('spelled');
-  const key = launch.cacheKey(root);
+  const key = keyOf(root);
   const link = join(temporary(), 'link');
   symlinkSync(root, link);
   const intoStore = join(temporary(), 'store-link');
@@ -202,7 +229,7 @@ test('relative, trailing-slash and symlinked entries resolve to their directory'
   } finally {
     process.chdir(here);
   }
-  assert.equal(resolve(intoStore, cache).plugins[0].key, launch.cacheKey(storeSubdirectoryPlugin));
+  assert.equal(resolve(intoStore, cache).plugins[0].key, launch.cacheKey(storeSubdirectoryPlugin, NOTHING));
 });
 
 test('a translation is replaced only by name, and the variable wins', () => {
@@ -418,23 +445,31 @@ test('translate sees only the translation inputs', () => {
   assert.deepEqual(seen, { only: 'this' });
 });
 
-test('a checkout that changes while it is translated is translated again', () => {
+test('a write elsewhere in the tree during a translation does not retry it', () => {
   const cache = temporary();
   const root = plugin('moving', 'hello', 'Before');
-  let edits = 1;
+  mkdirSync(join(root, 'junk'), { recursive: true });
+  writeFileSync(join(root, 'junk', 'log'), '0');
+  let attempts = 0;
   const adapter = {
     ...claude,
     translate: (description: any, out: string, inputs: any, report: any, key: string) => {
+      attempts++;
       claude.translate(description, out, inputs, report, key);
-      if (edits-- > 0) writeFileSync(join(root, 'skills/hello/SKILL.md'), '---\nname: hello\ndescription: After\n---\n');
+      // odu writes its run log here while a run is live.
+      writeFileSync(join(root, 'junk', 'log'), 'written during the translation');
     },
   };
   const [translated] = resolve(root, cache, [], [], adapter).plugins;
-  assert.equal(translated.key, launch.cacheKey(root));
-  assert.match(readFileSync(join(translated.translation, 'skills/hello/SKILL.md'), 'utf8'), /After/);
-  assert.equal(readdirSync(join(cacheDir(cache), 'plugins')).length, 1, 'the first attempt was never published');
+  assert.equal(attempts, 1, 'published on the first attempt');
+  assert.equal(translated.key, keyOf(root));
+  assert.equal(readdirSync(join(cacheDir(cache), 'plugins')).length, 1);
   let counter = 0;
-  const restless = { ...claude, translate: () => writeFileSync(join(root, 'counter'), String(counter++)) };
+  // Only a write within the read set can move the key.
+  const restless = {
+    ...claude,
+    translate: () => writeFileSync(join(root, 'skills/hello/SKILL.md'), String(counter++)),
+  };
   assert.throws(() => resolve(root, temporary(), [], [], restless), /kept changing while it was translated/);
 });
 
@@ -470,7 +505,7 @@ test('concurrent first launches publish one translation, and all use it', async 
     child.on('close', (code) => (code === 0 ? done(stdout) : fail(new Error(stderr))));
   })));
   assert.equal(new Set(outputs).size, 1, outputs.join('\n'));
-  const { names, links } = published(cache, launch.cacheKey(root));
+  const { names, links } = published(cache, keyOf(root));
   assert.equal(links.length, 1);
   assert.equal(names.length, 2, names.join(' '));
 });

@@ -26,8 +26,11 @@
  * content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
- * already content-addressed; otherwise it hashes the directory's NAR
- * serialization together with its path, since translations embed the root.
+ * already content-addressed; otherwise it hashes the directory's path together
+ * with what a translation reads of it — the description, and the bytes and
+ * mode of each skill file it lists — so the rest of a checkout is never read
+ * and cannot fail the launch, while a translation that embeds the root stays
+ * particular to it.
  * `<translator>` names the runtime and the adapter's inputs, so a new
  * agent-distro never reads an older translation.
  *
@@ -48,16 +51,16 @@
  * from, the PATH additions, the environment and settings, and the arguments it
  * hands the harness.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, type Hash } from 'node:crypto';
 import {
-  closeSync, constants, fstatSync, lstatSync, lutimesSync, mkdirSync, openSync, readdirSync, readFileSync,
-  readlinkSync, renameSync, rmdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync,
+  lstatSync, lutimesSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmdirSync, rmSync,
+  statSync, symlinkSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { log, SITE, VARIABLE as LOG_VARIABLE } from '../log.ts';
 import { nameText, sourceText } from '../listing.ts';
-import { isSystemError, printable, realpath, writeTemporary } from '../util.ts';
+import { isSystemError, realpath, writeTemporary } from '../util.ts';
 import {
   resolveProfile, select, workingDirectory, isResolved,
   type Described, type Info, type ProfileEnv, type Resolved, type SettingsSection,
@@ -139,79 +142,12 @@ export function entries(value: string | undefined): string[] {
 
 export { printable } from '../util.ts';
 
-function narString(hash: ReturnType<typeof createHash>, value: string | Buffer) {
+/** A length and then the bytes: two fields never serialize to the same input. */
+function field(hash: Hash, value: string | Buffer) {
   const bytes = typeof value === 'string' ? Buffer.from(value) : value;
   const length = Buffer.alloc(8);
   length.writeBigUInt64LE(BigInt(bytes.length));
-  hash.update(length);
-  hash.update(bytes);
-  if (bytes.length % 8) hash.update(Buffer.alloc(8 - (bytes.length % 8)));
-}
-
-const SLASH = Buffer.from('/');
-const GIT = Buffer.from('.git');
-
-/** One NAR node. Paths stay bytes, so a name that is not UTF-8 is hashed, not mangled. */
-function narNode(hash: ReturnType<typeof createHash>, path: Buffer, skip: Buffer | null) {
-  const put = (...values: (string | Buffer)[]) => values.forEach((value) => narString(hash, value));
-  put('(', 'type');
-  // Open first and ask the open file what it is, so nothing read can differ
-  // from what was checked. O_NOFOLLOW refuses a symlink, which is then read
-  // as one; O_NONBLOCK keeps a FIFO from blocking the launch.
-  let fd: number;
-  try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ELOOP') throw error;
-    put('symlink', 'target', readlinkSync(path, { encoding: 'buffer' }), ')');
-    return;
-  }
-  try {
-    const stat = fstatSync(fd);
-    if (stat.isFile()) {
-      put('regular');
-      if (stat.mode & 0o100) put('executable', '');
-      put('contents', readFileSync(fd));
-    } else if (stat.isDirectory()) {
-      put('directory');
-      const names = readdirSync(path, { encoding: 'buffer' }).sort(Buffer.compare);
-      for (const name of names) {
-        if (skip && name.equals(skip)) continue;
-        const entry = Buffer.concat([path, SLASH, name]);
-        // A socket, FIFO or device is no part of a plugin, and opening one
-        // can fail (a socket) or block; leave it out before opening it.
-        const kind = lstatSync(entry);
-        if (!kind.isFile() && !kind.isDirectory() && !kind.isSymbolicLink()) {
-          log.plugin.debug(`${printable(entry.toString())}: not a regular file, directory or symlink; not hashed`);
-          continue;
-        }
-        put('entry', '(', 'name', name, 'node');
-        narNode(hash, entry, null);
-        put(')');
-      }
-    } else {
-      // Its type changed after the directory listed it as a file, directory or symlink.
-      throw new LaunchError(`${VARIABLE}: ${printable(path.toString())} is not a regular file, directory or `
-        + 'symlink, so the plugin cannot be hashed');
-    }
-  } finally {
-    closeSync(fd);
-  }
-  put(')');
-}
-
-/**
- * SHA-256 of the directory's NAR serialization, as `nix-hash --type sha256`
- * prints it. `skipGit` leaves out a top-level `.git`, which no translation
- * reads. A socket, FIFO or device is left out too: NAR has no node for one
- * (nix-hash refuses it), no plugin consists of one, and a checkout may hold a
- * live one, such as `.ci/odu.sock` while odu runs there.
- */
-export function narHash(path: string, { skipGit = false } = {}): string {
-  const hash = createHash('sha256');
-  narString(hash, 'nix-archive-1');
-  narNode(hash, Buffer.from(path), skipGit ? GIT : null);
-  return hash.digest('hex');
+  hash.update(length).update(bytes);
 }
 
 export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
@@ -226,10 +162,12 @@ const NAME_MAX = 255;
  * The cache key of a resolved plugin root: one file name, injectively. A
  * store path is used as is, percent-encoded; when that is too long for a file
  * name, its store path's own name stays and the rest is a hash of the path
- * (never of the contents). Any other directory is a hash of its contents,
- * less a top-level `.git`, and of its path.
+ * (never of the contents). Any other directory is keyed by its path and by
+ * what a translation reads of it — `description`, and the bytes and mode of
+ * every skill file it lists — so nothing else in the tree is read, and a
+ * `node_modules`, a build output or a live socket beside them costs nothing.
  */
-export function cacheKey(root: string): string {
+export function cacheKey(root: string, description: Description): string {
   if (root.startsWith(STORE) && root.length > STORE.length) {
     const relative = root.slice(STORE.length);
     const key = 'store-' + encodeURIComponent(relative);
@@ -238,7 +176,23 @@ export function cacheKey(root: string): string {
     // cannot be the encoding of any path.
     return 'store-' + encodeURIComponent(relative.split('/')[0]).slice(0, 120) + '#' + sha256(relative);
   }
-  return 'sha256-' + sha256(`agent-distro plugin\0${root}\0${narHash(root, { skipGit: true })}`);
+  const hash = createHash('sha256');
+  field(hash, 'agent-distro plugin');
+  field(hash, root);
+  field(hash, JSON.stringify(description));
+  for (const [skill, files] of Object.entries(description.skills)) {
+    for (const file of files) {
+      // As the reader resolved it: a link is followed to the file it names.
+      const path = realpath(join(root, 'skills', skill, file));
+      field(hash, skill);
+      field(hash, file);
+      // copySkills copies a file's mode too (src/plugin/resources.ts), so the
+      // mode is part of what a translation holds.
+      field(hash, (statSync(path).mode & 0o7777).toString(8));
+      field(hash, readFileSync(path));
+    }
+  }
+  return 'sha256-' + hash.digest('hex');
 }
 
 /** Return the translation `link` names, or null when there is none to use. */
@@ -352,7 +306,7 @@ function removeIfEmpty(directory: string) {
  * first when absent. Reports are replayed from the cache, so a cached launch
  * says what the first one did. `known` is a description the plugin's writer
  * already holds (a built profile's, whose `reader` is this runtime), used in
- * place of reading `entry` again.
+ * place of reading `entry` again and hence never re-read to check the key.
  */
 export function translate(
   entry: string, harness: string, adapter: Adapter, args: unknown, cache: string, report: Report, label = VARIABLE,
@@ -379,15 +333,11 @@ export function translate(
     return { name: description.manifest.name, key, description, from: label, translation: join(directory, 'out') };
   };
 
-  // A checkout can change while it is read; it is hashed again afterwards,
-  // and a translation whose source changed under it is never published.
+  // What a translation reads of a checkout is its description and the skill
+  // files that lists, so those are what it is keyed by. A checkout can still
+  // change while it is read; it is read and keyed again afterwards, and a
+  // translation whose source changed under it is never published.
   for (let attempt = 1; ; attempt++) {
-    const key = cacheKey(root);
-    const parent = join(cache, 'plugins', key, harness);
-    const link = join(parent, translator);
-    const existing = cached(link);
-    if (existing) return replay(key, link, existing);
-
     const reports: string[] = [];
     let description: Description;
     if (known) {
@@ -400,6 +350,12 @@ export function translate(
         throw error;
       }
     }
+    const key = cacheKey(root, description);
+    const parent = join(cache, 'plugins', key, harness);
+    const link = join(parent, translator);
+    const existing = cached(link);
+    if (existing) return replay(key, link, existing);
+
     mkdirSync(parent, { recursive: true });
     // A directory that never moves, since translations embed their own paths;
     // the link to it appears atomically once it is complete.
@@ -410,11 +366,23 @@ export function translate(
       writeFileSync(join(directory, 'description.json'), JSON.stringify(description, null, 2));
       adapter.translate(description, join(directory, 'out'), inputs, (message) => reports.push(message), key);
       writeFileSync(join(directory, 'reports.json'), JSON.stringify(reports));
-      // A checkout can change while it is read; a store path cannot.
-      if (!known && cacheKey(root) !== key) {
-        rmSync(directory, { recursive: true, force: true });
-        if (attempt === 3) throw new LaunchError(`${label}: ${entry} kept changing while it was translated`);
-        continue;
+      // Read and key it again, and publish only what did not move: a store
+      // path cannot change, and a `known` description is the build's own word
+      // for what the root holds.
+      if (!known && !(root.startsWith(STORE) && root.length > STORE.length)) {
+        let again: Description | null = null;
+        try {
+          again = readPlugin(root);
+        } catch (error) {
+          // It changed into something invalid under us: the same as any other
+          // change, so the attempt is retried.
+          if (!(error instanceof Fatal)) throw error;
+        }
+        if (again === null || cacheKey(root, again) !== key) {
+          rmSync(directory, { recursive: true, force: true });
+          if (attempt === 3) throw new LaunchError(`${label}: ${entry} kept changing while it was translated`);
+          continue;
+        }
       }
       symlinkSync(name, link);
     } catch (error) {
