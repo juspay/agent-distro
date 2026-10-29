@@ -201,9 +201,9 @@ in
         def stderr_of(command):
             return user(f"{{ {command}; }} 2>&1 >/dev/null")
         repo = stderr_of("cd ~/repo && probe-claude")
-        assert "agent-distro profile: using repo (from /home/testuser/repo/plugin.json) · https://agent-distro.nixos.asia\n" in repo, repo
+        assert "agent-distro profile: using repo (from /home/testuser/repo/plugin.json) · https://agent-distro.kolu.dev\n" in repo, repo
         variable = stderr_of("AI_PROFILE=/home/testuser/elsewhere probe-claude")
-        assert "agent-distro profile: using elsewhere (from AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n" in variable, variable
+        assert "agent-distro profile: using elsewhere (from AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.kolu.dev\n" in variable, variable
         # No profile at all, and a positional choice, say nothing.
         builtin = stderr_of("probe-claude")
         assert "agent-distro" not in builtin, builtin
@@ -226,7 +226,7 @@ in
                 " over AI_PROFILE=/home/testuser/elsewhere") in listed, listed
         noticed = stderr_of(f"cd ~/repo && {other} probe-claude")
         assert ("agent-distro profile: using elsewhere + repo (from /home/testuser/repo/plugin.json"
-                " over AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.nixos.asia\n") in noticed, noticed
+                " over AI_PROFILE=/home/testuser/elsewhere) · https://agent-distro.kolu.dev\n") in noticed, noticed
         # The repository declares no `env`: AI_PROFILE's is in effect, and its
         # secret variable is what a launch without a terminal refuses.
         output = refused(f"cd ~/repo && {other} probe-omp")
@@ -269,7 +269,7 @@ in
             output = refused(command)
             assert "/home/testuser/legacy/agent-distro.nix: agent-distro.nix is no longer read" in output, output
             assert 'extensions."asia.nixos.agent-distro"' in output, output
-            assert "agent-distro.nixos.asia/#profiles" in output, output
+            assert "agent-distro.kolu.dev/#profiles" in output, output
             assert "STUB-STARTED" not in output, output
         # The repository a launch starts in, too.
         write("~/legacy-repo/.git/keep", "keep")

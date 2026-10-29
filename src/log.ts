@@ -48,7 +48,7 @@ export type Level = typeof LEVELS[number];
 export const VARIABLE = 'AGENT_DISTRO_LOG';
 
 /** agent-distro's website, named by the one line a plain launch prints. */
-export const SITE = 'https://agent-distro.nixos.asia';
+export const SITE = 'https://agent-distro.kolu.dev';
 
 /** How long an `async` slow operation runs before its start line is printed. */
 export const NOTICE_MS = 400;

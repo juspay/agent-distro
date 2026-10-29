@@ -11,7 +11,7 @@ reads it when a harness starts.
 this template shows empty: `plugins` for more plugin directories (paths
 beginning with `./`) or flake references, `packages` for nixpkgs attribute paths
 put on `PATH`, and `env` and `settings`. See
-[Profiles](https://agent-distro.nixos.asia/#profiles).
+[Profiles](https://agent-distro.kolu.dev/#profiles).
 
 Edit `plugin.json` to name your distribution, add skills under `skills/`, and
 optionally point OMP and OpenCode at a model gateway.
@@ -67,7 +67,7 @@ is agent-distro's own, and this profile is one entry of its `profiles`:
 ```
 
 Binary cache and manual install: see agent-distro's
-[Install](https://agent-distro.nixos.asia/#install).
+[Install](https://agent-distro.kolu.dev/#install).
 
 To add a harness to the framework, create `harnesses/<name>/` with `meta.nix`,
-`default.nix`, `source.nix`, and `README.md`; see [Adding a harness](https://agent-distro.nixos.asia/#adding-a-harness).
+`default.nix`, `source.nix`, and `README.md`; see [Adding a harness](https://agent-distro.kolu.dev/#adding-a-harness).

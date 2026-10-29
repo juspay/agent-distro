@@ -60,14 +60,14 @@ let
   # `agent-distro.nix` is gone; a repository that still carries it is told to
   # migrate rather than told it has no profile.
   migration =
-    let url = "https://agent-distro.nixos.asia/#profiles";
-    in file: "${file}: agent-distro.nix is no longer read — a profile is a plugin.json. Move its fields into extensions.\"asia.nixos.agent-distro\" (see ${url}; schema https://agent-distro.nixos.asia/agent-distro.schema.json)";
+    let url = "https://agent-distro.kolu.dev/#profiles";
+    in file: "${file}: agent-distro.nix is no longer read — a profile is a plugin.json. Move its fields into extensions.\"asia.nixos.agent-distro\" (see ${url}; schema https://agent-distro.kolu.dev/agent-distro.schema.json)";
   directory = if builtins.baseNameOf (toString at) == "plugin.json" then builtins.dirOf at else at;
   file =
     if builtins.baseNameOf (toString at) == "agent-distro.nix" then throw (migration (toString at))
     else if builtins.pathExists (directory + "/agent-distro.nix") then throw (migration (toString (directory + "/agent-distro.nix")))
     else if builtins.pathExists (directory + "/plugin.json") then directory + "/plugin.json"
-    else throw "mkProfile: no plugin.json at ${toString directory} (see https://agent-distro.nixos.asia/#profiles)";
+    else throw "mkProfile: no plugin.json at ${toString directory} (see https://agent-distro.kolu.dev/#profiles)";
   # The manifest, read here at evaluation rather than by `runtime.readPlugin`:
   # that reader is a derivation, and reading one needs import-from-derivation,
   # which `allow-import-from-derivation = false` refuses — including for a Home
