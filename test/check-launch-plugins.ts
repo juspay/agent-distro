@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 
 const [src, storePlugin, storeSubdirectoryPlugin, promptSecrets] = process.argv.slice(2);
@@ -57,9 +57,6 @@ function describedPlugin(root: string) {
 
 /** The cache key of the plugin at `root`, as a launch computes it. */
 const keyOf = (root: string) => launch.cacheKey(root, readPlugin(root));
-
-/** A store path is keyed by its path alone: no description is looked at. */
-const NOTHING = {} as never;
 
 const info = { nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
 const claudeArgs = () => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', ...info });
@@ -103,14 +100,14 @@ function published(cache: string, key: string) {
 }
 
 test('a store path is its own key, without hashing', () => {
-  assert.equal(launch.cacheKey(storePlugin, NOTHING), 'store-' + storePlugin.slice('/nix/store/'.length));
-  assert.match(launch.cacheKey(storeSubdirectoryPlugin, NOTHING), /^store-[a-z0-9]{32}-[^/]+%2F[^/]+$/);
+  assert.equal(launch.storeKey(storePlugin), 'store-' + storePlugin.slice('/nix/store/'.length));
+  assert.match(launch.storeKey(storeSubdirectoryPlugin), /^store-[a-z0-9]{32}-[^/]+%2F[^/]+$/);
   // Nothing under the path is read: an absent one keys the same way.
-  assert.equal(launch.cacheKey('/nix/store/00000000000000000000000000000000-absent/plugin', NOTHING),
+  assert.equal(launch.storeKey('/nix/store/00000000000000000000000000000000-absent/plugin'),
     'store-00000000000000000000000000000000-absent%2Fplugin');
   const cache = temporary();
   const [translated] = resolve(storeSubdirectoryPlugin, cache).plugins;
-  assert.equal(translated.key, launch.cacheKey(storeSubdirectoryPlugin, NOTHING));
+  assert.equal(translated.key, launch.storeKey(storeSubdirectoryPlugin));
   assert.ok(translated.translation.startsWith(join(cacheDir(cache), 'plugins', translated.key, 'claude') + '/'));
 });
 
@@ -120,12 +117,38 @@ test('a long store path still makes one file name, distinct per path', () => {
     `/nix/store/${name}/agent-plugin/${'d'.repeat(40)}/sub`,
     `/nix/store/${name}/agent-plugin/${'d'.repeat(40)}/other`,
     `/nix/store/00000000000000000000000000000000-x/${'é'.repeat(80)}`,
-  ].map((root) => launch.cacheKey(root, NOTHING));
+  ].map((root) => launch.storeKey(root));
   for (const key of keys) assert.ok(Buffer.byteLength(key) <= 255, key);
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys[0].startsWith('store-00000000000000000000000000000000-n') && keys[0].includes('#'), keys[0]);
   // Short paths keep their readable form.
-  assert.ok(!launch.cacheKey(storeSubdirectoryPlugin, NOTHING).includes('#'));
+  assert.ok(!launch.storeKey(storeSubdirectoryPlugin).includes('#'));
+});
+
+test('a store path is served from the cache without reading it', () => {
+  const cache = temporary();
+  // Any translation, for the translator name every link under a key shares.
+  const probe = resolve(plugin('probe'), cache).plugins[0];
+  const translator = published(cache, probe.key).links[0];
+  // The larger store path that holds the fixtures, which is no plugin at all:
+  // reading it would fail the launch, so a hit must never get that far.
+  const root = dirname(storeSubdirectoryPlugin);
+  assert.throws(() => readPlugin(root), /plugin\.json is missing/);
+  const key = launch.storeKey(root);
+  assert.ok(key?.startsWith('store-'), key);
+  const parent = join(cacheDir(cache), 'plugins', key, 'claude');
+  const name = `${translator}.cafebabe0000`;
+  const directory = join(parent, name);
+  mkdirSync(join(directory, 'out'), { recursive: true });
+  writeFileSync(join(directory, 'description.json'), JSON.stringify({
+    root, version: '1.0.0', manifest: { $schema: SCHEMA, name: 'fixtures' }, skills: {}, mcpServers: {}, reports: [],
+  }));
+  writeFileSync(join(directory, 'reports.json'), '[]');
+  symlinkSync(name, join(parent, translator));
+  const replayed = resolve(root, cache).plugins[0];
+  assert.equal(replayed.key, key);
+  assert.equal(replayed.name, 'fixtures');
+  assert.equal(replayed.translation, join(directory, 'out'));
 });
 
 test('only what a translation reads is keyed: the rest of the tree costs nothing', () => {
@@ -229,7 +252,7 @@ test('relative, trailing-slash and symlinked entries resolve to their directory'
   } finally {
     process.chdir(here);
   }
-  assert.equal(resolve(intoStore, cache).plugins[0].key, launch.cacheKey(storeSubdirectoryPlugin, NOTHING));
+  assert.equal(resolve(intoStore, cache).plugins[0].key, launch.storeKey(storeSubdirectoryPlugin));
 });
 
 test('a translation is replaced only by name, and the variable wins', () => {
@@ -285,6 +308,20 @@ test('a description a built profile holds is used instead of reading the root', 
   const result = launch.resolve('claude', claude, claudeArgs(), '', { XDG_CACHE_HOME: temporary() },
     () => {}, [root], [held]);
   assert.deepEqual(result.plugins.map((p: any) => p.name), ['from-the-description']);
+});
+
+test('a listed skill file that is gone is a change, not a crash', () => {
+  const root = plugin('vanished');
+  const held = describedPlugin(root);
+  const description = JSON.parse(readFileSync(held.description, 'utf8'));
+  // The listing names a file no longer there: reaching the key would throw
+  // ENOENT, which must leave the launch's error, not a stack trace.
+  description.skills = { hello: ['SKILL.md', 'gone.md'] };
+  writeFileSync(held.description, JSON.stringify(description));
+  assert.throws(
+    () => launch.resolve('claude', claude, claudeArgs(), '', { XDG_CACHE_HOME: temporary() }, () => {}, [root], [held]),
+    /kept changing while it was translated/,
+  );
 });
 
 test("a profile's plugin that is not a directory fails naming the profile", () => {

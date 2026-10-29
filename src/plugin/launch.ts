@@ -26,11 +26,11 @@
  * content into
  * `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/<translator>`.
  * The key is the plugin's own path when it is under /nix/store, which is
- * already content-addressed; otherwise it hashes the directory's path together
- * with what a translation reads of it — the description, and the bytes and
- * mode of each skill file it lists — so the rest of a checkout is never read
- * and cannot fail the launch, while a translation that embeds the root stays
- * particular to it.
+ * already content-addressed, and a hit on one is served without reading it;
+ * otherwise it hashes the directory's path together with what a translation
+ * reads of it — the description, and the bytes and mode of each skill file it
+ * lists — so the rest of a checkout is never read and cannot fail the launch,
+ * while a translation that embeds the root stays particular to it.
  * `<translator>` names the runtime and the adapter's inputs, so a new
  * agent-distro never reads an older translation.
  *
@@ -159,23 +159,31 @@ const STORE = '/nix/store/';
 const NAME_MAX = 255;
 
 /**
+ * The key of a directory under the default store — its own path,
+ * percent-encoded — or null for one anywhere else, which is keyed by what its
+ * translation reads. A store path is content-addressed already, so keying it
+ * never reads it: not even a cache hit checks that it is there.
+ */
+export function storeKey(root: string): string | null {
+  if (!root.startsWith(STORE) || root.length === STORE.length) return null;
+  const relative = root.slice(STORE.length);
+  const key = 'store-' + encodeURIComponent(relative);
+  if (Buffer.byteLength(key) <= NAME_MAX) return key;
+  // `#` is one character encodeURIComponent always escapes, so this form
+  // cannot be the encoding of any path.
+  return 'store-' + encodeURIComponent(relative.split('/')[0]).slice(0, 120) + '#' + sha256(relative);
+}
+
+/**
  * The cache key of a resolved plugin root: one file name, injectively. A
- * store path is used as is, percent-encoded; when that is too long for a file
- * name, its store path's own name stays and the rest is a hash of the path
- * (never of the contents). Any other directory is keyed by its path and by
- * what a translation reads of it — `description`, and the bytes and mode of
+ * store path's own (`storeKey`); any other directory is keyed by its path and
+ * by what a translation reads of it — `description`, and the bytes and mode of
  * every skill file it lists — so nothing else in the tree is read, and a
  * `node_modules`, a build output or a live socket beside them costs nothing.
  */
 export function cacheKey(root: string, description: Description): string {
-  if (root.startsWith(STORE) && root.length > STORE.length) {
-    const relative = root.slice(STORE.length);
-    const key = 'store-' + encodeURIComponent(relative);
-    if (Buffer.byteLength(key) <= NAME_MAX) return key;
-    // `#` is one character encodeURIComponent always escapes, so this form
-    // cannot be the encoding of any path.
-    return 'store-' + encodeURIComponent(relative.split('/')[0]).slice(0, 120) + '#' + sha256(relative);
-  }
+  const key = storeKey(root);
+  if (key !== null) return key;
   const hash = createHash('sha256');
   field(hash, 'agent-distro plugin');
   field(hash, root);
@@ -333,6 +341,31 @@ export function translate(
     return { name: description.manifest.name, key, description, from: label, translation: join(directory, 'out') };
   };
 
+  // A store path is keyed by its path alone, so a hit is decided before
+  // anything answers for the root: it is never read to serve one.
+  const stored = storeKey(root);
+  if (stored !== null) {
+    const link = join(cache, 'plugins', stored, harness, translator);
+    const existing = cached(link);
+    if (existing) return replay(stored, link, existing);
+  }
+
+  // The key of what is on disk now, or null when a file the listing named was
+  // replaced under us: an editor that writes a skill through a temporary file
+  // makes it vanish between the listing and the read.
+  const keyOf = (described: Description): string | null => {
+    try {
+      return cacheKey(root, described);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (isSystemError(error) && (code === 'ENOENT' || code === 'ENOTDIR')) return null;
+      throw error;
+    }
+  };
+  const retry = (attempt: number): void => {
+    if (attempt === 3) throw new LaunchError(`${label}: ${entry} kept changing while it was translated`);
+  };
+
   // What a translation reads of a checkout is its description and the skill
   // files that lists, so those are what it is keyed by. A checkout can still
   // change while it is read; it is read and keyed again afterwards, and a
@@ -350,11 +383,18 @@ export function translate(
         throw error;
       }
     }
-    const key = cacheKey(root, description);
+    const key = stored ?? keyOf(description);
+    if (key === null) {
+      retry(attempt);
+      continue;
+    }
     const parent = join(cache, 'plugins', key, harness);
     const link = join(parent, translator);
-    const existing = cached(link);
-    if (existing) return replay(key, link, existing);
+    // A store path's hit was decided above; any other key is this attempt's.
+    if (stored === null) {
+      const existing = cached(link);
+      if (existing) return replay(key, link, existing);
+    }
 
     mkdirSync(parent, { recursive: true });
     // A directory that never moves, since translations embed their own paths;
@@ -369,7 +409,7 @@ export function translate(
       // Read and key it again, and publish only what did not move: a store
       // path cannot change, and a `known` description is the build's own word
       // for what the root holds.
-      if (!known && !(root.startsWith(STORE) && root.length > STORE.length)) {
+      if (!known && stored === null) {
         let again: Description | null = null;
         try {
           again = readPlugin(root);
@@ -378,9 +418,9 @@ export function translate(
           // change, so the attempt is retried.
           if (!(error instanceof Fatal)) throw error;
         }
-        if (again === null || cacheKey(root, again) !== key) {
+        if (again === null || keyOf(again) !== key) {
           rmSync(directory, { recursive: true, force: true });
-          if (attempt === 3) throw new LaunchError(`${label}: ${entry} kept changing while it was translated`);
+          retry(attempt);
           continue;
         }
       }
