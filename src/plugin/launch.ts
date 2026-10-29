@@ -53,8 +53,8 @@
  */
 import { createHash, randomBytes, type Hash } from 'node:crypto';
 import {
-  lstatSync, lutimesSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmdirSync, rmSync,
-  statSync, symlinkSync, utimesSync, writeFileSync,
+  closeSync, constants, fstatSync, lstatSync, lutimesSync, mkdirSync, openSync, readdirSync, readFileSync,
+  readlinkSync, renameSync, rmdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
@@ -175,10 +175,19 @@ export function storeKey(root: string): string | null {
 }
 
 /**
+ * A file the description listed is no longer the regular file it named: the
+ * checkout changed under the key, so `translate` retries instead of keying
+ * whatever is there now.
+ */
+class Replaced extends Error {}
+
+/**
  * The key of a checkout: its path and what a translation reads of it —
  * `description`, and the bytes and mode of every skill file it lists — so
  * nothing else in the tree is read, and a `node_modules`, a build output or a
  * live socket beside them costs nothing. (A store path's key is `storeKey`.)
+ * Each file is opened once and read through that descriptor, so its mode and
+ * its bytes cannot come from two different files.
  */
 export function contentKey(root: string, description: Description): string {
   const hash = createHash('sha256');
@@ -188,13 +197,26 @@ export function contentKey(root: string, description: Description): string {
   for (const [skill, files] of Object.entries(description.skills)) {
     for (const file of files) {
       // As the reader resolved it: a link is followed to the file it names.
-      const path = realpath(join(root, 'skills', skill, file));
+      // O_NOFOLLOW then refuses a link that appeared at that name since, and
+      // O_NONBLOCK keeps a FIFO that replaced the file from blocking the open.
+      const fd = openSync(realpath(join(root, 'skills', skill, file)),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      let mode: number;
+      let bytes: Buffer;
+      try {
+        const stat = fstatSync(fd);
+        if (!stat.isFile()) throw new Replaced(`${skill}/${file} is no longer a regular file`);
+        mode = stat.mode & 0o7777;
+        bytes = readFileSync(fd);
+      } finally {
+        closeSync(fd);
+      }
       field(hash, skill);
       field(hash, file);
       // copySkills copies a file's mode too (src/plugin/resources.ts), so the
       // mode is part of what a translation holds.
-      field(hash, (statSync(path).mode & 0o7777).toString(8));
-      field(hash, readFileSync(path));
+      field(hash, mode.toString(8));
+      field(hash, bytes);
     }
   }
   return 'sha256-' + hash.digest('hex');
@@ -349,13 +371,15 @@ export function translate(
 
   // The key of what is on disk now, or null when a file the listing named was
   // replaced under us: an editor that writes a skill through a temporary file
-  // makes it vanish between the listing and the read.
+  // makes it vanish between the listing and the read, and a link or a FIFO
+  // that appears where a file was is refused by the open.
   const keyNow = (described: Description): string | null => {
     try {
       return contentKey(root, described);
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (isSystemError(error) && (code === 'ENOENT' || code === 'ENOTDIR')) return null;
+      if (error instanceof Replaced) return null;
+      const code = (error as NodeJS.ErrnoException).code!;
+      if (isSystemError(error) && ['ENOENT', 'ENOTDIR', 'ELOOP'].includes(code)) return null;
       throw error;
     }
   };
