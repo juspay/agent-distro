@@ -411,7 +411,7 @@ test('an agent-distro.nix is refused wherever it is found, naming the file and s
     error.message.includes(`${file}: agent-distro.nix is no longer read`)
     && error.message.includes('a profile is a plugin.json')
     && error.message.includes('extensions."asia.nixos.agent-distro"')
-    && error.message.includes('agent-distro.nixos.asia/#profiles')
+    && error.message.includes('agent-distro.kolu.dev/#profiles')
     && error.message.includes('agent-distro.schema.json'));
   // A positional selector…
   refused(() => resolve({ source: 'positional', origin: directory }));
@@ -906,7 +906,7 @@ test('a launch uses the profile in effect: its plugins, env, settings and packag
   // settings, which the profile keeps for OMP. The one line a plain launch
   // prints names the profile and the website.
   const [launched, secrets, settings, value, team_, handed] = launch(join(repo));
-  assert.match(noticed, /^agent-distro profile: using repo \(from .*plugin\.json\) · https:\/\/agent-distro\.nixos\.asia$/m);
+  assert.match(noticed, /^agent-distro profile: using repo \(from .*plugin\.json\) · https:\/\/agent-distro\.kolu\.dev$/m);
   // The repository's own directory is its first plugin, then the one it names.
   assert.equal((launched.match(/--plugin-dir \S+\/agent-distro\/plugins\/sha256-\S+\/claude\/\S+\/out/g) ?? []).length, 2, launched);
   assert.equal(secrets, "LITELLM_API_KEY=it's here");

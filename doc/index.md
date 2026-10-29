@@ -349,8 +349,8 @@ Every message agent-distro prints goes to stderr as `agent-distro <component>: �
 By default a launch prints a line only when something chose a profile for you, a repository's profile or `AI_PROFILE`, worded as `--list` words it:
 
 ```text
-agent-distro profile: using repo (from /home/me/repo/plugin.json) · https://agent-distro.nixos.asia
-agent-distro profile: using juspay-skills + repo (from /home/me/repo/plugin.json over AI_PROFILE=github:juspay/skills) · https://agent-distro.nixos.asia
+agent-distro profile: using repo (from /home/me/repo/plugin.json) · https://agent-distro.kolu.dev
+agent-distro profile: using juspay-skills + repo (from /home/me/repo/plugin.json over AI_PROFILE=github:juspay/skills) · https://agent-distro.kolu.dev
 ```
 
 and when something will take a while, such as evaluating a profile's packages for the first time or fetching them. A launch with no profile, or with one you named yourself, prints nothing.
@@ -500,13 +500,13 @@ servers — which is a valid profile. A namespace member that is not one of the 
 error naming it, as is the wrong shape for one.
 
 The extension's own JSON Schema is published at
-[agent-distro.schema.json](https://agent-distro.nixos.asia/agent-distro.schema.json),
+[agent-distro.schema.json](https://agent-distro.kolu.dev/agent-distro.schema.json),
 and mirrors the launch's validator. `plugin.json`'s `$schema` stays the Agent
 Plugins one, so point an editor at it from the editor's own settings — for VS
 Code, in `.vscode/settings.json`:
 
 ```json
-{ "json.schemas": [{ "fileMatch": ["**/plugin.json"], "url": "https://agent-distro.nixos.asia/agent-distro.schema.json" }] }
+{ "json.schemas": [{ "fileMatch": ["**/plugin.json"], "url": "https://agent-distro.kolu.dev/agent-distro.schema.json" }] }
 ```
 
 ### An `agent-distro.nix` is refused
@@ -516,8 +516,8 @@ Nix. That form is gone: a repository that still carries one is refused, naming t
 
 ```text
 /home/me/repo/agent-distro.nix: agent-distro.nix is no longer read — a profile is a plugin.json.
-Move its fields into `extensions."asia.nixos.agent-distro"` (see https://agent-distro.nixos.asia/#profiles;
-schema https://agent-distro.nixos.asia/agent-distro.schema.json)
+Move its fields into `extensions."asia.nixos.agent-distro"` (see https://agent-distro.kolu.dev/#profiles;
+schema https://agent-distro.kolu.dev/agent-distro.schema.json)
 ```
 
 Wherever it is found — the repository a launch starts in, an `AI_PROFILE` entry, a positional

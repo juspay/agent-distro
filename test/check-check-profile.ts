@@ -149,7 +149,7 @@ test('an agent-distro.nix is the migration error, naming the file', () => {
   assert.match(result.err, /agent-distro\.nix is no longer read/);
   assert.match(result.err, /agent-distro\.nix/);
   assert.match(result.err, /extensions\."asia\.nixos\.agent-distro"/);
-  assert.match(result.err, /agent-distro\.nixos\.asia\/#profiles/);
+  assert.match(result.err, /agent-distro\.kolu\.dev\/#profiles/);
   assert.match(result.err, /agent-distro\.schema\.json/);
 });
 

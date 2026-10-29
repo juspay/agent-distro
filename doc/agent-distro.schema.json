@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-distro.nixos.asia/agent-distro.schema.json",
+  "$id": "https://agent-distro.kolu.dev/agent-distro.schema.json",
   "title": "agent-distro profile extension",
   "description": "The `extensions.\"asia.nixos.agent-distro\"` member of a plugin.json: what the directory adds to the plugin itself when agent-distro reads it as a profile (src/profile/resolve.ts). Its members are the fields a profile carries. The plugin root is always the profile's first plugin and is never listed.",
   "type": "object",

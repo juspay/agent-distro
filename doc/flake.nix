@@ -1,5 +1,5 @@
 {
-  # The website at https://agent-distro.nixos.asia: one page, built from this
+  # The website at https://agent-distro.kolu.dev: one page, built from this
   # directory.
   #
   #   nix build ./doc   — the site, in result/

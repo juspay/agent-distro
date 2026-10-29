@@ -26,14 +26,14 @@ changed how a self-referential path is addressed, and a host on it cannot take
 them); a Mac needs the cache key or a trusted user, because a rewritten Mach-O
 does not run on arm64 macOS.
 
-Everything else is on the website, **<https://agent-distro.nixos.asia>**:
+Everything else is on the website, **<https://agent-distro.kolu.dev>**:
 
-- [Quick start](https://agent-distro.nixos.asia/#quick-start)
-- [Install and keep updated](https://agent-distro.nixos.asia/#install)
-- [The binary cache](https://agent-distro.nixos.asia/#binary-cache)
-- [Package layout](https://agent-distro.nixos.asia/#package-layout)
-- [Profiles](https://agent-distro.nixos.asia/#profiles)
-- [Harnesses](https://agent-distro.nixos.asia/#harnesses)
-- [How it works](https://agent-distro.nixos.asia/#how-it-works)
-- [Development](https://agent-distro.nixos.asia/#development)
-- [Adding a harness](https://agent-distro.nixos.asia/#adding-a-harness)
+- [Quick start](https://agent-distro.kolu.dev/#quick-start)
+- [Install and keep updated](https://agent-distro.kolu.dev/#install)
+- [The binary cache](https://agent-distro.kolu.dev/#binary-cache)
+- [Package layout](https://agent-distro.kolu.dev/#package-layout)
+- [Profiles](https://agent-distro.kolu.dev/#profiles)
+- [Harnesses](https://agent-distro.kolu.dev/#harnesses)
+- [How it works](https://agent-distro.kolu.dev/#how-it-works)
+- [Development](https://agent-distro.kolu.dev/#development)
+- [Adding a harness](https://agent-distro.kolu.dev/#adding-a-harness)
