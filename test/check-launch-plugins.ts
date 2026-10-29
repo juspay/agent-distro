@@ -55,8 +55,8 @@ function describedPlugin(root: string) {
   return { root, description };
 }
 
-/** The cache key of the plugin at `root`, as a launch computes it. */
-const keyOf = (root: string) => launch.cacheKey(root, readPlugin(root));
+/** The key of the checkout at `root`, as a launch computes it. */
+const checkoutKey = (root: string) => launch.contentKey(root, readPlugin(root));
 
 const info = { nixpkgs: '/nix/store/x-nixpkgs', system: 'x86_64-linux' };
 const claudeArgs = () => ({ harness: 'claude', bash: '/bin/sh', env: '/usr/bin/env', ...info });
@@ -167,7 +167,7 @@ test('only what a translation reads is keyed: the rest of the tree costs nothing
   mkdirSync(join(root, '.ci'));
   writeFileSync(join(root, '.ci', 'run.log'), 'line\n');
   writeFileSync(join(root, 'README.md'), '# plugin\n');
-  assert.equal(keyOf(root), first.key);
+  assert.equal(checkoutKey(root), first.key);
   const again = resolve(root, cache).plugins[0];
   assert.equal(again.key, first.key);
   assert.equal(again.translation, first.translation, 'not translated again');
@@ -179,36 +179,36 @@ test('a skill file, the manifest and the MCP config each key a translation', () 
     $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
     mcpServers: { docs: { type: 'sse', url: 'https://example.test/sse' } },
   }));
-  const key = keyOf(root);
+  const key = checkoutKey(root);
   assert.match(key, /^sha256-[0-9a-f]{64}$/);
   // copySkills copies a skill file's mode, so the mode is read too.
   chmodSync(join(root, 'skills/hello/SKILL.md'), 0o755);
-  const afterMode = keyOf(root);
+  const afterMode = checkoutKey(root);
   assert.notEqual(afterMode, key);
   writeFileSync(join(root, 'skills/hello/SKILL.md'), '---\nname: hello\ndescription: Edited\n---\n');
-  const afterSkill = keyOf(root);
+  const afterSkill = checkoutKey(root);
   assert.notEqual(afterSkill, afterMode);
   writeFileSync(join(root, 'plugin.json'), JSON.stringify({ $schema: SCHEMA, name: 'read-set', version: '2.0.0' }));
-  const afterManifest = keyOf(root);
+  const afterManifest = checkoutKey(root);
   assert.notEqual(afterManifest, afterSkill);
   writeFileSync(join(root, 'mcp.json'), JSON.stringify({
     $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
     mcpServers: { docs: { type: 'sse', url: 'https://example.test/other' } },
   }));
-  assert.notEqual(keyOf(root), afterManifest);
+  assert.notEqual(checkoutKey(root), afterManifest);
 });
 
 test('a socket or FIFO beside the plugin is not read, and the plugin still launches', async () => {
   const root = plugin('sock');
-  const before = keyOf(root);
+  const before = checkoutKey(root);
   // A live socket, as odu keeps `.ci/odu.sock` in the checkout it runs from.
   const server = createServer();
   await new Promise<void>((done) => server.listen(join(root, 's.sock'), done));
   try {
-    assert.equal(keyOf(root), before);
+    assert.equal(checkoutKey(root), before);
     const made = spawnSync('mkfifo', [join(root, 'pipe')]);
     assert.equal(made.status, 0, String(made.stderr));
-    assert.equal(keyOf(root), before);
+    assert.equal(checkoutKey(root), before);
     assert.equal(resolve(root, temporary()).plugins[0].name, 'sock');
     const result = run(root);
     assert.equal(result.status, 0, result.stderr);
@@ -238,7 +238,7 @@ test('a checkout is keyed by content and path, and translated again after an edi
 test('relative, trailing-slash and symlinked entries resolve to their directory', () => {
   const cache = temporary();
   const root = plugin('spelled');
-  const key = keyOf(root);
+  const key = checkoutKey(root);
   const link = join(temporary(), 'link');
   symlinkSync(root, link);
   const intoStore = join(temporary(), 'store-link');
@@ -499,7 +499,7 @@ test('a write elsewhere in the tree during a translation does not retry it', () 
   };
   const [translated] = resolve(root, cache, [], [], adapter).plugins;
   assert.equal(attempts, 1, 'published on the first attempt');
-  assert.equal(translated.key, keyOf(root));
+  assert.equal(translated.key, checkoutKey(root));
   assert.equal(readdirSync(join(cacheDir(cache), 'plugins')).length, 1);
   let counter = 0;
   // Only a write within the read set can move the key.
@@ -542,7 +542,7 @@ test('concurrent first launches publish one translation, and all use it', async 
     child.on('close', (code) => (code === 0 ? done(stdout) : fail(new Error(stderr))));
   })));
   assert.equal(new Set(outputs).size, 1, outputs.join('\n'));
-  const { names, links } = published(cache, keyOf(root));
+  const { names, links } = published(cache, checkoutKey(root));
   assert.equal(links.length, 1);
   assert.equal(names.length, 2, names.join(' '));
 });

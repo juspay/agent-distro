@@ -175,15 +175,12 @@ export function storeKey(root: string): string | null {
 }
 
 /**
- * The cache key of a resolved plugin root: one file name, injectively. A
- * store path's own (`storeKey`); any other directory is keyed by its path and
- * by what a translation reads of it — `description`, and the bytes and mode of
- * every skill file it lists — so nothing else in the tree is read, and a
- * `node_modules`, a build output or a live socket beside them costs nothing.
+ * The key of a checkout: its path and what a translation reads of it —
+ * `description`, and the bytes and mode of every skill file it lists — so
+ * nothing else in the tree is read, and a `node_modules`, a build output or a
+ * live socket beside them costs nothing. (A store path's key is `storeKey`.)
  */
-export function cacheKey(root: string, description: Description): string {
-  const key = storeKey(root);
-  if (key !== null) return key;
+export function contentKey(root: string, description: Description): string {
   const hash = createHash('sha256');
   field(hash, 'agent-distro plugin');
   field(hash, root);
@@ -353,18 +350,17 @@ export function translate(
   // The key of what is on disk now, or null when a file the listing named was
   // replaced under us: an editor that writes a skill through a temporary file
   // makes it vanish between the listing and the read.
-  const keyOf = (described: Description): string | null => {
+  const keyNow = (described: Description): string | null => {
     try {
-      return cacheKey(root, described);
+      return contentKey(root, described);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (isSystemError(error) && (code === 'ENOENT' || code === 'ENOTDIR')) return null;
       throw error;
     }
   };
-  const retry = (attempt: number): void => {
-    if (attempt === 3) throw new LaunchError(`${label}: ${entry} kept changing while it was translated`);
-  };
+  /** The failure of a checkout that never held still for one translation. */
+  const restless = () => new LaunchError(`${label}: ${entry} kept changing while it was translated`);
 
   // What a translation reads of a checkout is its description and the skill
   // files that lists, so those are what it is keyed by. A checkout can still
@@ -383,18 +379,15 @@ export function translate(
         throw error;
       }
     }
-    const key = stored ?? keyOf(description);
+    const key = stored ?? keyNow(description);
     if (key === null) {
-      retry(attempt);
+      if (attempt === 3) throw restless();
       continue;
     }
     const parent = join(cache, 'plugins', key, harness);
     const link = join(parent, translator);
-    // A store path's hit was decided above; any other key is this attempt's.
-    if (stored === null) {
-      const existing = cached(link);
-      if (existing) return replay(key, link, existing);
-    }
+    const existing = cached(link);
+    if (existing) return replay(key, link, existing);
 
     mkdirSync(parent, { recursive: true });
     // A directory that never moves, since translations embed their own paths;
@@ -418,9 +411,9 @@ export function translate(
           // change, so the attempt is retried.
           if (!(error instanceof Fatal)) throw error;
         }
-        if (again === null || keyOf(again) !== key) {
+        if (again === null || keyNow(again) !== key) {
           rmSync(directory, { recursive: true, force: true });
-          retry(attempt);
+          if (attempt === 3) throw restless();
           continue;
         }
       }
