@@ -107,12 +107,13 @@
             touch "$out"
           '';
           # AGENT_DISTRO_PLUGINS alone, without a VM: cache keys (a store
-          # path as is, a checkout by content), re-translation after an edit,
-          # name-based precedence, the shell a launcher evaluates (its `env`
-          # and the prompt for a secret), and the launches that must fail.
+          # path as is, a checkout by what a translation reads), re-translation
+          # after an edit, name-based precedence, the shell a launcher
+          # evaluates (its `env` and the prompt for a secret), and the launches
+          # that must fail.
           launch-plugins = pkgs.runCommand "launch-plugins-check" { } ''
             ${runtime.node} ${./check-launch-plugins.ts} ${runtime.tree}/src \
-              ${./fixtures/my-skills} ${./fixtures}/my-skills ${pkgs.nix}/bin/nix-hash ${../lib/prompt-secrets.nix}
+              ${./fixtures/my-skills} ${./fixtures}/my-skills ${../lib/prompt-secrets.nix}
             touch "$out"
           '';
           # The OpenCode launcher's own arguments, without a VM or the harness:

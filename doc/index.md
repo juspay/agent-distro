@@ -217,7 +217,7 @@ AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-dist
 - **Entries.** Directories separated by `:`,[^colon-path] with empty components ignored.[^entry-resolve] An entry that is not a directory fails the launch, naming it.
 - **Read like a profile's plugins.** Each directory goes through the same reader: an invalid manifest fails the launch with a message naming the field. Lesser problems are reported while the launch goes on.[^launch-warnings]
 - **Matched by name, never by version.** A plugin whose `plugin.json` `name` matches one of the profile's replaces it; on the variable, the last of a name wins.[^no-version]
-- **Translated once.** Each harness's translation of a plugin is cached under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`.[^cache-dir] An edited checkout is translated again on its next launch.[^cache-key]
+- **Translated once.** Each harness's translation of a plugin is cached under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`.[^cache-dir] An edited skill, manifest or MCP config is translated again on its next launch; the rest of the tree is never read.[^cache-key]
 - **Kept while in use.** Each launch marks the translations it uses; a launch that translates something new removes what no launch has used for 14 days.[^no-pile-up] With no harness running, removing `~/.cache/agent-distro/plugins` is always safe.
 - **For that launch only.** Unset the variable and the harness is back to the profile's plugins.[^undo] Each harness's README says how.
 
@@ -226,7 +226,7 @@ AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-dist
 [^launch-warnings]: Skipped skills, a disabled `mcp.json` or an invalid server entry are reported on stderr, on every launch.
 [^no-version]: No `version` is compared.
 [^cache-dir]: The cache directory must be an absolute path. Loading these plugins never calls Nix, and a cache it cannot write fails the launch.
-[^cache-key]: A plugin under `/nix/store` is keyed by its store path, as is, without reading it. Any other directory is keyed by a hash of its contents (its NAR serialization, computed without Nix, leaving out a top-level `.git`) and of its absolute path, so a key is particular to one machine and user. That directory is hashed in full on every launch: a large tree (a `node_modules`, say) costs launch time, and a FIFO or an unreadable file in it fails the launch.
+[^cache-key]: A plugin under `/nix/store` is keyed by its store path, as is, without reading it. Any other directory is keyed by its absolute path and by what a translation reads of it: the manifest it parses from `plugin.json`, the MCP config file, and the bytes and mode of each skill file its description lists. Nothing else in the directory is read, so a `node_modules`, a build output or a live `.ci/` beside them costs nothing and cannot fail the launch. A key is particular to one machine and user.
 [^no-pile-up]: So old versions of an edited checkout and translations for an older agent-distro do not pile up.
 [^undo]: Claude Code and OMP take them as arguments, OpenCode in its session config, and Codex through `-c` overrides; Codex keeps an inert copy in its plugin cache, removed once unused for 14 days. Pi only reads its own files, so it records what a launch added and its next launch, whenever that is, takes it back.
 
