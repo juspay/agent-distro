@@ -145,16 +145,6 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Read the nixpkgs the action installs attic from
-        id: attic
-        # attic-client comes from the nixpkgs this repository pins, never an
-        # unpinned ref resolved at run time. Read without Nix, which this job
-        # has none of until the action below installs the only one it uses.
-        run: |
-          set -eu
-          locked=$(python3 -c 'import json; print(json.load(open("flake.lock"))["nodes"]["nixpkgs"]["locked"]["rev"])')
-          echo "nixpkgs=github:NixOS/nixpkgs/$locked" >> "$GITHUB_OUTPUT"
-
       - name: Read the package this publishes
         id: package
         # The one package per system, and — until 2026-11-14, thirty days after
@@ -170,7 +160,13 @@ jobs:
             printf 'default=bin/claude --version\nvanilla=bin/claude --version\n'
             echo "PACKAGES"; } >> "$GITHUB_OUTPUT"
 
-      - uses: juspay/kolu/.github/actions/publish-closure@5b14790a4eb9c383dfd7fa247bbff1af60f9eb92 # juspay/kolu#2294, on master
+      # Its client is the declaration's `pusher` — `{"kind": "odu", "bucket":
+      # "kolu"}` — not an input here: the action pushes with `odu cache push`,
+      # run from its own pinned odu, and takes `odu-cache-token` as the
+      # credential that push needs.
+      # juspay/kolu#2335's head, whose npins odu is 996f888 — the chunked push
+      # through the bucket's own domain; moves to kolu's merge sha once it lands.
+      - uses: juspay/kolu/.github/actions/publish-closure@37b45f616ae4d7ef0cf3e160efefb7cb67b2bc85
         with:
           installables: ${{ steps.package.outputs.installables }}
           # Where the package goes and where its index is written: the
@@ -184,5 +180,7 @@ jobs:
           # the run — which its own action.yml states once.
           latest: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           smoke: ${{ steps.package.outputs.smoke }}
-          attic-nixpkgs: ${{ steps.attic.outputs.nixpkgs }}
-          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          # The write token for the `kolu` bucket, exported by the action as
+          # `ODU_CACHE_TOKEN`. A fork pull request has no secret: the action
+          # rewrites, smokes and import-verifies, and pushes nothing.
+          odu-cache-token: ${{ secrets.ODU_CACHE_TOKEN }}
