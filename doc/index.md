@@ -293,8 +293,8 @@ The updater never compiles harnesses from source; it passes the project cache to
 **Signed paths, if you list the cache.** Add the cache to your NixOS or nix-darwin configuration:[^untrusted]
 
 ```nix
-nix.settings.extra-substituters = [ "https://cache.nixos.asia/oss" ];
-nix.settings.extra-trusted-public-keys = [ "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=" ];
+nix.settings.extra-substituters = [ "https://cache.kolu.dev" ];
+nix.settings.extra-trusted-public-keys = [ "kolu-1:eAXwD1RPt1BpFjrHfVUO8Ia0bK32WcuIeJcwFWmgj9Y=" ];
 ```
 
 **Content-addressed paths, without touching `nix.conf`.** A *content-addressed* store path is trusted by itself: nix copies one from any cache, for any user, without a signature (`require-sigs`, `nix store make-content-addressed`). CI therefore rewrites the package it built that way for each revision, through the publisher this distribution shares with kolu ([`.github/actions/publish-closure`](https://github.com/juspay/kolu/tree/main/.github/actions/publish-closure), [juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)), and publishes an index of what it wrote:
@@ -316,7 +316,7 @@ This index is agent-distro's. A consumer that publishes its own builds names its
 `ia` is the package as built — what the cache holds signed, for users that can use it — and `ca` its content-addressed rewrite, which needs no signature. The updater reads the pair for the revision it is on and the system it runs, copies `ca` from the configured cache, and points `current` at it: no build, no `--option`, no configuration on your side. Before the index names a path, CI pushes the rewritten closure and reads one back from the cache into a throwaway store, verifying its contents — a rewrite that a consumer's nix cannot verify never reaches the index. Which nix does the rewriting matters for that: 2.35 hashes a self-referential NAR differently than 2.17–2.34 do, so CI rewrites with the release the fleet runs (kolu's `publish-closure` action installs 2.34.8 itself, so it is the job's only Nix), not the newest. **These paths target Nix 2.34.x, and nothing else.** Measured both ways on a closure that has such a path (libunistring's `.la` files): a 2.34 rewrite fails to import on 2.35 and a 2.35 rewrite fails on 2.34, each with `ca hash mismatch` naming the same two digests — the lines do not accept each other's form. A host on 2.35 or later therefore cannot take these paths and takes the ordinary skip; the signed path and the cache key above are its route, and so is a single-user install of either line. Anyone can do the same by hand, with the `ca` path the index names:
 
 ```sh
-nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro
+nix copy --from https://cache.kolu.dev /nix/store/…-agent-distro
 ```
 
 > A revision CI has not built yet, a `path:` flake (which names no revision to key an entry by), and a cache that does not hold the path all end the same way: the update is skipped and your current version keeps working.
@@ -325,10 +325,10 @@ nix copy --from https://cache.nixos.asia/oss /nix/store/…-agent-distro
 
 `history.log` records the skip,[^skip-line] and activation warns while the cache is unusable.
 
-[^cache-setting]: `cache.nixos.asia/oss`, configurable with `services.agent-distro.substituters`.
+[^cache-setting]: `cache.kolu.dev`, odu's `kolu` bucket, configurable with `services.agent-distro.substituters`.
 [^ca-index]: Where the index lives is stated once, in [lib/ca-index.nix](https://github.com/juspay/agent-distro/blob/main/lib/ca-index.nix): `mkUpdater` reads it, [`binary-cache.json`](https://github.com/juspay/agent-distro/blob/main/binary-cache.json) — the declaration `cache.yml` hands the publisher — carries it and the cache, and `.github/scripts/check-cache-config.py` keeps that file and this page equal to both.
 [^untrusted]: Nothing more is needed when you are a trusted Nix user or run a single-user install. Otherwise the daemon ignores the updater's request unless your system config already lists the cache.
-[^skip-line]: A line such as `skipped: cache https://cache.nixos.asia/oss not usable and no content-addressed path is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
+[^skip-line]: A line such as `skipped: cache https://cache.kolu.dev not usable and no content-addressed path is published for revision 0f3c…; add it to nix.settings substituters/trusted-public-keys`. The same line is not repeated, and a skip is not retried until the next scheduled run.
 [^old-key]: Transition only: CI also writes `<rev>/<system>/vanilla.json` and `latest/<system>/vanilla.json`, the same content under a `vanilla` attribute that aliases the one package, so updaters still reading the old profile-keyed name keep working. Both, and `packages.<system>.vanilla`, go away on **2026-11-14**, thirty days after the one-package release: the PR that removes them also drops the alias from `cache.yml` and from `flake.nix`.
 
 ### Troubleshooting
@@ -795,7 +795,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 - **Required checks.** `just protect --dry-run` prints the contexts main's ruleset requires; `just protect` sets them, from what the pipeline and `cache.yml` say they are.[^protect]
 - **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
 - **Report.** The update report reads resolved versions and each harness's release-note metadata.
-- **Cache.** `cache.yml` pushes realised paths to the OSS cache,[^attic-token] and publishes the package's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository, through the `publish-closure` action it shares with kolu ([juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)) ([The binary cache](#binary-cache)).
+- **Cache.** `cache.yml` pushes realised paths to [the kolu cache](#binary-cache),[^odu-cache-token] and publishes the package's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository, through the `publish-closure` action it shares with kolu ([juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)) ([The binary cache](#binary-cache)).
 - **Merge gate.** The daily update PR enables auto-merge, so it lands once every context the ruleset requires is green.[^auto-merge]
 - **Consumers.** They run `nix flake update agent-distro`.
 
@@ -804,7 +804,7 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 [^update-sources]: It discovers npins directories under `harnesses/` and `lib/`, re-pins each npm tarball pinned there (`yaml`, `opencode-plugin-litellm`) to the newest release of its major version, and runs each harness's `update.py`.
 [^shards]: `test` carries `[metadata("odu:shard=8")]`: odu gives each shard `ODU_SHARD_INDEX` and `ODU_SHARD_TOTAL`, and the recipe builds its own slice of `./test`'s checks. With neither variable set it runs them all in one `nix flake check`.
 [^protect]: `odu protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
-[^attic-token]: `ATTIC_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret.
+[^odu-cache-token]: `ODU_CACHE_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret. It is a write token for the cache's `kolu` bucket, minted by `odu cache token mint kolu --write`.
 [^auto-merge]: The update workflow approves the runs GitHub holds back for automation-created pull requests and enables auto-merge, so the PR lands as soon as every context `Require CI on main` requires is green — `cache.yml`'s `build (…)` and `publish (…)`, which that approval starts, and odu's `<recipe>@<platform>`, which someone has to run on the branch.
 
 ### Test library

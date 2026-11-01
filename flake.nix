@@ -2,8 +2,8 @@
   description = "The coding-agent distribution: every discovered harness preloaded with Agent Plugins";
 
   nixConfig = {
-    extra-substituters = "https://cache.nixos.asia/oss";
-    extra-trusted-public-keys = "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=";
+    extra-substituters = "https://cache.kolu.dev";
+    extra-trusted-public-keys = "kolu-1:eAXwD1RPt1BpFjrHfVUO8Ia0bK32WcuIeJcwFWmgj9Y=";
   };
 
   # Start at OMP's nixpkgs revision. Daily nix flake update advances this

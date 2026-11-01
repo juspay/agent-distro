@@ -13,6 +13,10 @@ import sys
 
 root = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ".github/workflows/cache.yml"
+# Every other place that installs Nix with the cache. The site's workflow builds
+# `./doc` with it too, so a rename of the cache that missed this file would go
+# unnoticed until that job rebuilt a world instead of substituting one.
+PAGES = ".github/workflows/pages.yaml"
 
 
 def contexts():
@@ -69,7 +73,7 @@ expected = {
     "extra-trusted-public-keys": cache["publicKey"],
 }
 failed = False
-for path in ["flake.nix", WORKFLOW]:
+for path in ["flake.nix", WORKFLOW, PAGES]:
     text = (root / path).read_text()
     for key, value in expected.items():
         found = re.findall(r"^\s*" + re.escape(key) + r"\s*=\s*\"?([^\"\n]+?)\"?;?\s*$", text, re.M)
@@ -87,6 +91,10 @@ index = indexed("ca-index")
 declaration = {
     "substituters": [cache["url"]],
     "trustedPublicKeys": [cache["publicKey"]],
+    # HOW the publish job pushes — kolu's action reads this field rather than
+    # taking a client as an input (juspay/kolu#2334), so a cache whose pushes
+    # go somewhere else is stated here, once, beside its URL and key.
+    "pusher": cache["pusher"],
     "index": {"repo": index["repo"], "branch": index["branch"]},
 }
 try:
