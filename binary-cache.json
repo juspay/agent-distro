@@ -1,6 +1,7 @@
 {
-  "substituters": ["https://cache.nixos.asia/oss"],
-  "trustedPublicKeys": ["oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU="],
+  "substituters": ["https://cache.kolu.dev"],
+  "trustedPublicKeys": ["kolu-1:eAXwD1RPt1BpFjrHfVUO8Ia0bK32WcuIeJcwFWmgj9Y="],
+  "pusher": { "kind": "odu", "bucket": "kolu" },
   "index": {
     "repo": "juspay/agent-distro",
     "branch": "ca-index"

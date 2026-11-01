@@ -2,8 +2,8 @@
 # repository writes. odu (github.com/juspay/odu) runs the checks themselves —
 # the justfile recipe tagged [metadata("ci")] and its dependency graph — and
 # posts one commit status per (recipe × platform). This workflow is what pushes
-# the OSS cache and the `ca-index` branch, because ATTIC_TOKEN lives here, so
-# `just protect` keeps its contexts required on main beside odu's.
+# to the cache and the `ca-index` branch, because ODU_CACHE_TOKEN lives here,
+# so `just protect` keeps its contexts required on main beside odu's.
 name: Cache
 
 on:
@@ -33,7 +33,16 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
-      ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+      # The write token for the cache's `kolu` bucket, and the odu rev that
+      # pushes with it: a CI push runs this client from a PINNED rev, never an
+      # unpinned ref resolved at run time. This is odu#139's `push-origin` head
+      # — the client sends a NAR in parts so a body over Cloudflare's proxied
+      # cap still lands, and reports a path the bucket holds for its references
+      # instead of counting it a failure; the server side of the same branch
+      # serves an object from its file. It moves to the merge sha once that PR
+      # lands; the pod runs this same rev.
+      ODU_CACHE_TOKEN: ${{ secrets.ODU_CACHE_TOKEN }}
+      ODU_REV: 10f28d029852d96c6fe352c3f0d50a31ce2a79ae
       # This job pushes what it builds when the run may write the cache: a main
       # push, a dispatch, or a same-repository pull request.
       PUSH_CACHE: >-
@@ -58,40 +67,55 @@ jobs:
           # Trust the project cache so builds pull from it (warms nix run /
           # nix develop on both platforms) instead of rebuilding.
           extra_nix_config: |
-            extra-substituters = https://cache.nixos.asia/oss
-            extra-trusted-public-keys = oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=
+            extra-substituters = https://cache.kolu.dev
+            extra-trusted-public-keys = kolu-1:eAXwD1RPt1BpFjrHfVUO8Ia0bK32WcuIeJcwFWmgj9Y=
 
       - name: Check the cache config matches lib/cache.nix
         run: python3 .github/scripts/check-cache-config.py
 
+      # A missing token is an error, not a skip: the cache is what lets users
+      # and CI fetch source-built harnesses.
       - name: Require cache token
         if: env.PUSH_CACHE == 'true'
         run: |
-          if [ -z "$ATTIC_TOKEN" ]; then
-            echo "::error::ATTIC_TOKEN must be set to push builds to the OSS cache."
+          if [ -z "$ODU_CACHE_TOKEN" ]; then
+            echo "::error::ODU_CACHE_TOKEN must be set to push builds to the kolu cache."
             exit 1
           fi
 
-      # The cache lets users and CI fetch source-built harnesses,
-      # so a missing token is an error, not a skip.
-      - uses: ryanccn/attic-action@5635a15ef0c5462194ffbd05d1daeddc74625c3a # v0.5.0
-        if: env.PUSH_CACHE == 'true'
-        with:
-          endpoint: https://cache.nixos.asia
-          cache: oss
-          token: ${{ secrets.ATTIC_TOKEN }}
-
       # odu runs the same two recipes (`flake`, `picker`) as its own nodes; they
-      # are here because a push is what warms the cache for everybody else.
+      # are here because a push is what warms the cache for everybody else. The
+      # out-links are how the push below knows WHICH paths to send.
       - name: Build all flake outputs
         run: |
-          nix build github:srid/devour-flake -L --no-link \
+          nix build github:srid/devour-flake -L --out-link "$RUNNER_TEMP/built/flake" \
             --override-input flake .
 
       - name: Build the picker
         # The picker depends on every launcher, so this builds them all.
         run: |
-          nix build --print-build-logs .#default
+          nix build --print-build-logs --out-link "$RUNNER_TEMP/built/default" .#default
+
+      # odu's own client pushes: it walks each path's closure, uploads only what
+      # the bucket lacks, and the server signs every path on ingest — so this
+      # job's builds are what make the signed paths exist at all.
+      - name: Push built paths to the kolu cache
+        if: env.PUSH_CACHE == 'true'
+        env:
+          # The advertised substituter itself: the client parts a large NAR
+          # under Cloudflare's proxied-body cap, so what a reader dials and
+          # what a pusher dials are the same name.
+          ORIGIN: https://cache.kolu.dev
+        run: |
+          set -eu
+          # One store path per out-link, and its closure is what gets pushed:
+          # devour-flake's output is a JSON file that references every flake
+          # output (building it builds them), and the picker depends on every
+          # launcher. `odu cache push` walks those closures itself.
+          # shellcheck disable=SC2046 # word-split on purpose
+          nix run --accept-flake-config "github:juspay/odu/$ODU_REV" -- \
+            cache push kolu $(nix path-info "$RUNNER_TEMP"/built/flake "$RUNNER_TEMP"/built/default) \
+            --origin "$ORIGIN"
 
   # The content-addressed package and the index that names it, through the
   # publisher `@kolu/surface` and this distribution now share
@@ -121,16 +145,6 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Read the nixpkgs the action installs attic from
-        id: attic
-        # attic-client comes from the nixpkgs this repository pins, never an
-        # unpinned ref resolved at run time. Read without Nix, which this job
-        # has none of until the action below installs the only one it uses.
-        run: |
-          set -eu
-          locked=$(python3 -c 'import json; print(json.load(open("flake.lock"))["nodes"]["nixpkgs"]["locked"]["rev"])')
-          echo "nixpkgs=github:NixOS/nixpkgs/$locked" >> "$GITHUB_OUTPUT"
-
       - name: Read the package this publishes
         id: package
         # The one package per system, and — until 2026-11-14, thirty days after
@@ -146,7 +160,13 @@ jobs:
             printf 'default=bin/claude --version\nvanilla=bin/claude --version\n'
             echo "PACKAGES"; } >> "$GITHUB_OUTPUT"
 
-      - uses: juspay/kolu/.github/actions/publish-closure@5b14790a4eb9c383dfd7fa247bbff1af60f9eb92 # juspay/kolu#2294, on master
+      # Its client is the declaration's `pusher` — `{"kind": "odu", "bucket":
+      # "kolu"}` — not an input here: the action pushes with `odu cache push`,
+      # run from its own pinned odu, and takes `odu-cache-token` as the
+      # credential that push needs.
+      # juspay/kolu#2335's head, whose npins odu is 996f888 — the chunked push
+      # through the bucket's own domain; moves to kolu's merge sha once it lands.
+      - uses: juspay/kolu/.github/actions/publish-closure@37b45f616ae4d7ef0cf3e160efefb7cb67b2bc85
         with:
           installables: ${{ steps.package.outputs.installables }}
           # Where the package goes and where its index is written: the
@@ -160,5 +180,7 @@ jobs:
           # the run — which its own action.yml states once.
           latest: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           smoke: ${{ steps.package.outputs.smoke }}
-          attic-nixpkgs: ${{ steps.attic.outputs.nixpkgs }}
-          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          # The write token for the `kolu` bucket, exported by the action as
+          # `ODU_CACHE_TOKEN`. A fork pull request has no secret: the action
+          # rewrites, smokes and import-verifies, and pushes nothing.
+          odu-cache-token: ${{ secrets.ODU_CACHE_TOKEN }}
