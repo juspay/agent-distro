@@ -94,10 +94,11 @@ jobs:
       # event with no token fails. That is what this job's `PUSH_CACHE`
       # condition and its token shell used to decide, one step earlier.
       #
-      # juspay/odu#142's head; the pin moves to that PR's merge commit once it
-      # lands.
+      # odu master `b805557`: #142 merged, so this is the action as odu ships
+      # it rather than a branch head. Its files are byte-identical to the
+      # branch commit this PR first pinned, so the move changes no behaviour.
       - name: Push the built paths to the kolu cache, and prove they answer
-        uses: juspay/odu/.github/actions/push@ab0ec9f3196f5e195b0a4765d44bab6149a83fae
+        uses: juspay/odu/.github/actions/push@b80555719e70c2574355bb00d54b771f70a6b4e7
         with:
           # The advertised substituter itself: what a reader dials and what a
           # pusher dials are the same name.
