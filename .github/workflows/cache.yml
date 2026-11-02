@@ -32,26 +32,6 @@ jobs:
         # macos-latest is arm64 (aarch64-darwin). aarch64-linux is not warmed.
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      # The write token for the cache's `kolu` bucket, and the odu rev that
-      # pushes with it: a CI push runs this client from a PINNED rev, never an
-      # unpinned ref resolved at run time. This is odu#139's `push-origin` head
-      # — the client sends a NAR in parts so a body over Cloudflare's proxied
-      # cap still lands, and reports a path the bucket holds for its references
-      # instead of counting it a failure; the server side of the same branch
-      # serves an object from its file. It moves to the merge sha once that PR
-      # lands; the pod runs this same rev.
-      ODU_CACHE_TOKEN: ${{ secrets.ODU_CACHE_TOKEN }}
-      ODU_REV: 10f28d029852d96c6fe352c3f0d50a31ce2a79ae
-      # This job pushes what it builds when the run may write the cache: a main
-      # push, a dispatch, or a same-repository pull request.
-      PUSH_CACHE: >-
-        ${{
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'pull_request' &&
-           github.event.pull_request.head.repo.full_name == github.repository)
-        }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -73,16 +53,6 @@ jobs:
       - name: Check the cache config matches lib/cache.nix
         run: python3 .github/scripts/check-cache-config.py
 
-      # A missing token is an error, not a skip: the cache is what lets users
-      # and CI fetch source-built harnesses.
-      - name: Require cache token
-        if: env.PUSH_CACHE == 'true'
-        run: |
-          if [ -z "$ODU_CACHE_TOKEN" ]; then
-            echo "::error::ODU_CACHE_TOKEN must be set to push builds to the kolu cache."
-            exit 1
-          fi
-
       # odu runs the same two recipes (`flake`, `picker`) as its own nodes; they
       # are here because a push is what warms the cache for everybody else. The
       # out-links are how the push below knows WHICH paths to send.
@@ -96,26 +66,48 @@ jobs:
         run: |
           nix build --print-build-logs --out-link "$RUNNER_TEMP/built/default" .#default
 
-      # odu's own client pushes: it walks each path's closure, uploads only what
-      # the bucket lacks, and the server signs every path on ingest — so this
-      # job's builds are what make the signed paths exist at all.
-      - name: Push built paths to the kolu cache
-        if: env.PUSH_CACHE == 'true'
-        env:
-          # The advertised substituter itself: the client parts a large NAR
-          # under Cloudflare's proxied-body cap, so what a reader dials and
-          # what a pusher dials are the same name.
-          ORIGIN: https://cache.kolu.dev
+      - name: Read the store paths those out-links name
+        id: built
+        # `nix path-info` does not build — both out-links are the steps above'
+        # builds — so this is a read of what exists, one store path per line,
+        # which is the push's `paths:` shape. What gets pushed is unchanged.
         run: |
           set -eu
-          # One store path per out-link, and its closure is what gets pushed:
-          # devour-flake's output is a JSON file that references every flake
-          # output (building it builds them), and the picker depends on every
-          # launcher. `odu cache push` walks those closures itself.
-          # shellcheck disable=SC2046 # word-split on purpose
-          nix run --accept-flake-config "github:juspay/odu/$ODU_REV" -- \
-            cache push kolu $(nix path-info "$RUNNER_TEMP"/built/flake "$RUNNER_TEMP"/built/default) \
-            --origin "$ORIGIN"
+          { echo "paths<<PATHS"
+            nix path-info "$RUNNER_TEMP"/built/flake "$RUNNER_TEMP"/built/default
+            echo "PATHS"; } >> "$GITHUB_OUTPUT"
+
+      # odu's push action (juspay/odu#142), in one step, for one bucket: it
+      # builds its own pusher from the commit pinned here — never a release,
+      # never a ref resolved at run time — pushes only what the bucket lacks,
+      # and then PROVES the result. Every path the bucket serves must answer
+      # its narinfo at the substituter URL the bucket publishes, and its NAR at
+      # the size that narinfo claims, over plain HTTP so no local narinfo cache
+      # can answer for the bucket: a NAR a proxy truncated is caught, not
+      # counted as landed. A step summary reports the counts.
+      #
+      # Nix is already on PATH above; the action never installs one.
+      #
+      # The token rule is the action's own, never an `if:` here, where a
+      # condition cannot read a secret: a pull request with no token — a fork,
+      # which has no secrets — builds, pushes nothing and says so; a `push`
+      # event with no token fails. That is what this job's `PUSH_CACHE`
+      # condition and its token shell used to decide, one step earlier.
+      #
+      # odu master `b805557`: #142 merged, so this is the action as odu ships
+      # it rather than a branch head. Its files are byte-identical to the
+      # branch commit this PR first pinned, so the move changes no behaviour.
+      - name: Push the built paths to the kolu cache, and prove they answer
+        uses: juspay/odu/.github/actions/push@b80555719e70c2574355bb00d54b771f70a6b4e7
+        with:
+          # The advertised substituter itself: what a reader dials and what a
+          # pusher dials are the same name.
+          origin: https://cache.kolu.dev
+          bucket: kolu
+          # The write token for that bucket: both the credential the push
+          # needs and the whole of what decides whether this run publishes.
+          token: ${{ secrets.ODU_CACHE_TOKEN }}
+          paths: ${{ steps.built.outputs.paths }}
 
   # The content-addressed package and the index that names it, through the
   # publisher `@kolu/surface` and this distribution now share
@@ -164,9 +156,11 @@ jobs:
       # "kolu"}` — not an input here: the action pushes with `odu cache push`,
       # run from its own pinned odu, and takes `odu-cache-token` as the
       # credential that push needs.
-      # juspay/kolu#2335's head, whose npins odu is 996f888 — the chunked push
-      # through the bucket's own domain; moves to kolu's merge sha once it lands.
-      - uses: juspay/kolu/.github/actions/publish-closure@37b45f616ae4d7ef0cf3e160efefb7cb67b2bc85
+      # juspay/kolu master: #2335 — the chunked push through the bucket's own
+      # domain — and #2337, whose npins odu is 08f0b2a, the client that push
+      # then runs. The action itself is byte-identical to #2335's head; what
+      # moves is the odu it pins and one docstring on `held`.
+      - uses: juspay/kolu/.github/actions/publish-closure@113ab7f7e84194e50039e6c2cc848cc4046c14e5
         with:
           installables: ${{ steps.package.outputs.installables }}
           # Where the package goes and where its index is written: the
