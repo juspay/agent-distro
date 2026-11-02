@@ -98,7 +98,7 @@ jobs:
       # it rather than a branch head. Its files are byte-identical to the
       # branch commit this PR first pinned, so the move changes no behaviour.
       - name: Push the built paths to the kolu cache, and prove they answer
-        uses: juspay/odu/.github/actions/push@8ee6c59bf3e2a2c94f1405e003c203c7d972091f # odu #145 (pin input)
+        uses: juspay/odu/.github/actions/push@3b3f761722afcd01c6f3f4299e356f1a82efef7b # odu #145: pin
         with:
           # The advertised substituter itself: what a reader dials and what a
           # pusher dials are the same name.
@@ -108,8 +108,8 @@ jobs:
           # needs and the whole of what decides whether this run publishes.
           token: ${{ secrets.ODU_CACHE_TOKEN }}
           paths: ${{ steps.built.outputs.paths }}
-          # Re-point the agent-distro-master pin at this closure on a default-branch push.
-          pin: agent-distro-master
+          # Hold this push's closure while it is the default branch's.
+          pin: ${{ github.ref_name == github.event.repository.default_branch }}
 
   # The content-addressed package and the index that names it, through the
   # publisher `@kolu/surface` and this distribution now share
