@@ -155,9 +155,11 @@ jobs:
       # "kolu"}` — not an input here: the action pushes with `odu cache push`,
       # run from its own pinned odu, and takes `odu-cache-token` as the
       # credential that push needs.
-      # juspay/kolu#2335's head, whose npins odu is 996f888 — the chunked push
-      # through the bucket's own domain; moves to kolu's merge sha once it lands.
-      - uses: juspay/kolu/.github/actions/publish-closure@37b45f616ae4d7ef0cf3e160efefb7cb67b2bc85
+      # juspay/kolu master: #2335 — the chunked push through the bucket's own
+      # domain — and #2337, whose npins odu is 08f0b2a, the client that push
+      # then runs. The action itself is byte-identical to #2335's head; what
+      # moves is the odu it pins and one docstring on `held`.
+      - uses: juspay/kolu/.github/actions/publish-closure@113ab7f7e84194e50039e6c2cc848cc4046c14e5
         with:
           installables: ${{ steps.package.outputs.installables }}
           # Where the package goes and where its index is written: the
