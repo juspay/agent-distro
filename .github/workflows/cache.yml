@@ -94,16 +94,16 @@ jobs:
       # event with no token fails. That is what this job's `PUSH_CACHE`
       # condition and its token shell used to decide, one step earlier.
       #
-      # odu master `b805557`: #142 merged, so this is the action as odu ships
-      # it rather than a branch head. Its files are byte-identical to the
-      # branch commit this PR first pinned, so the move changes no behaviour.
+      # odu master `d82ae66`: #150 merged, which made every odu cache
+      # self-describing — the substituter's own `nix-cache-info` carries the
+      # origin to push to and the bucket to push into, so this step names the
+      # one URL a reader already uses.
       - name: Push the built paths to the kolu cache, and prove they answer
-        uses: juspay/odu/.github/actions/push@9607dfe3fd7ab3d1e5d699d2b090182189b876b5 # odu master: #145 merged
+        uses: juspay/odu/.github/actions/push@d82ae6652d1645f124ac3f3a7c110cfdfdc97871 # odu master: #150 merged
         with:
-          # NOT the substituter: that is the bucket's store, static files a
-          # push cannot go to. This is odu's own origin, which takes it.
-          origin: https://odu-k3s.rooster-blues.ts.net
-          bucket: kolu-r2
+          # The substituter, read for its `Odu-Origin` and `Odu-Bucket`: the
+          # push goes to the origin that cache names, not to these files.
+          cache: https://cache.kolu.dev/kolu-r2
           # The write token for that bucket: both the credential the push
           # needs and the whole of what decides whether this run publishes.
           token: ${{ secrets.ODU_CACHE_TOKEN }}
