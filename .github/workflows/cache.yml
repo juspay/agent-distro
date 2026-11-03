@@ -154,16 +154,15 @@ jobs:
             printf 'default=bin/claude --version\nvanilla=bin/claude --version\n'
             echo "PACKAGES"; } >> "$GITHUB_OUTPUT"
 
-      # Its client is the declaration's `pusher` — `{"kind": "odu", "bucket":
-      # "kolu-r2", "origin": "https://odu-k3s.rooster-blues.ts.net"}` — not an
-      # input here: the action pushes with `odu cache push`,
-      # run from its own pinned odu, and takes `odu-cache-token` as the
-      # credential that push needs.
-      # juspay/kolu master: #2335 — the chunked push through the bucket's own
-      # domain — and #2337, whose npins odu is 08f0b2a, the client that push
-      # then runs. The action itself is byte-identical to #2335's head; what
-      # moves is the odu it pins and one docstring on `held`.
-      - uses: juspay/kolu/.github/actions/publish-closure@1516ad211dbeac1c400f9fe45b8de620caa32b8a
+      # Its client is the declaration's `pusher` — `{"kind": "odu"}` — not an
+      # input here: the action pushes with `odu cache push --cache
+      # https://cache.kolu.dev/kolu-r2`, run from its own pinned odu, and takes
+      # `odu-cache-token` as the credential that push needs. The declaration
+      # names the client and the cache names the address: the substituter's own
+      # `nix-cache-info` carries the origin to push to and the bucket to push
+      # into, so `pusher` is a kind and nothing else (juspay/kolu#2344,
+      # juspay/odu#150 — `bucket` and `origin` are refused).
+      - uses: juspay/kolu/.github/actions/publish-closure@38ee53364cfcb5fe3a7dfe5e8ef7707bca039c74
         with:
           installables: ${{ steps.package.outputs.installables }}
           # Where the package goes and where its index is written: the
