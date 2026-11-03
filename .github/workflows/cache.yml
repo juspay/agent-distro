@@ -163,7 +163,7 @@ jobs:
       # domain — and #2337, whose npins odu is 08f0b2a, the client that push
       # then runs. The action itself is byte-identical to #2335's head; what
       # moves is the odu it pins and one docstring on `held`.
-      - uses: juspay/kolu/.github/actions/publish-closure@113ab7f7e84194e50039e6c2cc848cc4046c14e5
+      - uses: juspay/kolu/.github/actions/publish-closure@6db5b0c3c379e60a6565659a95887a5c85ecbe2f
         with:
           installables: ${{ steps.package.outputs.installables }}
           # Where the package goes and where its index is written: the
