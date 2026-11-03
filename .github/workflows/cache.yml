@@ -47,8 +47,8 @@ jobs:
           # Trust the project cache so builds pull from it (warms nix run /
           # nix develop on both platforms) instead of rebuilding.
           extra_nix_config: |
-            extra-substituters = https://cache.kolu.dev
-            extra-trusted-public-keys = kolu-1:eAXwD1RPt1BpFjrHfVUO8Ia0bK32WcuIeJcwFWmgj9Y=
+            extra-substituters = https://cache.kolu.dev/kolu-r2
+            extra-trusted-public-keys = kolu-r2-1:7KmFrK05rVrnxkyZi9hJGnJJmRCpg87u6MUQIk7nokQ=
 
       - name: Check the cache config matches lib/cache.nix
         run: python3 .github/scripts/check-cache-config.py
@@ -100,10 +100,10 @@ jobs:
       - name: Push the built paths to the kolu cache, and prove they answer
         uses: juspay/odu/.github/actions/push@a6d7a0e2e8c095ae0f8b56663e315926b6ce8548 # odu master: #145 merged
         with:
-          # The advertised substituter itself: what a reader dials and what a
-          # pusher dials are the same name.
-          origin: https://cache.kolu.dev
-          bucket: kolu
+          # NOT the substituter: that is the bucket's store, static files a
+          # push cannot go to. This is odu's own origin, which takes it.
+          origin: https://odu-k3s.rooster-blues.ts.net
+          bucket: kolu-r2
           # The write token for that bucket: both the credential the push
           # needs and the whole of what decides whether this run publishes.
           token: ${{ secrets.ODU_CACHE_TOKEN }}
@@ -155,7 +155,8 @@ jobs:
             echo "PACKAGES"; } >> "$GITHUB_OUTPUT"
 
       # Its client is the declaration's `pusher` — `{"kind": "odu", "bucket":
-      # "kolu"}` — not an input here: the action pushes with `odu cache push`,
+      # "kolu-r2", "origin": "https://odu-k3s.rooster-blues.ts.net"}` — not an
+      # input here: the action pushes with `odu cache push`,
       # run from its own pinned odu, and takes `odu-cache-token` as the
       # credential that push needs.
       # juspay/kolu master: #2335 — the chunked push through the bucket's own
@@ -176,7 +177,7 @@ jobs:
           # the run — which its own action.yml states once.
           latest: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           smoke: ${{ steps.package.outputs.smoke }}
-          # The write token for the `kolu` bucket, exported by the action as
+          # The write token for the `kolu-r2` bucket, exported by the action as
           # `ODU_CACHE_TOKEN`. A fork pull request has no secret: the action
           # rewrites, smokes and import-verifies, and pushes nothing.
           odu-cache-token: ${{ secrets.ODU_CACHE_TOKEN }}

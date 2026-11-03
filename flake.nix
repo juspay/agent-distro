@@ -2,8 +2,8 @@
   description = "The coding-agent distribution: every discovered harness preloaded with Agent Plugins";
 
   nixConfig = {
-    extra-substituters = "https://cache.kolu.dev";
-    extra-trusted-public-keys = "kolu-1:eAXwD1RPt1BpFjrHfVUO8Ia0bK32WcuIeJcwFWmgj9Y=";
+    extra-substituters = "https://cache.kolu.dev/kolu-r2";
+    extra-trusted-public-keys = "kolu-r2-1:7KmFrK05rVrnxkyZi9hJGnJJmRCpg87u6MUQIk7nokQ=";
   };
 
   # Start at OMP's nixpkgs revision. Daily nix flake update advances this
