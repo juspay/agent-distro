@@ -98,7 +98,7 @@ jobs:
       # it rather than a branch head. Its files are byte-identical to the
       # branch commit this PR first pinned, so the move changes no behaviour.
       - name: Push the built paths to the kolu cache, and prove they answer
-        uses: juspay/odu/.github/actions/push@a6d7a0e2e8c095ae0f8b56663e315926b6ce8548 # odu master: #145 merged
+        uses: juspay/odu/.github/actions/push@9607dfe3fd7ab3d1e5d699d2b090182189b876b5 # odu master: #145 merged
         with:
           # NOT the substituter: that is the bucket's store, static files a
           # push cannot go to. This is odu's own origin, which takes it.
