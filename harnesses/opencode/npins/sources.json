@@ -2,9 +2,9 @@
   "pins": {
     "opencode-plugin-litellm": {
       "type": "Url",
-      "url": "https://registry.npmjs.org/opencode-plugin-litellm/-/opencode-plugin-litellm-1.8.1.tgz",
+      "url": "https://registry.npmjs.org/opencode-plugin-litellm/-/opencode-plugin-litellm-1.10.0.tgz",
       "unpack": true,
-      "hash": "sha256-qFMSxBg+HJFgYSNCJInEap19n27/xKYHpwqKPy6WvBY="
+      "hash": "sha256-/yVoGxs8C+8OhqN23dnOLBpCMDAKrNMpQbETUVSuOyM="
     }
   },
   "version": 8
