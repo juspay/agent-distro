@@ -790,7 +790,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 
 ### CI
 
-- **Runner.** CI is [odu](https://github.com/juspay/odu): `nix run --accept-flake-config github:juspay/odu -- ci run` runs the `ci` recipe and everything it depends on — one `<recipe>@<platform>` commit status per node, on the Linux and macOS lane hosts of `~/.config/odu/hosts.json`.
+- **Runner.** CI is [odu](https://github.com/juspay/odu): `nix run --accept-flake-config github:juspay/odu/b7733a490484cd96c554e5cf5a48d7b4af80cc47 -- ci run` runs the `ci` recipe and everything it depends on — one `<recipe>@<platform>` commit status per node, on the Linux and macOS lane hosts of `~/.config/odu/hosts.json`.[^odu-pin]
 - **Sharding.** The VM tests spread over up to 8 Linux hosts,[^shards] since each wrapper check boots a machine of its own.
 - **Required checks.** `just protect --dry-run` prints the contexts main's ruleset requires; `just protect` sets them, from what the pipeline and `cache.yml` say they are.[^protect]
 - **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
@@ -806,6 +806,7 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 [^protect]: `odu ci protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
 [^odu-cache-token]: `ODU_CACHE_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret. It is a write token for the cache's `kolu-r2` bucket, minted on that bucket's page on the odu board — or from a shell with `odu surface cache token_mint --input '{"rootToken": "…", "bucket": "kolu-r2", "scope": "write"}' --json`, since odu 2.10 retired the admin CLI that used to mint it.
 [^auto-merge]: The update workflow approves the runs GitHub holds back for automation-created pull requests and enables auto-merge, so the PR lands as soon as every context `Require CI on main` requires is green — `cache.yml`'s `build (…)` and `publish (…)`, which that approval starts, and odu's `<recipe>@<platform>`, which someone has to run on the branch.
+[^odu-pin]: odu is pinned to one revision, named in `justfile`, `plugin.json`, `AGENTS.md`, here, and as the `juspay/odu/.github/actions/push` pin in `cache.yml`; all five are bumped together, as odu's consumer page asks. A reference without a revision follows master, which renames verbs on a major — the way odu 2.10 broke `just protect` ([#149](https://github.com/juspay/agent-distro/pull/149)).
 
 ### Test library
 

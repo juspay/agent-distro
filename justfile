@@ -88,8 +88,13 @@ demo:
 # definition: this section is what *runs* them, not a second spelling of any of
 # them.
 #
-# Run it with `nix run --accept-flake-config github:juspay/odu -- ci run`; hosts
-# come from ~/.config/odu/hosts.json (or $ODU_HOSTS).
+# Run it with `nix run --accept-flake-config
+# github:juspay/odu/b7733a490484cd96c554e5cf5a48d7b4af80cc47 -- ci run`; hosts
+# come from ~/.config/odu/hosts.json (or $ODU_HOSTS). That revision is pinned
+# here, in plugin.json, in AGENTS.md and in doc/index.md, and is bumped
+# together with the push action in .github/workflows/cache.yml — a reference
+# without a revision follows master, which is how the 2.10 rename broke this
+# file's `protect` (#149).
 #
 # A lane host has nix, git and bash but no python3 (the cache workflow's
 # scripts use its runner's own), so `scripts` takes python3 from nixpkgs.
@@ -160,7 +165,8 @@ protect *args:
     # always empty — the dry run below would then look like a real one. They are
     # word-split, so an argument holding a space needs no quoting to survive
     # (none of this recipe's flags takes one).
-    odu=(nix run --accept-flake-config github:juspay/odu -- ci protect \
+    odu=(nix run --accept-flake-config \
+      github:juspay/odu/b7733a490484cd96c554e5cf5a48d7b4af80cc47 -- ci protect \
       --platform x86_64-linux --platform aarch64-darwin {{ args }})
     contexts=$(nix shell --accept-flake-config nixpkgs#python3 \
       -c python3 .github/scripts/check-cache-config.py --contexts)
