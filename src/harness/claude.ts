@@ -14,13 +14,20 @@
  * environment, working directory and placeholders itself, and Claude Code is
  * handed only that script. Remote servers cannot be wrapped and are mapped to
  * Claude Code's transport names.
+ *
+ * The launcher (harnesses/claude/default.nix) also runs this module as
+ * `claude.ts attribution`, for the `--settings` that leaves Claude Code's own
+ * attribution out of the commits and pull requests of that session.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { log } from '../log.ts';
 import type { Adapter, Report } from '../plugin/launch.ts';
 import { launcher, shellQuote } from '../plugin/launcher.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, fileName, launchable } from '../plugin/resources.ts';
+import { workingDirectory } from '../profile/resolve.ts';
+import { decodeUtf8 } from '../util.ts';
 
 const MANIFEST_FIELDS = ['name', 'version', 'description', 'author', 'homepage', 'repository', 'license', 'keywords'] as const;
 const TRANSPORTS = { 'streamable-http': 'http', sse: 'sse' } as const;
@@ -67,6 +74,63 @@ export function writePlugin(description: Description, out: string, { bash, env }
 }
 
 /**
+ * Attribution text Claude Code adds nothing to: empty hides the trailer it
+ * ends a commit message with and the line it ends a pull request description
+ * with (Claude Code 2.1.319 `attribution`, which replaced `includeCoAuthoredBy`).
+ */
+const NO_ATTRIBUTION = { attribution: { commit: '', pr: '' } };
+
+/** A settings key that means attribution is the user's own decision. */
+const ATTRIBUTION_KEYS = ['attribution', 'includeCoAuthoredBy'];
+
+/**
+ * The settings files Claude Code reads for this launch that are the user's:
+ * their own, and the launch directory's project and local ones. A managed
+ * policy is not among them, since it outranks the flag in any case.
+ */
+function userSettings(env: NodeJS.ProcessEnv, cwd: string | undefined): string[] {
+  const config = env.CLAUDE_CONFIG_DIR || (env.HOME ? join(env.HOME, '.claude') : undefined);
+  return [
+    ...(config ? [join(config, 'settings.json')] : []),
+    ...(cwd ? [join(cwd, '.claude', 'settings.json'), join(cwd, '.claude', 'settings.local.json')] : []),
+  ];
+}
+
+/** Whether `path` decides attribution; one Claude Code cannot read decides nothing. */
+function decidesAttribution(path: string): boolean {
+  let settings: unknown;
+  try {
+    settings = JSON.parse(decodeUtf8(readFileSync(path)));
+  } catch {
+    return false;
+  }
+  return typeof settings === 'object' && settings !== null
+    && ATTRIBUTION_KEYS.some((key) => key in settings);
+}
+
+/**
+ * The `--settings` words that leave Claude Code's own attribution out of the
+ * commits and pull requests of this session, and none at all when a settings
+ * file of the user's already decides attribution: a default fills what the
+ * user left absent, as every other harness's does. The flag outranks every
+ * settings file, so the way to keep attribution for one launch is a
+ * `--settings` of your own, which the launcher puts after this one, where it
+ * wins.
+ */
+export function attributionArguments(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string | undefined = workingDirectory(),
+): string[] {
+  const decided = userSettings(env, cwd).find(decidesAttribution);
+  if (decided) {
+    log.claude.debug(`attribution is ${decided}'s to decide`);
+    return [];
+  }
+  log.claude.debug('attribution: none of Claude Code\'s own, for this session');
+  return ['--settings', shellQuote(JSON.stringify(NO_ATTRIBUTION))];
+}
+
+/**
  * At launch: the `--plugin-dir` arguments for every plugin, as shell words. A
  * plugin of a profile, or of the variable, is one more session-only plugin
  * directory.
@@ -77,3 +141,9 @@ export const adapter: Adapter<Inputs, Inputs> = {
   launch: ({ plugins }) => plugins.map((plugin) => plugin.translation)
     .flatMap((dir) => ['--plugin-dir', shellQuote(dir)]).join(' '),
 };
+
+if (import.meta.main) {
+  const [mode] = process.argv.slice(2);
+  if (mode !== 'attribution') throw new Error(`usage: claude.ts attribution (not ${JSON.stringify(mode)})`);
+  process.stdout.write(attributionArguments().join(' ') + '\n');
+}
