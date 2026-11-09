@@ -94,21 +94,28 @@ jobs:
       # event with no token fails. That is what this job's `PUSH_CACHE`
       # condition and its token shell used to decide, one step earlier.
       #
-      # odu master `6c8c02e`: #167 merged. The pin was `d82ae66` (#150, every
-      # odu cache self-describing — the substituter's own `nix-cache-info`
-      # carries the origin to push to and the bucket to push into, so this step
-      # names the one URL a reader already uses); what this commit adds for a
-      # consumer is 2.9's direct-to-store uploads (#154): the NAR goes to R2
-      # over a presigned URL instead of through the odu daemon. The action's
-      # inputs are unchanged.
+      # odu master `b7733a4`: #168 merged. The pin was `6c8c02e` (#167, where
+      # a consumer gained 2.9's direct-to-store uploads — the NAR goes to R2
+      # over a presigned URL instead of through the odu daemon). What this
+      # commit adds is an optional `cache:` that works: with none, the step
+      # runs `odu cache target` in this checkout, takes the one odu
+      # substituter `./flake.nix`'s `nixConfig` names, and pushes to that URL
+      # WITH the token (juspay/odu#163, closed — the inferred push used to go
+      # anonymously and 401).
+      #
+      # Bump this pin and the `github:juspay/odu/<rev>` the justfile,
+      # plugin.json, AGENTS.md and doc/index.md name together: odu's consumer
+      # page asks for one revision, named everywhere.
       - name: Push the built paths to the kolu cache, and prove they answer
-        uses: juspay/odu/.github/actions/push@6c8c02e75d60ba595b19cff95a264455948b6482 # odu master: #167 merged
+        uses: juspay/odu/.github/actions/push@b7733a490484cd96c554e5cf5a48d7b4af80cc47 # odu master: #168 merged
         with:
-          # The substituter, read for its `Odu-Origin` and `Odu-Bucket`: the
-          # push goes to the origin that cache names, not to these files.
-          # Named explicitly even though #159 made the input optional: the
-          # inferred path pushes anonymously and 401s (juspay/odu#163, open).
-          cache: https://cache.kolu.dev/kolu-r2
+          # No `cache:`. The `extra-substituters` line above — flake.nix's
+          # too, both kept equal to lib/cache.nix — is this repository's one
+          # declaration of its cache, and the step reads it rather than take
+          # a second spelling here. The push origin and the bucket still come
+          # from that substituter's own `nix-cache-info` (`Odu-Origin`,
+          # `Odu-Bucket`); the inference probes it anonymously, which the
+          # public `kolu-r2` answers.
           # The write token for that bucket: both the credential the push
           # needs and the whole of what decides whether this run publishes.
           token: ${{ secrets.ODU_CACHE_TOKEN }}
