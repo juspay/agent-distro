@@ -790,7 +790,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 
 ### CI
 
-- **Runner.** CI is [odu](https://github.com/juspay/odu): `nix run --accept-flake-config github:juspay/odu -- run` runs the `ci` recipe and everything it depends on — one `<recipe>@<platform>` commit status per node, on the Linux and macOS lane hosts of `~/.config/odu/hosts.json`.
+- **Runner.** CI is [odu](https://github.com/juspay/odu): `nix run --accept-flake-config github:juspay/odu -- ci run` runs the `ci` recipe and everything it depends on — one `<recipe>@<platform>` commit status per node, on the Linux and macOS lane hosts of `~/.config/odu/hosts.json`.
 - **Sharding.** The VM tests spread over up to 8 Linux hosts,[^shards] since each wrapper check boots a machine of its own.
 - **Required checks.** `just protect --dry-run` prints the contexts main's ruleset requires; `just protect` sets them, from what the pipeline and `cache.yml` say they are.[^protect]
 - **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
@@ -803,8 +803,8 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 
 [^update-sources]: It discovers npins directories under `harnesses/` and `lib/`, re-pins each npm tarball pinned there (`yaml`, `opencode-plugin-litellm`) to the newest release of its major version, and runs each harness's `update.py`.
 [^shards]: `test` carries `[metadata("odu:shard=8")]`: odu gives each shard `ODU_SHARD_INDEX` and `ODU_SHARD_TOTAL`, and the recipe builds its own slice of `./test`'s checks. With neither variable set it runs them all in one `nix flake check`.
-[^protect]: `odu protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
-[^odu-cache-token]: `ODU_CACHE_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret. It is a write token for the cache's `kolu-r2` bucket, minted by `odu cache token mint kolu-r2 --write`.
+[^protect]: `odu ci protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
+[^odu-cache-token]: `ODU_CACHE_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret. It is a write token for the cache's `kolu-r2` bucket, minted on that bucket's page on the odu board — or from a shell with `odu surface cache token_mint --input '{"rootToken": "…", "bucket": "kolu-r2", "scope": "write"}' --json`, since odu 2.10 retired the admin CLI that used to mint it.
 [^auto-merge]: The update workflow approves the runs GitHub holds back for automation-created pull requests and enables auto-merge, so the PR lands as soon as every context `Require CI on main` requires is green — `cache.yml`'s `build (…)` and `publish (…)`, which that approval starts, and odu's `<recipe>@<platform>`, which someone has to run on the branch.
 
 ### Test library
