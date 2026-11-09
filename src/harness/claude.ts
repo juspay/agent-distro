@@ -16,8 +16,8 @@
  * Claude Code's transport names.
  *
  * The launcher (harnesses/claude/default.nix) also runs this module as
- * `claude.ts attribution`, for the `--settings` that leaves Claude Code's own
- * attribution out of the commits and pull requests of that session.
+ * `claude.ts settings`, for the `--settings` this session asks Claude Code
+ * for: `SESSION_DEFAULTS`, minus whatever the user has decided themselves.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -73,15 +73,31 @@ export function writePlugin(description: Description, out: string, { bash, env }
   }
 }
 
-/**
- * Attribution text Claude Code adds nothing to: empty hides the trailer it
- * ends a commit message with and the line it ends a pull request description
- * with (Claude Code 2.1.319 `attribution`, which replaced `includeCoAuthoredBy`).
- */
-const NO_ATTRIBUTION = { attribution: { commit: '', pr: '' } };
+/** One setting this launch asks for, and what means the user has decided it. */
+type SessionDefault = {
+  /** What it is called in a log line. */
+  name: string;
+  /** The settings fragment, merged into the flag when it stands. */
+  settings: Record<string, unknown>;
+  /** Settings keys of the user's that leave the decision to them. */
+  decidedBy: string[];
+};
 
-/** A settings key that means attribution is the user's own decision. */
-const ATTRIBUTION_KEYS = ['attribution', 'includeCoAuthoredBy'];
+/**
+ * What a session of ours settles that the user has not: one row per setting,
+ * so the next one is a row rather than another flag.
+ */
+const SESSION_DEFAULTS: SessionDefault[] = [
+  // Claude Code ends the commit messages it writes with a `Co-Authored-By:
+  // Claude …` trailer and pull request descriptions with a line of its own.
+  // Empty text is how it is told to write neither. `includeCoAuthoredBy` is
+  // what said this before Claude Code 2.1.319's `attribution` replaced it.
+  {
+    name: 'attribution',
+    settings: { attribution: { commit: '', pr: '' } },
+    decidedBy: ['attribution', 'includeCoAuthoredBy'],
+  },
+];
 
 /**
  * The settings files Claude Code reads for this launch that are the user's:
@@ -96,39 +112,52 @@ function userSettings(env: NodeJS.ProcessEnv, cwd: string | undefined): string[]
   ];
 }
 
-/** Whether `path` decides attribution; one Claude Code cannot read decides nothing. */
-function decidesAttribution(path: string): boolean {
-  let settings: unknown;
-  try {
-    settings = JSON.parse(decodeUtf8(readFileSync(path)));
-  } catch {
-    return false;
+/**
+ * Every settings key the user has set, and the first file that set it. A file
+ * Claude Code cannot read sets nothing, there as here.
+ */
+function decidedKeys(env: NodeJS.ProcessEnv, cwd: string | undefined): Map<string, string> {
+  const owners = new Map<string, string>();
+  for (const path of userSettings(env, cwd)) {
+    let settings: unknown;
+    try {
+      settings = JSON.parse(decodeUtf8(readFileSync(path)));
+    } catch {
+      continue;
+    }
+    if (typeof settings !== 'object' || settings === null) continue;
+    for (const key of Object.keys(settings)) if (!owners.has(key)) owners.set(key, path);
   }
-  return typeof settings === 'object' && settings !== null
-    && ATTRIBUTION_KEYS.some((key) => key in settings);
+  return owners;
 }
 
 /**
- * The `--settings` words that leave Claude Code's own attribution out of the
- * commits and pull requests of this session, and none at all when a settings
- * file of the user's already decides attribution: a default fills what the
- * user left absent, as every other harness's does. The flag outranks every
- * settings file, which is why a file that decides is left to it rather than
- * overruled. Claude Code keeps only the last `--settings`, so one of the
- * user's own — the launcher puts theirs after this one — replaces this whole
- * flag, attribution and all.
+ * The `--settings` words for this session: every default the user has left
+ * absent, in one flag, and no words at all when they have decided them all. A
+ * default fills what the user did not say, as every other harness's does; the
+ * flag outranks every settings file, which is why a decided one is left to
+ * decide rather than overruled. Claude Code keeps only the last `--settings`,
+ * so one of the user's own — the launcher puts theirs after this one —
+ * replaces this whole flag, defaults and all.
  */
-export function attributionArguments(
+export function settingsArguments(
   env: NodeJS.ProcessEnv = process.env,
   cwd: string | undefined = workingDirectory(),
+  defaults: SessionDefault[] = SESSION_DEFAULTS,
 ): string[] {
-  const decided = userSettings(env, cwd).find(decidesAttribution);
-  if (decided) {
-    log.claude.debug(`attribution is ${decided}'s to decide`);
-    return [];
+  const owners = decidedKeys(env, cwd);
+  const settings: Record<string, unknown> = {};
+  for (const { name, settings: fragment, decidedBy } of defaults) {
+    const decided = decidedBy.map((key) => owners.get(key)).find((path) => path !== undefined);
+    if (decided) {
+      log.claude.debug(`${name} is ${decided}'s to decide`);
+      continue;
+    }
+    log.claude.debug(`${name}: this session's default`);
+    Object.assign(settings, fragment);
   }
-  log.claude.debug('attribution: none of Claude Code\'s own, for this session');
-  return ['--settings', shellQuote(JSON.stringify(NO_ATTRIBUTION))];
+  if (!Object.keys(settings).length) return [];
+  return ['--settings', shellQuote(JSON.stringify(settings))];
 }
 
 /**
@@ -145,6 +174,6 @@ export const adapter: Adapter<Inputs, Inputs> = {
 
 if (import.meta.main) {
   const [mode] = process.argv.slice(2);
-  if (mode !== 'attribution') throw new Error(`usage: claude.ts attribution (not ${JSON.stringify(mode)})`);
-  process.stdout.write(attributionArguments().join(' ') + '\n');
+  if (mode !== 'settings') throw new Error(`usage: claude.ts settings (not ${JSON.stringify(mode)})`);
+  process.stdout.write(settingsArguments().join(' ') + '\n');
 }

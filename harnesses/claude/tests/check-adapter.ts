@@ -1,7 +1,7 @@
 /**
- * The attribution default the Claude launcher asks this module for, without a
- * running harness: which settings files of the user's stand it down, and the
- * shell words the launcher evaluates.
+ * The settings the Claude launcher asks this module for, without a running
+ * harness: how a table of defaults answers the settings files of the user's,
+ * what the shipped table settles, and the shell words the launcher evaluates.
  *
  * Usage: node check-adapter.ts SRC HARNESS_DIR
  */
@@ -12,11 +12,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
+// The module under test is named by argv, as every check-adapter.ts is.
 const src = process.argv[2]!;
-const { attributionArguments } = await import(join(src, 'harness/claude.ts'));
+const { settingsArguments } = await import(join(src, 'harness/claude.ts'));
 
-/** Empty attribution text: Claude Code ends a commit or a PR with none of its own. */
-const HIDDEN = ['--settings', `'{"attribution":{"commit":"","pr":""}}'`];
+/** Two defaults, so what one of them answers cannot stand for the other. */
+const TABLE = [
+  { name: 'first', settings: { alpha: { on: true } }, decidedBy: ['alpha', 'alphaLegacy'] },
+  { name: 'second', settings: { beta: 1 }, decidedBy: ['beta'] },
+];
+const flag = (settings: unknown) => ['--settings', `'${JSON.stringify(settings)}'`];
 const temporary = () => mkdtempSync(join(tmpdir(), 'claude-adapter-'));
 
 /** A home and a launch directory, each with a `.claude` to put settings in. */
@@ -28,58 +33,72 @@ function places() {
   return { home, cwd };
 }
 
-test('attribution the user has not decided is hidden', () => {
+test('every default the user has left absent goes in one flag', () => {
   const { home, cwd } = places();
-  assert.deepEqual(attributionArguments({ HOME: home }, cwd), HIDDEN);
-  // Settings that say nothing about attribution leave the default standing.
+  const whole = flag({ alpha: { on: true }, beta: 1 });
+  assert.deepEqual(settingsArguments({ HOME: home }, cwd, TABLE), whole);
+  // Settings that name none of the keys leave the whole table standing.
   writeFileSync(join(home, '.claude/settings.json'), '{"model":"sonnet"}');
   writeFileSync(join(cwd, '.claude/settings.json'), '{"permissions":{"allow":[]}}');
   writeFileSync(join(cwd, '.claude/settings.local.json'), '{}');
-  assert.deepEqual(attributionArguments({ HOME: home }, cwd), HIDDEN);
-  // A file Claude Code cannot read decides nothing there either.
-  writeFileSync(join(home, '.claude/settings.json'), '{"attribution"');
-  assert.deepEqual(attributionArguments({ HOME: home }, cwd), HIDDEN);
-  // A launch with neither a home nor a working directory has nothing of the
-  // user's to read, and still hides it.
-  assert.deepEqual(attributionArguments({}, undefined), HIDDEN);
+  assert.deepEqual(settingsArguments({ HOME: home }, cwd, TABLE), whole);
+  // A file Claude Code cannot read decides nothing, there as here.
+  writeFileSync(join(home, '.claude/settings.json'), '{"alpha"');
+  assert.deepEqual(settingsArguments({ HOME: home }, cwd, TABLE), whole);
+  // Neither a home nor a working directory: nothing of the user's to read.
+  assert.deepEqual(settingsArguments({}, undefined, TABLE), whole);
 });
 
-test("a settings file of the user's decides attribution itself", () => {
-  const decisions = ['{"attribution":{"commit":""}}', '{"attribution":{"pr":"Ours"}}',
-    '{"includeCoAuthoredBy":true}', '{"attribution":false}'];
-  for (const settings of decisions) {
-    for (const file of ['.claude/settings.json', '.claude/settings.local.json']) {
-      const { home, cwd } = places();
-      writeFileSync(join(cwd, file), settings);
-      assert.deepEqual(attributionArguments({ HOME: home }, cwd), [], `${file}: ${settings}`);
-    }
+test('a default the user has decided stands down, and only that one', () => {
+  for (const [file, key] of [
+    ['.claude/settings.json', 'alpha'],
+    ['.claude/settings.local.json', 'alpha'],
+    ['.claude/settings.json', 'alphaLegacy'],
+  ]) {
     const { home, cwd } = places();
-    writeFileSync(join(home, '.claude/settings.json'), settings);
-    assert.deepEqual(attributionArguments({ HOME: home }, cwd), [], settings);
+    writeFileSync(join(cwd, file), `{"${key}":"theirs"}`);
+    assert.deepEqual(settingsArguments({ HOME: home }, cwd, TABLE), flag({ beta: 1 }), `${file}: ${key}`);
   }
+  // The user's own settings file counts the same as the launch directory's.
+  const { home, cwd } = places();
+  writeFileSync(join(home, '.claude/settings.json'), '{"beta":0}');
+  assert.deepEqual(settingsArguments({ HOME: home }, cwd, TABLE), flag({ alpha: { on: true } }));
+  // Every default decided is no flag at all, rather than an empty one.
+  writeFileSync(join(cwd, '.claude/settings.json'), '{"alpha":"theirs"}');
+  assert.deepEqual(settingsArguments({ HOME: home }, cwd, TABLE), []);
   // CLAUDE_CONFIG_DIR is where Claude Code keeps the user's settings when it
   // is set, so that is the file read, and the home's is not.
-  const { home, cwd } = places();
   const config = temporary();
-  writeFileSync(join(home, '.claude/settings.json'), '{"attribution":{"commit":""}}');
-  assert.deepEqual(attributionArguments({ HOME: home, CLAUDE_CONFIG_DIR: config }, cwd), HIDDEN);
-  writeFileSync(join(config, 'settings.json'), '{"attribution":{"commit":""}}');
-  assert.deepEqual(attributionArguments({ HOME: home, CLAUDE_CONFIG_DIR: config }, cwd), []);
+  assert.deepEqual(settingsArguments({ HOME: home, CLAUDE_CONFIG_DIR: config }, cwd, TABLE), flag({ beta: 1 }));
+  writeFileSync(join(config, 'settings.json'), '{"beta":0}');
+  assert.deepEqual(settingsArguments({ HOME: home, CLAUDE_CONFIG_DIR: config }, cwd, TABLE), []);
+});
+
+test('the shipped table leaves out attribution of Claude Code\'s own', () => {
+  const { home, cwd } = places();
+  const hidden = flag({ attribution: { commit: '', pr: '' } });
+  assert.deepEqual(settingsArguments({ HOME: home }, cwd), hidden);
+  // Either spelling of the decision — the current one and the deprecated one.
+  for (const settings of ['{"attribution":{"pr":"Ours"}}', '{"includeCoAuthoredBy":true}']) {
+    const launch = places();
+    writeFileSync(join(launch.cwd, '.claude/settings.json'), settings);
+    assert.deepEqual(settingsArguments({ HOME: launch.home }, launch.cwd), [], settings);
+  }
 });
 
 test('the launcher evaluates those words, for the environment it runs in', () => {
   const { home, cwd } = places();
-  const words = (environment: NodeJS.ProcessEnv = {}) => {
-    const result = spawnSync(process.execPath, [join(src, 'harness/claude.ts'), 'attribution'],
-      { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, ...environment } });
+  const words = () => {
+    const result = spawnSync(process.execPath, [join(src, 'harness/claude.ts'), 'settings'],
+      { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home } });
     assert.equal(result.status, 0, result.stderr);
     return result.stdout;
   };
-  assert.equal(words(), `${HIDDEN.join(' ')}\n`);
+  assert.equal(words(), `${flag({ attribution: { commit: '', pr: '' } }).join(' ')}\n`);
   writeFileSync(join(cwd, '.claude/settings.json'), '{"includeCoAuthoredBy":false}');
   assert.equal(words(), '\n');
   // Any other usage is a launcher that no longer matches this module.
   const wrong = spawnSync(process.execPath, [join(src, 'harness/claude.ts')], { encoding: 'utf8' });
   assert.equal(wrong.status, 1);
-  assert.match(wrong.stderr, /usage: claude\.ts attribution/);
+  assert.match(wrong.stderr, /usage: claude\.ts settings/);
 });
