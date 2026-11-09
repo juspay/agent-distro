@@ -94,15 +94,20 @@ jobs:
       # event with no token fails. That is what this job's `PUSH_CACHE`
       # condition and its token shell used to decide, one step earlier.
       #
-      # odu master `d82ae66`: #150 merged, which made every odu cache
-      # self-describing — the substituter's own `nix-cache-info` carries the
-      # origin to push to and the bucket to push into, so this step names the
-      # one URL a reader already uses.
+      # odu master `6c8c02e`: #167 merged. The pin was `d82ae66` (#150, every
+      # odu cache self-describing — the substituter's own `nix-cache-info`
+      # carries the origin to push to and the bucket to push into, so this step
+      # names the one URL a reader already uses); what this commit adds for a
+      # consumer is 2.9's direct-to-store uploads (#154): the NAR goes to R2
+      # over a presigned URL instead of through the odu daemon. The action's
+      # inputs are unchanged.
       - name: Push the built paths to the kolu cache, and prove they answer
-        uses: juspay/odu/.github/actions/push@d82ae6652d1645f124ac3f3a7c110cfdfdc97871 # odu master: #150 merged
+        uses: juspay/odu/.github/actions/push@6c8c02e75d60ba595b19cff95a264455948b6482 # odu master: #167 merged
         with:
           # The substituter, read for its `Odu-Origin` and `Odu-Bucket`: the
           # push goes to the origin that cache names, not to these files.
+          # Named explicitly even though #159 made the input optional: the
+          # inferred path pushes anonymously and 401s (juspay/odu#163, open).
           cache: https://cache.kolu.dev/kolu-r2
           # The write token for that bucket: both the credential the push
           # needs and the whole of what decides whether this run publishes.

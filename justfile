@@ -88,7 +88,7 @@ demo:
 # definition: this section is what *runs* them, not a second spelling of any of
 # them.
 #
-# Run it with `nix run --accept-flake-config github:juspay/odu -- run`; hosts
+# Run it with `nix run --accept-flake-config github:juspay/odu -- ci run`; hosts
 # come from ~/.config/odu/hosts.json (or $ODU_HOSTS).
 #
 # A lane host has nix, git and bash but no python3 (the cache workflow's
@@ -143,7 +143,7 @@ protect *args:
     #!/usr/bin/env bash
     # Coordinator-side, and the one recipe here that writes to GitHub:
     # unreachable from `ci`, so odu never schedules it. It is also the reason
-    # the cache workflow's contexts live beside it — `odu protect` sets the
+    # the cache workflow's contexts live beside it — `odu ci protect` sets the
     # ruleset's list to exactly the contexts odu posts, replacing it wholesale,
     # so a context appended out of band would survive only until the next
     # protect run. Appending inside `protect` is what keeps them together.
@@ -160,7 +160,7 @@ protect *args:
     # always empty — the dry run below would then look like a real one. They are
     # word-split, so an argument holding a space needs no quoting to survive
     # (none of this recipe's flags takes one).
-    odu=(nix run --accept-flake-config github:juspay/odu -- protect \
+    odu=(nix run --accept-flake-config github:juspay/odu -- ci protect \
       --platform x86_64-linux --platform aarch64-darwin {{ args }})
     contexts=$(nix shell --accept-flake-config nixpkgs#python3 \
       -c python3 .github/scripts/check-cache-config.py --contexts)
