@@ -18,8 +18,10 @@ attribution of Claude Code's own: the launcher hands it empty `attribution`
 text for that session, through `--settings`. A settings file of the user's
 that decides attribution — their own, or the launch directory's project or
 local one, by `attribution` or the deprecated `includeCoAuthoredBy` — is left
-to decide it, and the launch passes nothing; a `--settings` of your own comes
-after the launcher's, where it wins.
+to decide it, and the launch passes nothing. Claude Code keeps only the last
+`--settings` it is given, so a `--settings` of the user's own, which comes
+after the launcher's, replaces it whole: that launch is the upstream one,
+attribution and all, unless those settings say otherwise.
 
 The npins branch pin tracks `sadjow/claude-code-nix`. Its standalone binary
 packaging recipe is called with the distribution's shared nixpkgs, which allows

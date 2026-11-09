@@ -113,9 +113,10 @@ function decidesAttribution(path: string): boolean {
  * commits and pull requests of this session, and none at all when a settings
  * file of the user's already decides attribution: a default fills what the
  * user left absent, as every other harness's does. The flag outranks every
- * settings file, so the way to keep attribution for one launch is a
- * `--settings` of your own, which the launcher puts after this one, where it
- * wins.
+ * settings file, which is why a file that decides is left to it rather than
+ * overruled. Claude Code keeps only the last `--settings`, so one of the
+ * user's own — the launcher puts theirs after this one — replaces this whole
+ * flag, attribution and all.
  */
 export function attributionArguments(
   env: NodeJS.ProcessEnv = process.env,
