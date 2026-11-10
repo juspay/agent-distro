@@ -58,7 +58,7 @@ def main():
         "Automated input update.\n\n" + "\n\n".join(notes) + "\n\n"
         + f"```text\n{lock_log}\n```\n\n### CI on this PR\n\n"
         "Run odu on this branch (`nix run --accept-flake-config "
-        "github:juspay/odu/b7733a490484cd96c554e5cf5a48d7b4af80cc47 "
+        "github:juspay/odu/71e62402008e328779676618e43d499f9d299988 "
         "-- ci run`) to post the `<recipe>@<platform>` statuses; the pull request "
         f"auto-merges once main's required checks are green — [this run]({run_url}) "
         "approves the ones GitHub holds back for automation-created pull requests.\n"

@@ -89,12 +89,13 @@ demo:
 # them.
 #
 # Run it with `nix run --accept-flake-config
-# github:juspay/odu/b7733a490484cd96c554e5cf5a48d7b4af80cc47 -- ci run`; hosts
+# github:juspay/odu/71e62402008e328779676618e43d499f9d299988 -- ci run`; hosts
 # come from ~/.config/odu/hosts.json (or $ODU_HOSTS). That revision is pinned
-# here, in plugin.json, in AGENTS.md and in doc/index.md, and is bumped
-# together with the push action in .github/workflows/cache.yml — a reference
-# without a revision follows master, which is how the 2.10 rename broke this
-# file's `protect` (#149).
+# here, in plugin.json, in AGENTS.md, in doc/index.md and in
+# .github/scripts/describe-flake-update.py, and is bumped together with the
+# push action in .github/workflows/cache.yml — a reference without a revision
+# follows master, which is how the 2.10 rename broke this file's `protect`
+# (#149).
 #
 # A lane host has nix, git and bash but no python3 (the cache workflow's
 # scripts use its runner's own), so `scripts` takes python3 from nixpkgs.
@@ -109,6 +110,22 @@ demo:
 # x86_64-linux pool has 9 hosts and the others have work to do). The recipe
 # picks its own slice of ./test's checks. With neither variable set it runs
 # them all in one `nix flake check`, which is the local spelling.
+#
+# Pinning: an out-link is what a node pushes, and `picker`'s `nix build` leaves
+# `result` — the pipeline's one out-link naming the package itself (`site`
+# leaves result-site, a website nobody substitutes). So `picker` carries
+# [metadata("odu:pin")]: a run on the default branch holds that closure under
+# juspay/agent-distro@main/<system>, past the bucket's 90-day retention, so
+# what consumers substitute stays served however long main goes between
+# pushes. A run on any other branch pushes as before and pins nothing.
+#
+# Both halves have to be true, and a run from a laptop fails the first: a node
+# pushes only when the coordinator's own odu serves the cache flake.nix names
+# — otherwise `_ci-setup` says `[odu] not pushing: no substituter in flake.nix
+# nixConfig is a cache this odu serves` — and only a push can carry a pin.
+# cache.yml's push step derives the SAME name by the same rule, so the two
+# never hold two pins: whichever ran last owns it, and the package's closure
+# is in either one.
 
 # `[linux]` alone, and it must be: `just` on a lane parses the whole justfile,
 # and a dependency on a recipe this platform pruned is an unknown dependency —
@@ -133,6 +150,7 @@ flake:
 # The picker depends on every launcher, so this builds them all.
 [linux]
 [macos]
+[metadata("odu:pin")]
 picker: flake
     nix build --print-build-logs .#default
 
@@ -166,7 +184,7 @@ protect *args:
     # word-split, so an argument holding a space needs no quoting to survive
     # (none of this recipe's flags takes one).
     odu=(nix run --accept-flake-config \
-      github:juspay/odu/b7733a490484cd96c554e5cf5a48d7b4af80cc47 -- ci protect \
+      github:juspay/odu/71e62402008e328779676618e43d499f9d299988 -- ci protect \
       --platform x86_64-linux --platform aarch64-darwin {{ args }})
     contexts=$(nix shell --accept-flake-config nixpkgs#python3 \
       -c python3 .github/scripts/check-cache-config.py --contexts)

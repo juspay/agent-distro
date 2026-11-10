@@ -790,12 +790,13 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 
 ### CI
 
-- **Runner.** CI is [odu](https://github.com/juspay/odu): `nix run --accept-flake-config github:juspay/odu/b7733a490484cd96c554e5cf5a48d7b4af80cc47 -- ci run` runs the `ci` recipe and everything it depends on — one `<recipe>@<platform>` commit status per node, on the Linux and macOS lane hosts of `~/.config/odu/hosts.json`.[^odu-pin]
+- **Runner.** CI is [odu](https://github.com/juspay/odu): `nix run --accept-flake-config github:juspay/odu/71e62402008e328779676618e43d499f9d299988 -- ci run` runs the `ci` recipe and everything it depends on — one `<recipe>@<platform>` commit status per node, on the Linux and macOS lane hosts of `~/.config/odu/hosts.json`.[^odu-pin]
 - **Sharding.** The VM tests spread over up to 8 Linux hosts,[^shards] since each wrapper check boots a machine of its own.
 - **Required checks.** `just protect --dry-run` prints the contexts main's ruleset requires; `just protect` sets them, from what the pipeline and `cache.yml` say they are.[^protect]
 - **Daily sources.** The daily update runs `.github/scripts/update-sources.sh`,[^update-sources] then updates the root and test locks.
 - **Report.** The update report reads resolved versions and each harness's release-note metadata.
 - **Cache.** `cache.yml` pushes realised paths to [the kolu cache](#binary-cache),[^odu-cache-token] and publishes the package's content-addressed rewrite with the index that names it, on the `ca-index` branch of this repository, through the `publish-closure` action it shares with kolu ([juspay/kolu#2294](https://github.com/juspay/kolu/pull/2294)) ([The binary cache](#binary-cache)).
+- **Retention.** A run on main, and that workflow's push, hold what they pushed, so the package keeps being served between pushes.[^odu-cache-hold]
 - **Merge gate.** The daily update PR enables auto-merge, so it lands once every context the ruleset requires is green.[^auto-merge]
 - **Consumers.** They run `nix flake update agent-distro`.
 
@@ -805,8 +806,9 @@ For manual updates, run `bash .github/scripts/update-sources.sh`, `nix flake upd
 [^shards]: `test` carries `[metadata("odu:shard=8")]`: odu gives each shard `ODU_SHARD_INDEX` and `ODU_SHARD_TOTAL`, and the recipe builds its own slice of `./test`'s checks. With neither variable set it runs them all in one `nix flake check`.
 [^protect]: `odu ci protect` writes [the repository ruleset](https://github.com/juspay/agent-distro/rules/23633532) with exactly the contexts the pipeline posts; the recipe then appends `cache.yml`'s, which odu cannot know since they come from a GitHub workflow rather than the justfile. Run it after merging a change to either side's names.
 [^odu-cache-token]: `ODU_CACHE_TOKEN` is needed except on fork PRs, and only here: `cache.yml` stays on GitHub Actions because it is what pushes to the cache, and odu runs the checks without any repository secret. It is a write token for the cache's `kolu-r2` bucket, minted on that bucket's page on the odu board — or from a shell with `odu surface cache token_mint --input '{"rootToken": "…", "bucket": "kolu-r2", "scope": "write"}' --json`, since odu 2.10 retired the admin CLI that used to mint it.
+[^odu-cache-hold]: `picker` carries `[metadata("odu:pin")]` and leaves the `result` out-link odu pushes, so a run on the default branch pins that closure as `juspay/agent-distro@main/<system>`, past the bucket's 90-day retention. A run on another branch pins nothing, and a run whose own odu does not serve this cache pushes nothing and so pins nothing. `cache.yml`'s push step derives the same name and takes that pin by default on main, which is why it names no `pin:`.
 [^auto-merge]: The update workflow approves the runs GitHub holds back for automation-created pull requests and enables auto-merge, so the PR lands as soon as every context `Require CI on main` requires is green — `cache.yml`'s `build (…)` and `publish (…)`, which that approval starts, and odu's `<recipe>@<platform>`, which someone has to run on the branch.
-[^odu-pin]: odu is pinned to one revision, named in `justfile`, `plugin.json`, `AGENTS.md`, here, and as the `juspay/odu/.github/actions/push` pin in `cache.yml`; all five are bumped together, as odu's consumer page asks. A reference without a revision follows master, which renames verbs on a major — the way odu 2.10 broke `just protect` ([#149](https://github.com/juspay/agent-distro/pull/149)).
+[^odu-pin]: odu is pinned to one revision, named in `justfile`, `plugin.json`, `AGENTS.md`, `.github/scripts/describe-flake-update.py`, here, and as the `juspay/odu/.github/actions/push` pin in `cache.yml`; all six are bumped together, as odu's consumer page asks. A reference without a revision follows master, which renames verbs on a major — the way odu 2.10 broke `just protect` ([#149](https://github.com/juspay/agent-distro/pull/149)).
 
 ### Test library
 
