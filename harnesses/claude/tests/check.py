@@ -22,3 +22,13 @@ for path, contents in preserved.items():
     assert path.read_bytes() == contents, path
 assert not (config_dir / 'plugins/installed_plugins.json').exists()
 assert not (config_dir / 'plugins/known_marketplaces.json').exists()
+
+# Claude Code's own attribution, as the API it talks to sees it: a launch asks
+# for none, and a settings file of the user's decides it instead. The endpoint
+# is this script's own, so the check needs neither credentials nor a network.
+work = home / 'attribution'
+work.mkdir()
+assert 'Co-Authored-By' not in prompt(work), 'the launch asked for attribution of its own'
+(work / '.claude').mkdir()
+(work / '.claude/settings.json').write_text('{"attribution":{"commit":"Trailer: ours"}}')
+assert 'Trailer: ours' in prompt(work), "the user's own attribution did not reach the model"
