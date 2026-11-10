@@ -94,20 +94,19 @@ jobs:
       # event with no token fails. That is what this job's `PUSH_CACHE`
       # condition and its token shell used to decide, one step earlier.
       #
-      # odu master `b7733a4`: #168 merged. The pin was `6c8c02e` (#167, where
-      # a consumer gained 2.9's direct-to-store uploads — the NAR goes to R2
-      # over a presigned URL instead of through the odu daemon). What this
-      # commit adds is an optional `cache:` that works: with none, the step
-      # runs `odu cache target` in this checkout, takes the one odu
-      # substituter `./flake.nix`'s `nixConfig` names, and pushes to that URL
-      # WITH the token (juspay/odu#163, closed — the inferred push used to go
-      # anonymously and 401).
+      # odu master `71e6240`: #169 merged. The pin before it was #168, where
+      # the step gained an optional `cache:` that works, so this one needs
+      # none. What this commit adds is the pin below: `pin:` now defaults to
+      # "on the repository's default branch", which is what the expression
+      # here used to spell, and a RUN takes the same pin from
+      # [metadata("odu:pin")] on a recipe — `picker`, in the justfile.
       #
       # Bump this pin and the `github:juspay/odu/<rev>` the justfile,
-      # plugin.json, AGENTS.md and doc/index.md name together: odu's consumer
+      # plugin.json, AGENTS.md, doc/index.md and
+      # .github/scripts/describe-flake-update.py name together: odu's consumer
       # page asks for one revision, named everywhere.
       - name: Push the built paths to the kolu cache, and prove they answer
-        uses: juspay/odu/.github/actions/push@b7733a490484cd96c554e5cf5a48d7b4af80cc47 # odu master: #168 merged
+        uses: juspay/odu/.github/actions/push@71e62402008e328779676618e43d499f9d299988 # odu master: #169 merged
         with:
           # No `cache:`. The `extra-substituters` line above — flake.nix's
           # too, both kept equal to lib/cache.nix — is this repository's one
@@ -120,8 +119,10 @@ jobs:
           # needs and the whole of what decides whether this run publishes.
           token: ${{ secrets.ODU_CACHE_TOKEN }}
           paths: ${{ steps.built.outputs.paths }}
-          # Hold this push's closure while it is the default branch's.
-          pin: ${{ github.ref_name == github.event.repository.default_branch }}
+          # No `pin:`. Omitted is the policy this job wants — hold the closure
+          # while it is the default branch's, pin nothing from a branch or a
+          # pull request — and the action's default since #169, so the
+          # expression that used to say it here would only drift from it.
 
   # The content-addressed package and the index that names it, through the
   # publisher `@kolu/surface` and this distribution now share
