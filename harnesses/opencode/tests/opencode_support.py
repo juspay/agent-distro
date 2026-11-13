@@ -52,8 +52,14 @@ def api(resource, launcher=binary, plugins=None):
             def get(resource):
                 return json.loads(run('api', '--server', url, 'GET', '/api/' + resource,
                                       '--header', 'x-opencode-directory:' + str(home), launcher=launcher))
-            # Cold locations activate plugins asynchronously; this endpoint waits for activation.
-            get('integration')
+            # Cold locations activate plugins asynchronously and no endpoint waits
+            # for them: like upstream's one-shot clients, wait for a plugin list.
+            for _ in range(60):
+                if get('plugin')['data']:
+                    break
+                time.sleep(0.5)
+            else:
+                raise AssertionError('no plugin activated')
             for _ in range(60):
                 result = get(resource)
                 if resource != 'mcp' or all(s['status']['status'] != 'pending' for s in result['data']):
