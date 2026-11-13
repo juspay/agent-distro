@@ -38,7 +38,7 @@ nix run github:juspay/agent-distro                            # pick from the li
 AI_HARNESS=claude nix run github:juspay/agent-distro          # skip the list
 ```
 
-To keep the agents installed and updated, see [Install and keep updated](#install). To give your agents a team's skills, MCP servers and settings, see [Profiles](#profiles).
+To keep the agents installed and updated, see [Install and keep updated](#install). To give your agents a team's skills, MCP servers and settings, see [Profiles](#profiles). To add one published plugin to the profile you already use, see [Add a plugin](#add-a-plugin).
 
 - **Systems.** `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
 - **Binary cache.** Pass `--accept-flake-config` to use the cache this flake names;[^nixconfig] without it, Oh My Pi is built from source.
@@ -211,6 +211,9 @@ that launch:
 AGENT_DISTRO_PLUGINS=~/src/my-plugin agent-distro claude
 AGENT_DISTRO_PLUGINS=/nix/store/…-kolu/agent-plugin:~/src/my-plugin agent-distro github:juspay/skills omp
 ```
+
+A plugin named by a flake reference rather than a directory goes on `AI_PROFILE` or in a
+`plugin.json`; see [Add a plugin](#add-a-plugin).
 
 > Unset or empty, the launchers behave exactly as they do without this feature.
 
@@ -596,6 +599,82 @@ names the stack: `juspay-skills + ekala + kolu`.
 
 A profile named on the command line is that profile alone: nothing is composed beneath it, not even
 a repository's own.
+
+### Add a plugin
+
+A plugin somebody else publishes needs no installer. Chrome's
+[modern-web-guidance](https://github.com/GoogleChrome/modern-web-guidance) — two skills that keep
+an agent on current web platform APIs — carries a `plugin.json` at the root of its repository, so
+its flake reference, `github:GoogleChrome/modern-web-guidance`, is all agent-distro needs.[^plugin-installers]
+Where you write that reference decides who gets the plugin.
+
+**For yourself, in every repository.** A `plugin.json` with no extension is a valid profile, so
+the plugin is one more entry on the stack, beside the profile you already use:
+
+```sh
+AI_PROFILE="github:juspay/skills github:GoogleChrome/modern-web-guidance" agent-distro claude
+```
+
+With Home Manager it is one more entry of `profiles`:
+
+```nix
+services.agent-distro.profiles = [
+  "github:juspay/skills"
+  "github:GoogleChrome/modern-web-guidance"
+];
+```
+
+Every harness then starts with both, and the chooser's header names the stack: `juspay-skills +
+modern-web-guidance`, with a repository's own profile on top of that.[^plugin-order] Do not name
+the plugin on the command line instead: a positional profile is used alone, without yours.
+
+**For everyone who works in a repository.** List it in the repository's `plugin.json`, which is
+composed over whatever each person's `AI_PROFILE` holds:
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "my-repo",
+  "extensions": {
+    "asia.nixos.agent-distro": {
+      "plugins": ["github:GoogleChrome/modern-web-guidance"],
+      "packages": ["nodejs"]
+    }
+  }
+}
+```
+
+`packages` is there because this plugin's skills tell the agent to run `npx`. A plugin carries no
+packages of its own: the profile that lists it can supply them, and otherwise the command is
+whichever one is on your own `PATH`.
+
+**For one launch, from a checkout.** `AGENT_DISTRO_PLUGINS` takes directories, not references
+([Plugins at launch](#plugins-at-launch)) — the way to try a plugin, or your own changes to one:
+
+```sh
+git clone https://github.com/GoogleChrome/modern-web-guidance ~/src/modern-web-guidance
+AGENT_DISTRO_PLUGINS=~/src/modern-web-guidance agent-distro claude
+```
+
+- **What a reference names.** A directory holding a `plugin.json`: the repository's root, or a
+  `?dir=` within it, as in `github:juspay/kolu?dir=agent-plugin`. A reference to anything else
+  stops the launch, saying what is missing.[^plugin-missing]
+- **Follows its branch.** An unpinned reference is fetched at every launch, so the plugin's
+  updates arrive by themselves.[^profile-cache] To hold one, name a revision —
+  `github:GoogleChrome/modern-web-guidance/<rev>` — or [pin it](#pin-a-profile-optional) as a flake
+  input.
+- **Seeing it load.** `AGENT_DISTRO_LOG=debug` prints one line per plugin, with its name and where
+  it came from ([Diagnostics](#diagnostics)):
+
+  ```text
+  agent-distro plugin: /nix/store/…-source: from profile /home/me/repo/plugin.json, as modern-web-guidance, translated at …
+  ```
+
+- **Trust.** As for any profile: its skills instruct your agents and its MCP servers run.
+
+[^plugin-installers]: The plugin's own instructions — `npx modern-web-guidance@latest install`, or a harness's `/plugin install` — install it into each harness's own directory, one harness at a time. Here nothing is installed or committed: every harness is pointed at the plugin as it starts, and a launch without the reference is a launch without the plugin.
+[^plugin-order]: A plugin sets no `env` or `settings`, so its place in the stack changes only whose `description` the chooser shows: the topmost's.
+[^plugin-missing]: `no plugin.json at /nix/store/…-source` for a repository that ships skills in some other layout, and `the tree at rev 4dd9683 has no directory nope` for a `?dir=` it does not have. [`check-profile`](#checking-a-profiles-packages) finds either ahead of time, for a reference in a `plugin.json`.
 
 ### Pin a profile (optional)
 
