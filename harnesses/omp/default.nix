@@ -12,10 +12,17 @@ let
   # hide them for every profile. OMP ships the resolved-model badge off, so a
   # subagent's row names the agent and nothing else: which model a worker or
   # reviewer resolved to is invisible, and the badge is the only place that
-  # answer surfaces. A user-set value, including `false`, is never replaced.
+  # answer surfaces. OMP's own `rebuild` reprints the entire transcript on
+  # every width change and every height shrink — 1.7 million characters for a
+  # 3.7 MB session, measured, even for one column — which a terminal relayed
+  # to a viewer (kolu, ssh, a phone) has to deliver every time; `preserve`
+  # repaints the visible screen alone, leaving older scrollback wrapped the
+  # way it already was. A user-set value, including `false` or `rebuild`, is
+  # never replaced.
   alwaysDefaults = (formats.yaml { }).generate "omp-config.yml" {
     hideThinkingBlock = true;
     task.showResolvedModelBadge = true;
+    tui.resizeScrollback = "preserve";
   };
 
   initialization = ''

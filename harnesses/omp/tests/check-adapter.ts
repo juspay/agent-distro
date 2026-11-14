@@ -20,7 +20,7 @@ const work = mkdtempSync(join(tmpdir(), 'omp-adapter-'));
 // harnesses/omp/default.nix generates them, then the profile's
 // `settings.omp` as `--settings` (JSON, as src/plugin/launch.ts prints it).
 const always = join(work, 'always.yml');
-writeFileSync(always, 'hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n');
+writeFileSync(always, 'hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\n');
 const settings = JSON.stringify({
   modelRoles: { default: 'litellm/open-large', slow: 'litellm/open-large', smol: 'litellm/open-small', task: 'litellm/open-large' },
 });
@@ -32,31 +32,35 @@ function fill(config: string, layers = [always, ...profile]) {
 
 // [name, config.yml before, config.yml after or null when the launch must stop]
 const cases: [string, string, string | null][] = [
-  ["empty", "", "hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["comment-only", "# my settings", "# my settings\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["comment-only-nl", "# a\n\n# b\n", "# a\n\n# b\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["setup", "setupVersion: 2\n", "setupVersion: 2\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["old", "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\n", "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n"],
-  ["full", "modelRoles:\n  default: x\n  slow: y\n  smol: z\n  task: w\ntask:\n  showResolvedModelBadge: false\nhideThinkingBlock: false\n", "modelRoles:\n  default: x\n  slow: y\n  smol: z\n  task: w\ntask:\n  showResolvedModelBadge: false\nhideThinkingBlock: false\n"],
-  ["quotes", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n  - x\n  - \"y\"\ne: [1, 2]\nf: {g: h}\n", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n- x\n- \"y\"\ne: [1, 2]\nf: {g: h}\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["seq-noindent", "list:\n- a\n- b\nnested:\n  inner:\n  - c\n", "list:\n- a\n- b\nnested:\n  inner:\n  - c\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["long", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word \n", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["multiline", "block: |\n  line one\n  line two\nfolded: >\n  folded text\n  here\n", "block: |\n  line one\n  line two\nfolded: >\n  folded text here\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["anchors", "base: &b\n  k: v\nother: *b\n", "base: &b\n  k: v\nother: *b\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["task-partial", "task:\n  other: 1 # keep\n", "task:\n  other: 1 # keep\n  showResolvedModelBadge: true\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["tilde", "~\n", "hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["docstart", "---\nkey: v\n", "---\nkey: v\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["unicode", "name: \"héllo ✓\"\n", "name: \"héllo ✓\"\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["empty", "", "hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["comment-only", "# my settings", "# my settings\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["comment-only-nl", "# a\n\n# b\n", "# a\n\n# b\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["setup", "setupVersion: 2\n", "setupVersion: 2\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["old", "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\n", "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\n"],
+  ["full", "modelRoles:\n  default: x\n  slow: y\n  smol: z\n  task: w\ntask:\n  showResolvedModelBadge: false\nhideThinkingBlock: false\ntui:\n  resizeScrollback: rebuild\n", "modelRoles:\n  default: x\n  slow: y\n  smol: z\n  task: w\ntask:\n  showResolvedModelBadge: false\nhideThinkingBlock: false\ntui:\n  resizeScrollback: rebuild\n"],
+  ["quotes", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n  - x\n  - \"y\"\ne: [1, 2]\nf: {g: h}\n", "a: \"double\"\nb: 'single'\nc: plain # trailing\n# between\nd:\n- x\n- \"y\"\ne: [1, 2]\nf: {g: h}\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["seq-noindent", "list:\n- a\n- b\nnested:\n  inner:\n  - c\n", "list:\n- a\n- b\nnested:\n  inner:\n  - c\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["long", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word \n", "long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["multiline", "block: |\n  line one\n  line two\nfolded: >\n  folded text\n  here\n", "block: |\n  line one\n  line two\nfolded: >\n  folded text here\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["anchors", "base: &b\n  k: v\nother: *b\n", "base: &b\n  k: v\nother: *b\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["task-partial", "task:\n  other: 1 # keep\n", "task:\n  other: 1 # keep\n  showResolvedModelBadge: true\nhideThinkingBlock: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  // The resize default joins a `tui:` the user already keeps other keys in,
+  // and never displaces the value of someone who chose OMP's own `rebuild`.
+  ["tui-partial", "tui:\n  completeScrollback: true # keep\n", "tui:\n  completeScrollback: true # keep\n  resizeScrollback: preserve\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["resize-kept", "tui:\n  resizeScrollback: rebuild\n", "tui:\n  resizeScrollback: rebuild\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["tilde", "~\n", "hideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["docstart", "---\nkey: v\n", "---\nkey: v\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["unicode", "name: \"héllo ✓\"\n", "name: \"héllo ✓\"\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
   ["bad-roles", "modelRoles: []\n", null],
   ["null-roles", "modelRoles: null\n", null],
   ["invalid", "modelRoles: [", null],
   ["list-root", "- a\n", null],
   ["scalar-root", "just text\n", null],
   ["task-null", "task: null\n", null],
-  ["alias-section", "base: &r {default: mine}\nmodelRoles: *r\n", "base: &r {default: mine, slow: litellm/open-large, smol: litellm/open-small, task: litellm/open-large}\nmodelRoles: *r\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n"],
-  ["merge", "common: &c {modelRoles: {default: mine}}\n<<: *c\n", "common: &c {modelRoles: {default: mine, slow: litellm/open-large, smol: litellm/open-small, task: litellm/open-large}}\n<<: *c\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n"],
-  ["merge-seq", "a: &a {x: 1}\nb: &b {task: {other: 2}}\n<<: [*a, *b]\n", "a: &a {x: 1}\nb: &b {task: {other: 2, showResolvedModelBadge: true}}\n<<: [*a, *b]\nhideThinkingBlock: true\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
-  ["merge-own-wins", "common: &c {hideThinkingBlock: false}\n<<: *c\nmodelRoles: {default: own}\n", "common: &c {hideThinkingBlock: false}\n<<: *c\nmodelRoles: {default: own, slow: litellm/open-large, smol: litellm/open-small, task: litellm/open-large}\ntask:\n  showResolvedModelBadge: true\n"],
+  ["alias-section", "base: &r {default: mine}\nmodelRoles: *r\n", "base: &r {default: mine, slow: litellm/open-large, smol: litellm/open-small, task: litellm/open-large}\nmodelRoles: *r\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\n"],
+  ["merge", "common: &c {modelRoles: {default: mine}}\n<<: *c\n", "common: &c {modelRoles: {default: mine, slow: litellm/open-large, smol: litellm/open-small, task: litellm/open-large}}\n<<: *c\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\n"],
+  ["merge-seq", "a: &a {x: 1}\nb: &b {task: {other: 2}}\n<<: [*a, *b]\n", "a: &a {x: 1}\nb: &b {task: {other: 2, showResolvedModelBadge: true}}\n<<: [*a, *b]\nhideThinkingBlock: true\ntui:\n  resizeScrollback: preserve\nmodelRoles:\n  default: litellm/open-large\n  slow: litellm/open-large\n  smol: litellm/open-small\n  task: litellm/open-large\n"],
+  ["merge-own-wins", "common: &c {hideThinkingBlock: false}\n<<: *c\nmodelRoles: {default: own}\n", "common: &c {hideThinkingBlock: false}\n<<: *c\nmodelRoles: {default: own, slow: litellm/open-large, smol: litellm/open-small, task: litellm/open-large}\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\n"],
 ];
 // Layouts that differ from ruamel: `yaml` never folds a line (ruamel folded
 // plain scalars and flow collections at 80 columns), re-flows a `>` block,
@@ -95,13 +99,13 @@ test('a config that needs nothing is not rewritten', () => {
 
 test('the layers are applied in order, and each fills only what is absent', () => {
   // The wrapper's own defaults win over a profile's, and a profile's role
-  // reaches OMP where the user has none: exactly the two the user did not set.
+  // reaches OMP where the user has none: exactly the keys left absent.
   const config = join(work, 'ordered.yml');
   writeFileSync(config, 'modelRoles:\n  slow: mine\nhideThinkingBlock: true\n');
   const own = JSON.stringify({ modelRoles: { default: 'litellm/large', slow: 'litellm/large' }, hideThinkingBlock: false });
   assert.equal(fill(config, [always, '--settings', own]).status, 0);
   assert.equal(readFileSync(config, 'utf8'),
-    'modelRoles:\n  slow: mine\n  default: litellm/large\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n');
+    'modelRoles:\n  slow: mine\n  default: litellm/large\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\n');
 });
 
 test('a config that is not UTF-8 stops the launch unchanged', () => {
@@ -126,7 +130,7 @@ test('mode and symlink are kept; no temporary file is left', () => {
   const fd = openSync(real, 'r');
   try {
     assert.equal(fstatSync(fd).mode & 0o777, 0o640);
-    assert.equal(readFileSync(fd, 'utf8'), 'setupVersion: 2\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\n');
+    assert.equal(readFileSync(fd, 'utf8'), 'setupVersion: 2\nhideThinkingBlock: true\ntask:\n  showResolvedModelBadge: true\ntui:\n  resizeScrollback: preserve\n');
   } finally {
     closeSync(fd);
   }

@@ -13,6 +13,7 @@ config = Path.home() / '.omp/agent/config.yml'
 text = config.read_text()
 assert 'hideThinkingBlock: true' in text, text
 assert 'task:\n  showResolvedModelBadge: true' in text, text
+assert 'tui:\n  resizeScrollback: preserve' in text, text
 assert 'modelRoles' not in text, text
 environ = discover()
 # A secret is the VM's own environment, so only the profile's plain values are

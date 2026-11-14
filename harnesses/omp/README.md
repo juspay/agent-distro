@@ -14,7 +14,16 @@ already made the choices the setup wizard asks for, so the launcher exports
 wizard runs as upstream intends. Every profile fills `hideThinkingBlock: true`
 and `task.showResolvedModelBadge: true`, so thinking blocks stay hidden and a
 subagent's row names the model it resolved to; set either to `false` in
-`config.yml` to turn it off again.
+`config.yml` to turn it off again. It also fills `tui.resizeScrollback:
+preserve`: OMP's own `rebuild` clears the terminal's scrollback and reprints
+the whole transcript on every width change and every height shrink
+(1.7 million characters for a 3.7 MB session, measured, even for a
+one-column change), which a relayed terminal has to deliver every time.
+`preserve` repaints only the visible screen; the price is that scrollback
+above it keeps the wrapping it had, because OMP no longer rewrites it. Set
+`tui.resizeScrollback: rebuild` in `config.yml` for upstream's behaviour
+(`append` is the third value: reprint below the old scrollback instead of
+erasing it).
 
 OMP uses an npins release pin. Its source build is loaded from upstream's lock,
 except that every nixpkgs in it is the distribution's shared nixpkgs.
