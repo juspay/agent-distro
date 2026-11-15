@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, VARIABLE, type Adapter, type Report } from '../plugin/launch.ts';
+import { checkIds, type ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -189,6 +190,31 @@ export function mergeState(mode: string, directory: string, fragmentPath: string
 }
 
 type LaunchArgs = Inputs & { config: string };
+
+/** What `pi --list-models` prints when it has none, before its login help. */
+const NO_MODELS = 'No models available.';
+
+/**
+ * `pi --list-models`: a table whose first two columns are the provider and the
+ * id, which `--model` takes as `provider/id`.
+ */
+export const models: ModelSource = {
+  launch: { kind: 'flag', flag: '--model' },
+  list: {
+    args: ['--list-models'],
+    read: (stdout) => {
+      if (stdout.startsWith(NO_MODELS)) return [];
+      const [header, ...rows] = stdout.split('\n').filter((line) => line.trim());
+      if (!/^provider\s+model\s/.test(header ?? '')) {
+        throw new Error(`pi --list-models printed ${JSON.stringify(header ?? '')}, not its table header`);
+      }
+      return checkIds(rows.map((row) => {
+        const [provider, id] = row.trim().split(/\s+/);
+        return `${provider}/${id}`;
+      }));
+    },
+  },
+};
 
 /**
  * At launch: the profile's fragment with every plugin merged into it, written

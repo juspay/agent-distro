@@ -5,6 +5,7 @@
   "sideEffects": false,
   "exports": {
     "./listing": "./listing.ts",
+    "./models": "./models.ts",
     "./profile/reference": "./profile/reference.ts",
     "./update/due": "./update/due.ts",
     "./update/history": "./update/history.ts",

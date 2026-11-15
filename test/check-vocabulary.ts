@@ -29,6 +29,7 @@ const state = modules['./update/state'] as typeof import('../src/update/state.ts
 const reference = modules['./profile/reference'] as typeof import('../src/profile/reference.ts');
 const historyLog = modules['./update/history-log'] as typeof import('../src/update/history-log.ts');
 assert.ok(modules['./listing']?.parseListing, './listing exports parseListing');
+assert.ok(modules['./models']?.parseModels && modules['./models']?.launchWords, './models exports parseModels and launchWords');
 
 // The writer's line is what the reader reads back, newline and all.
 const at = new Date(2026, 9, 15, 2, 0, 7);

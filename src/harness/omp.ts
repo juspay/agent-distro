@@ -22,6 +22,7 @@ import { dirname } from 'node:path';
 import { Document, isAlias, isMap, isScalar, isSeq, parse, parseDocument, type YAMLMap } from 'yaml';
 import { log } from '../log.ts';
 import type { Adapter } from '../plugin/launch.ts';
+import { checkIds, type ModelSource } from '../models.ts';
 import { shellQuote } from '../plugin/launcher.ts';
 import { writeSpecPlugin, type Inputs } from '../plugin/resources.ts';
 import { decodeUtf8, isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -119,6 +120,24 @@ export function fillDefaults(configPath: string, layers: Defaults[]) {
     rmSync(temporary, { force: true });
   }
 }
+
+/**
+ * `omp models --json`: each chat model's `selector`, `provider/id`, which is
+ * what `--model` takes exactly — a bare id is matched fuzzily, and the same id
+ * is served by more than one provider.
+ */
+export const models: ModelSource = {
+  launch: { kind: 'flag', flag: '--model' },
+  list: {
+    args: ['models', '--json'],
+    read: (stdout) => {
+      const printed: unknown = JSON.parse(stdout);
+      const listed = isPlainObject(printed) ? printed.models : undefined;
+      if (!Array.isArray(listed)) throw new Error('omp models --json printed no models array');
+      return checkIds(listed.map((model: unknown) => (isPlainObject(model) ? model.selector : undefined)), 'selector');
+    },
+  },
+};
 
 /** At launch: every plugin's `-e` root, as shell words. */
 export const adapter: Adapter<Inputs, Inputs> = {

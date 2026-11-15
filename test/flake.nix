@@ -200,6 +200,15 @@
               ${agent-distro.packages.${system}.default}
             touch "$out"
           '';
+          # `--models <harness>` without a VM: `unlisted` from the package for
+          # the harnesses with no list command, each list command read through
+          # a stand-in launcher, a failed one failing the command, and the
+          # answer's type.
+          models = pkgs.runCommand "models-check" { } ''
+            ${runtime.node} ${./check-models.ts} ${runtime.tree}/src \
+              ${lib.getExe agent-distro.packages.${system}.default}
+            touch "$out"
+          '';
           # Launchers name nixpkgs by a locked reference, fetched only for a
           # profile with packages (lib/nixpkgs-reference.nix): the package does
           # not hold its source.

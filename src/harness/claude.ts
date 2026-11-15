@@ -23,6 +23,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../log.ts';
 import type { Adapter, Report } from '../plugin/launch.ts';
+import type { ModelSource } from '../models.ts';
 import { launcher, shellQuote } from '../plugin/launcher.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, fileName, launchable } from '../plugin/resources.ts';
@@ -159,6 +160,9 @@ export function settingsArguments(
   if (!Object.keys(settings).length) return [];
   return ['--settings', shellQuote(JSON.stringify(settings))];
 }
+
+/** Claude Code has no command that lists its models: one is named with `--model`. */
+export const models: ModelSource = { launch: { kind: 'flag', flag: '--model' }, list: null };
 
 /**
  * At launch: the `--plugin-dir` arguments for every plugin, as shell words. A
