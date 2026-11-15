@@ -15,7 +15,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
-import { checkIds, type ModelSource } from '../models.ts';
+import type { ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 
@@ -93,8 +93,8 @@ export const models: ModelSource = {
     read: (stdout) => {
       const ids = stdout.split('\n').map((line) => line.trim()).filter(Boolean);
       const bad = ids.find((id) => !/^[^\s/]+\/\S+$/.test(id));
-      if (bad !== undefined) throw new Error(`opencode models printed ${JSON.stringify(bad)}, not provider/id`);
-      return checkIds(ids);
+      if (bad !== undefined) throw new Error(`${JSON.stringify(bad)}, not provider/id`);
+      return ids;
     },
   },
 };

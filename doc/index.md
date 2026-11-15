@@ -208,8 +208,8 @@ Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list`
 [^models-type]: Its shape is stable, typed as `Models` in [src/models.ts](https://github.com/juspay/agent-distro/blob/main/src/models.ts), with its checker `parseModels` and the launch's words for a model, `launchWords`.
 
 ```json
-{"harness":"omp","launch":{"kind":"flag","flag":"--model"},"models":{"kind":"listed","ids":["anthropic/claude-fable-5","litellm/claude-fable-5"]}}
-{"harness":"claude","launch":{"kind":"flag","flag":"--model"},"models":{"kind":"unlisted"}}
+{"launch":{"kind":"flag","flag":"--model"},"models":{"kind":"listed","ids":["anthropic/claude-fable-5","litellm/claude-fable-5"]}}
+{"launch":{"kind":"flag","flag":"--model"},"models":{"kind":"unlisted"}}
 ```
 
 | Harness | Lists with | A launch takes a model as |

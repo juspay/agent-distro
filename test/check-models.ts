@@ -30,7 +30,7 @@ const sources: Record<'omp' | 'opencode' | 'pi', ModelSource> = {
 // starting either, and says how a launch names a model.
 for (const harness of ['claude', 'codex']) {
   const answer: Models = parseModels(JSON.parse(execFileSync(agentDistro, ['--models', harness], { encoding: 'utf8' })));
-  assert.deepEqual(answer, { harness, launch: { kind: 'flag', flag: '--model' }, models: { kind: 'unlisted' } });
+  assert.deepEqual(answer, { launch: { kind: 'flag', flag: '--model' }, models: { kind: 'unlisted' } });
 }
 // The command takes exactly one harness, one the package carries.
 for (const [args, message] of [
@@ -68,7 +68,6 @@ const ompJson = JSON.stringify({
 const omp = listModels('omp', launcher('omp', ompJson, { stderr: 'agent-distro profile: using juspay\n' }), sources.omp);
 assert.deepEqual(argsOf('omp'), ['models', '--json']);
 assert.deepEqual(omp, {
-  harness: 'omp',
   launch: { kind: 'flag', flag: '--model' },
   models: { kind: 'listed', ids: ['anthropic/claude-fable-5', 'litellm/claude-fable-5'] },
 });
@@ -101,8 +100,10 @@ assert.throws(
 );
 // So is output the reader does not recognize.
 for (const [harness, stdout, message] of [
-  ['omp', '{"error":"offline"}', /omp models --json printed what agent-distro cannot read: omp models --json printed no models array/],
+  ['omp', '{"error":"offline"}', /omp models --json printed what agent-distro cannot read: no models array/],
   ['omp', 'not json', /omp models --json printed what agent-distro cannot read/],
+  // An id the harness printed is refused by the answer's own type, naming it.
+  ['omp', '{"models":[{"selector":"a b"}]}', /models\.models\.ids\[0\] is empty or contains whitespace/],
   ['opencode', 'beam-free\n', /not provider\/id/],
   ['pi', 'Warning: something\n', /not its table header/],
 ] as const) {
@@ -110,9 +111,8 @@ for (const [harness, stdout, message] of [
 }
 
 // The answer's type, each refusal naming the field.
-const good = { harness: 'omp', launch: { kind: 'flag', flag: '--model' }, models: { kind: 'listed', ids: ['a/b'] } };
+const good = { launch: { kind: 'flag', flag: '--model' }, models: { kind: 'listed', ids: ['a/b'] } };
 for (const [bad, message] of [
-  [{ ...good, harness: 'a b' }, /models\.harness is empty or contains whitespace/],
   [{ ...good, extra: 1 }, /models has unknown field extra/],
   [{ ...good, launch: { kind: 'env' } }, /models\.launch\.kind is not flag or config/],
   [{ ...good, launch: { kind: 'flag', flag: 'model' } }, /models\.launch\.flag is not an option/],

@@ -22,7 +22,7 @@ import { parseModels, type ModelSource, type Models } from './models.ts';
 /** The answer for `harness`, or a thrown Error whose message is the failure's words. */
 export function listModels(harness: string, launcher: string, source: ModelSource): Models {
   const { launch, list } = source;
-  if (!list) return { harness, launch, models: { kind: 'unlisted' } };
+  if (!list) return { launch, models: { kind: 'unlisted' } };
   const command = [harness, ...list.args].join(' ');
   const result = spawnSync(launcher, list.args, {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -43,7 +43,7 @@ export function listModels(harness: string, launcher: string, source: ModelSourc
   }
   // The answer is checked against its own type before it is printed, so what
   // a consumer parses is never something this command would refuse.
-  return parseModels({ harness, launch, models: { kind: 'listed', ids } });
+  return parseModels({ launch, models: { kind: 'listed', ids } });
 }
 
 if (import.meta.main) {

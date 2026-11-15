@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '../log.ts';
 import { LaunchError, readCached, writeAddressed, VARIABLE, type Adapter, type Report } from '../plugin/launch.ts';
-import { checkIds, type ModelSource } from '../models.ts';
+import type { ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 import { isSystemError, realpath, writeTemporary } from '../util.ts';
@@ -206,12 +206,12 @@ export const models: ModelSource = {
       if (stdout.startsWith(NO_MODELS)) return [];
       const [header, ...rows] = stdout.split('\n').filter((line) => line.trim());
       if (!/^provider\s+model\s/.test(header ?? '')) {
-        throw new Error(`pi --list-models printed ${JSON.stringify(header ?? '')}, not its table header`);
+        throw new Error(`${JSON.stringify(header ?? '')}, not its table header`);
       }
-      return checkIds(rows.map((row) => {
+      return rows.map((row) => {
         const [provider, id] = row.trim().split(/\s+/);
         return `${provider}/${id}`;
-      }));
+      });
     },
   },
 };

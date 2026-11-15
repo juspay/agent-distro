@@ -5,12 +5,10 @@
  * harness, through its launcher, so the profile in effect decides the
  * providers exactly as it would for a launch from the same directory.
  *
- *   { "harness": "omp",
- *     "launch": { "kind": "flag", "flag": "--model" },
+ *   { "launch": { "kind": "flag", "flag": "--model" },
  *     "models": { "kind": "listed", "ids": ["anthropic/claude-fable-5", "litellm/open-large"] } }
  *
- *   { "harness": "claude",
- *     "launch": { "kind": "flag", "flag": "--model" },
+ *   { "launch": { "kind": "flag", "flag": "--model" },
  *     "models": { "kind": "unlisted" } }
  *
  * `listed` is what the harness listed — possibly nothing, when it has no
@@ -33,12 +31,7 @@ export type ModelLaunch =
 /** The models a harness offers, or that it has no way to list them. */
 export type ModelList = { kind: 'listed'; ids: string[] } | { kind: 'unlisted' };
 
-export type Models = {
-  /** The harness asked about, as `--list` names it. */
-  harness: string;
-  launch: ModelLaunch;
-  models: ModelList;
-};
+export type Models = { launch: ModelLaunch; models: ModelList };
 
 /**
  * What a harness's adapter says about its models: how a launch takes one, and
@@ -67,9 +60,14 @@ export function launchWords(launch: ModelLaunch, id: string): { env: Record<stri
   return { env: { [launch.variable]: JSON.stringify({ [launch.key]: id }) }, args: [] };
 }
 
-function object(value: unknown, path: string, keys: string[]): Record<string, unknown> {
+/** An object that is not an array: every value here is one or a refusal. */
+function plain(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${path} is not an object`);
-  const fields = value as Record<string, unknown>;
+  return value as Record<string, unknown>;
+}
+
+function object(value: unknown, path: string, keys: string[]): Record<string, unknown> {
+  const fields = plain(value, path);
   for (const key of keys) if (fields[key] === undefined) throw new Error(`${path}.${key} is missing`);
   const extra = Object.keys(fields).find((key) => !keys.includes(key));
   if (extra !== undefined) throw new Error(`${path} has unknown field ${extra}`);
@@ -78,8 +76,7 @@ function object(value: unknown, path: string, keys: string[]): Record<string, un
 
 /** The `kind` an object at `path` is tagged with; its other fields are its arm's to check. */
 function kindOf(value: unknown, path: string): unknown {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${path} is not an object`);
-  const { kind } = value as { kind?: unknown };
+  const { kind } = plain(value, path) as { kind?: unknown };
   if (kind === undefined) throw new Error(`${path}.kind is missing`);
   return kind;
 }
@@ -101,7 +98,7 @@ function parseLaunch(value: unknown): ModelLaunch {
 }
 
 /** Check that `ids` are model ids, each once; throws naming the first bad one. */
-export function checkIds(ids: unknown, path = 'ids'): string[] {
+function checkIds(ids: unknown, path: string): string[] {
   if (!Array.isArray(ids)) throw new Error(`${path} is not an array`);
   ids.forEach((id, i) => {
     if (!isModelId(id)) throw new Error(`${path}[${i}] is empty or contains whitespace`);
@@ -126,7 +123,6 @@ function parseList(value: unknown): ModelList {
 
 /** Check a parsed `--models` value against `Models`; throws naming the first bad field. */
 export function parseModels(value: unknown): Models {
-  const { harness, launch, models } = object(value, 'models', ['harness', 'launch', 'models']);
-  if (typeof harness !== 'string' || !/^[^\s/]+$/.test(harness)) throw new Error('models.harness is empty or contains whitespace or /');
-  return { harness, launch: parseLaunch(launch), models: parseList(models) };
+  const { launch, models } = object(value, 'models', ['launch', 'models']);
+  return { launch: parseLaunch(launch), models: parseList(models) };
 }
