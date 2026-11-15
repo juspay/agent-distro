@@ -15,6 +15,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LaunchError, readCached, writeAddressed, type Adapter, type Report } from '../plugin/launch.ts';
+import type { ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher } from '../plugin/resources.ts';
 
@@ -79,6 +80,24 @@ function main(out: string, argsPath: string) {
 type LaunchArgs = Inputs & { name: string; config: string };
 /** The session config the launcher writes, and this adapter merges into. */
 type Session = { skills: string[]; mcp: { servers: Record<string, Server> } };
+
+/**
+ * `opencode models`: one `provider/id` per line. OpenCode's terminal interface
+ * has no model flag, so a launch names the model in a config layer of its own,
+ * OPENCODE_CONFIG_CONTENT, which OpenCode reads over OPENCODE_CONFIG.
+ */
+export const models: ModelSource = {
+  launch: { kind: 'config', variable: 'OPENCODE_CONFIG_CONTENT', key: 'model' },
+  list: {
+    args: ['models'],
+    read: (stdout) => {
+      const ids = stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+      const bad = ids.find((id) => !/^[^\s/]+\/\S+$/.test(id));
+      if (bad !== undefined) throw new Error(`${JSON.stringify(bad)}, not provider/id`);
+      return ids;
+    },
+  },
+};
 
 /**
  * At launch: the launcher's session config with every plugin merged into it,

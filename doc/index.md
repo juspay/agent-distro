@@ -98,6 +98,7 @@ agent-distro ./path/to/repo claude
 agent-distro /nix/store/…-agent-distro-profile-juspay-skills omp   # a built profile, by its store path
 agent-distro --list                      # the profiles in effect, then harness title version, one per line
 agent-distro --list --json               # the same, as JSON (below)
+agent-distro --models omp                # the models omp offers from here, and how a launch takes one, as JSON (below)
 ```
 
 - **Precedence.** The positional profile is used exactly, alone. Otherwise the repository's profile is composed over the profiles of `AI_PROFILE` ([Profiles](#profiles)). `AI_HARNESS` takes precedence over a positional harness.
@@ -199,6 +200,31 @@ Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list`
 
 [^plus-suffix]: Without the package's `+` revision suffix.
 [^three-agree]: The plain `--list` and the chooser read the same value, so the three cannot disagree.
+
+### Models as JSON
+
+`agent-distro --models <harness>` prints, on one line, the models that harness offers from the current directory, and how a launch is given one — for programs that ask which model to start a harness with (such as [kolu](https://github.com/juspay/kolu)).[^models-type] It asks the harness itself, through its launcher, so the [profile in effect](#profiles) decides the providers exactly as it would for a launch from here.
+
+[^models-type]: Its shape is stable, typed as `Models` in [src/models.ts](https://github.com/juspay/agent-distro/blob/main/src/models.ts), with its checker `parseModels` and the launch's words for a model, `launchWords`.
+
+```json
+{"launch":{"kind":"flag","flag":"--model"},"models":{"kind":"listed","ids":["anthropic/claude-fable-5","litellm/claude-fable-5"]}}
+{"launch":{"kind":"flag","flag":"--model"},"models":{"kind":"unlisted"}}
+```
+
+| Harness | Lists with | A launch takes a model as |
+| --- | --- | --- |
+| Oh My Pi | `omp models --json` | `--model <id>` |
+| OpenCode | `opencode models` | `OPENCODE_CONFIG_CONTENT='{"model":"<id>"}'`[^opencode-model] |
+| Pi | `pi --list-models` | `--model <id>` |
+| Claude Code, Codex | nothing: `unlisted` | `--model <id>` |
+
+[^opencode-model]: OpenCode's terminal interface has no model flag; this config layer is read over the launch's own.
+
+- **Ids.** Each is exactly what the launch takes, `provider/id`, so a model two providers serve is two ids.
+- **Three answers.** `listed` (possibly empty, when the harness has no model to offer), `unlisted` (the harness has no list command: a model is whatever the user names), or a failure.
+- **Failure.** A list command that fails, or prints what agent-distro cannot read, exits 1 with nothing on stdout and, on stderr, the command and everything it printed there — never an empty list. Its stdin is not a terminal, so a `secret` the profile still needs is a failure, not a prompt.
+- **Arguments.** Exactly one harness the package carries; anything else exits 2.
 
 ### Plugins at launch
 
@@ -374,9 +400,10 @@ AGENT_DISTRO_LOG=debug claude
 bin/<harness>…                      # one launcher per harness
 bin/agent-distro                    # the picker, the package's main program
 share/agent-distro/versions         # <harness>\t<title>\t<version>, one line per harness, in menu order
+share/agent-distro/answers          # one flag per line: what the picker answers without launching a harness
 ```
 
-`versions` lists the harness packages this build pinned, the same values `--list` prints, so the two cannot drift. A [profile](#profiles) needs no package of its own: any agent-distro reads one at launch.
+`versions` lists the harness packages this build pinned, the same values `--list` prints, so the two cannot drift. `answers` names the flags this package's picker answers (`--list`, `--models`), so a program holding a package learns what it can ask from the package itself, never from a launch's error; a package without the file predates `--models`. A [profile](#profiles) needs no package of its own: any agent-distro reads one at launch.
 
 ## Library
 
@@ -457,7 +484,7 @@ agent-distro.lib.mkUpdater { pkgs; package; flake; attribute ? "default"; stateD
 
 The updater's schedule is one `lib/schedule.nix`, exposed as `agent-distro.lib.schedule`: `updateHoursUTC`, `defaultFrequency`, `updatePeriodSeconds` and `updateOffsetSeconds`. The module, `mkUpdater` and any consumer read the same numbers.
 
-The updater's words are a small TypeScript library a program can import rather than repeat: `src/package.json` names it `@juspay/agent-distro`, with no dependencies. `./update/due` is the due rule (`updateDue`), the scheduled run's `SCHEDULED_ATTEMPTS` and `SCHEDULED_RETRY_SECONDS`, and the `last-success` reader (`parseStamp`); `./update/state` names a state directory's `current` link and `last-success` stamp (`currentLink`, `lastSuccessFile`); `./update/history` writes and reads a history line (`historyLine`, `parseHistoryLine`, `parseHistory`); `./update/history-log` is the log's one writer, `appendHistory`, which keeps its newest `HISTORY_LINES` under a lock every writer shares — the one module here that touches files; `./update/versions` reads a package's `share/agent-distro/versions` (`parseVersions`) and words what changed between two (`changes`); `./profile/reference` says what a profile reference names (`classifyReference`: a path, a flake reference, or nothing), the `nix` arguments that fetch a flake reference (`prefetchArgs`) and where its answer put it (`prefetchedTree`) — the launch's own rules, so a program that builds profiles ahead of a launch runs the fetch itself and reads it the same way; `./listing` is the `--list --json` value and its checker (`parseListing`). kolu, which builds profiles and delivers the package to hosts of its own and appends to the same history log, imports them from its pin of this repository.
+The updater's words are a small TypeScript library a program can import rather than repeat: `src/package.json` names it `@juspay/agent-distro`, with no dependencies. `./update/due` is the due rule (`updateDue`), the scheduled run's `SCHEDULED_ATTEMPTS` and `SCHEDULED_RETRY_SECONDS`, and the `last-success` reader (`parseStamp`); `./update/state` names a state directory's `current` link and `last-success` stamp (`currentLink`, `lastSuccessFile`); `./update/history` writes and reads a history line (`historyLine`, `parseHistoryLine`, `parseHistory`); `./update/history-log` is the log's one writer, `appendHistory`, which keeps its newest `HISTORY_LINES` under a lock every writer shares — the one module here that touches files; `./update/versions` reads a package's `share/agent-distro/versions` (`parseVersions`) and words what changed between two (`changes`); `./profile/reference` says what a profile reference names (`classifyReference`: a path, a flake reference, or nothing), the `nix` arguments that fetch a flake reference (`prefetchArgs`) and where its answer put it (`prefetchedTree`) — the launch's own rules, so a program that builds profiles ahead of a launch runs the fetch itself and reads it the same way; `./listing` is the `--list --json` value and its checker (`parseListing`); `./models` is the `--models` value, its checker (`parseModels`) and the words a launch takes for a model (`launchWords`). kolu, which builds profiles and delivers the package to hosts of its own and appends to the same history log, imports them from its pin of this repository.
 
 ## Profiles
 
@@ -864,6 +891,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
+| `models` | `--models`: `unlisted` for the harnesses without a list command, each list command's output read, a failed one failing the command, and the answer's type |
 | `picker-layout` | the chooser's cell widths, truncation and box at common terminal sizes |
 | `picker-auth` | the auth probes over fixture homes and stores |
 
@@ -921,6 +949,7 @@ Create `harnesses/<name>/` with four files:
 - **Alongside.** Pins in `npins/`, scripts in `tests/`, and an optional custom updater in `update.py`.
 - **No registration.** Nothing outside this directory needs registration.[^discovery]
 - **Logic beyond shell.** Keep it in `src/harness/<name>.ts` and call it with `(import ../../lib/runtime.nix pkgs).script "harness/<name>.ts"`.[^beyond-shell]
+- **Models.** `src/harness/<name>.ts` also exports `models`: how a launch takes a model, and the arguments that make the harness list its models with a reader of what it prints — or `list: null` when it has none (`ModelSource`, [src/models.ts](https://github.com/juspay/agent-distro/blob/main/src/models.ts)).
 - **Unit checks.** Those that need no VM go in `tests/check-adapter.ts`, which receives the runtime's `src` and the harness directory.
 - **Checks.** Checks declare `{ name; script; requires ? []; packages ? []; env ? {}; diskSize ? null; }`.[^check-packages] `script` is VM-driver Python.[^guest-script]
 - **Gateway checks.** They receive the shared fake service and launchers configured against it.

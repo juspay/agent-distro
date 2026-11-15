@@ -1,6 +1,7 @@
 # The agent-distro package: one command per harness, the picker over them, and
 # `bin/agent-distro` as the picker. `share/agent-distro/versions` lists the
-# harnesses it carries and their versions (src/listing.ts).
+# harnesses it carries and their versions (src/listing.ts), and
+# `share/agent-distro/answers` the flags its picker answers (lib/picker.nix).
 #
 # No profile is part of the build. A profile is a `plugin.json` read when a
 # harness starts, or one built into its own store path
@@ -42,6 +43,7 @@ commands // {
     postBuild = ''
       mkdir -p "$out/share/agent-distro"
       cp ${versions} "$out/share/agent-distro/versions"
+      cp ${pkgs.writeText "agent-distro-answers" (lib.concatMapStrings (flag: "${flag}\n") picker.passthru.answers)} "$out/share/agent-distro/answers"
     '';
     meta.mainProgram = "agent-distro";
     passthru = {

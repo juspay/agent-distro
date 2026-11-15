@@ -26,6 +26,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync,
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { LaunchError, STALE_DAYS, type Adapter } from '../plugin/launch.ts';
+import type { ModelSource } from '../models.ts';
 import { shellQuote } from '../plugin/launcher.ts';
 import { writeSpecPlugin, type Inputs } from '../plugin/resources.ts';
 
@@ -39,6 +40,9 @@ const marketplaceName = (key: string) => PREFIX + createHash('sha256').update(ke
 
 /** A TOML basic string; JSON's escapes are all valid TOML. */
 const tomlString = (value: string) => JSON.stringify(value);
+
+/** Codex has no command that lists its models: one is named with `--model`. */
+export const models: ModelSource = { launch: { kind: 'flag', flag: '--model' }, list: null };
 
 export const adapter: Adapter<LaunchArgs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
