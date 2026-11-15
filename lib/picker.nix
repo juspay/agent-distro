@@ -40,11 +40,17 @@ let
   modelArms = block "        " (map (harness: "2:${harness}) exec ${runtime.script "models-cli.ts"} ${harness} ${lib.getExe launchers.${harness}} ;;") names);
   quote = lib.escapeShellArg;
   noTty = [ "agent-distro picker: error: set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init names)}, or ${lib.last names}, use agent-distro <harness>, or run this from a terminal." ];
+  # The flags this picker answers without launching a harness — the `--list`
+  # and `--models` arms below. The package ships them as
+  # `share/agent-distro/answers` (lib/mk-launchers.nix), so a consumer holding
+  # an older package learns it cannot ask from the package itself, never from
+  # a launch's error.
+  answers = [ "--list" "--models" ];
 in
 writeShellApplication {
   name = "agent-distro";
   # Not `info`: NixOS installs a package's `info` as its texinfo output.
-  passthru = { inherit listing infoFile; };
+  passthru = { inherit listing infoFile answers; };
   text = ''
     invalid=${quote "agent-distro picker: error: invalid AI_HARNESS; valid values: ${lib.concatStringsSep ", " names}."}
 

@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 // Erased at run time; the modules themselves come from SRC.
 import type { ModelSource, Models } from '../src/models.ts';
 
@@ -43,6 +43,12 @@ for (const [args, message] of [
   assert.equal(result.stdout, '');
   assert.match(result.stderr, message);
 }
+
+// The package says what its picker answers, and answers it: a consumer reads
+// the file instead of trying a flag an older package would launch with.
+const answers = readFileSync(join(dirname(dirname(agentDistro)), 'share', 'agent-distro', 'answers'), 'utf8');
+assert.deepEqual(answers.trimEnd().split('\n'), ['--list', '--models']);
+assert.equal(spawnSync(agentDistro, ['--list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).status, 0);
 
 // A stand-in launcher: prints `stdout` and `stderr`, exits `status`, and
 // records the arguments it was given.

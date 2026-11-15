@@ -400,9 +400,10 @@ AGENT_DISTRO_LOG=debug claude
 bin/<harness>…                      # one launcher per harness
 bin/agent-distro                    # the picker, the package's main program
 share/agent-distro/versions         # <harness>\t<title>\t<version>, one line per harness, in menu order
+share/agent-distro/answers          # one flag per line: what the picker answers without launching a harness
 ```
 
-`versions` lists the harness packages this build pinned, the same values `--list` prints, so the two cannot drift. A [profile](#profiles) needs no package of its own: any agent-distro reads one at launch.
+`versions` lists the harness packages this build pinned, the same values `--list` prints, so the two cannot drift. `answers` names the flags this package's picker answers (`--list`, `--models`), so a program holding a package learns what it can ask from the package itself, never from a launch's error; a package without the file predates `--models`. A [profile](#profiles) needs no package of its own: any agent-distro reads one at launch.
 
 ## Library
 
