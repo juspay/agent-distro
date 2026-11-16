@@ -38,14 +38,17 @@ let
   # `--models <harness>`: src/models-cli.ts asks that harness's own launcher,
   # so the profile in effect decides its providers as it would for a launch.
   modelArms = block "        " (map (harness: "2:${harness}) exec ${runtime.script "models-cli.ts"} ${harness} ${lib.getExe launchers.${harness}} ;;") names);
+  # `--launch <harness>`: how a launch takes a model, from the harness's
+  # adapter alone. No launcher is named here, so nothing it could fail on runs.
+  launchArms = block "        " (map (harness: "2:${harness}) exec ${runtime.script "model-launch-cli.ts"} ${harness} ;;") names);
   quote = lib.escapeShellArg;
   noTty = [ "agent-distro picker: error: set AI_HARNESS to ${lib.concatStringsSep ", " (lib.init names)}, or ${lib.last names}, use agent-distro <harness>, or run this from a terminal." ];
-  # The flags this picker answers without launching a harness — the `--list`
-  # and `--models` arms below. The package ships them as
+  # The flags this picker answers without launching a harness — the `--list`,
+  # `--models` and `--launch` arms below. The package ships them as
   # `share/agent-distro/answers` (lib/mk-launchers.nix), so a consumer holding
   # an older package learns it cannot ask from the package itself, never from
   # a launch's error.
-  answers = [ "--list" "--models" ];
+  answers = [ "--list" "--models" "--launch" ];
 in
 writeShellApplication {
   name = "agent-distro";
@@ -74,6 +77,13 @@ writeShellApplication {
       case "$#:''${2-}" in${modelArms}
         2:*) echo ${quote "agent-distro picker: error: --models takes one of ${lib.concatStringsSep ", " names}."} >&2; exit 2 ;;
         *) echo "agent-distro picker: usage: agent-distro --models <harness>" >&2; exit 2 ;;
+      esac
+    fi
+
+    if [ "''${1-}" = --launch ]; then
+      case "$#:''${2-}" in${launchArms}
+        2:*) echo ${quote "agent-distro picker: error: --launch takes one of ${lib.concatStringsSep ", " names}."} >&2; exit 2 ;;
+        *) echo "agent-distro picker: usage: agent-distro --launch <harness>" >&2; exit 2 ;;
       esac
     fi
 

@@ -6,6 +6,10 @@
  * the command with the harness's words and never answers an empty list; and
  * the answer's type and how a launch takes a model.
  *
+ * And `agent-distro --launch HARNESS`: for every harness the package carries,
+ * its adapter's word on how a launch takes a model, answered where a launch
+ * (and so a list) could not even start.
+ *
  * Usage: node check-models.ts SRC AGENT_DISTRO
  */
 import assert from 'node:assert/strict';
@@ -14,10 +18,10 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 // Erased at run time; the modules themselves come from SRC.
-import type { ModelSource, Models } from '../src/models.ts';
+import type { Launch, ModelSource, Models } from '../src/models.ts';
 
 const [src, agentDistro] = process.argv.slice(2);
-const { parseModels, launchWords } = await import(join(src, 'models.ts'));
+const { parseModels, parseLaunchAnswer, launchWords } = await import(join(src, 'models.ts'));
 const { listModels } = await import(join(src, 'models-cli.ts'));
 // Each listing harness's own word on its models, from its adapter.
 const sources: Record<'omp' | 'opencode' | 'pi', ModelSource> = {
@@ -47,8 +51,46 @@ for (const [args, message] of [
 // The package says what its picker answers, and answers it: a consumer reads
 // the file instead of trying a flag an older package would launch with.
 const answers = readFileSync(join(dirname(dirname(agentDistro)), 'share', 'agent-distro', 'answers'), 'utf8');
-assert.deepEqual(answers.trimEnd().split('\n'), ['--list', '--models']);
+assert.deepEqual(answers.trimEnd().split('\n'), ['--list', '--models', '--launch']);
 assert.equal(spawnSync(agentDistro, ['--list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).status, 0);
+
+// `--launch`: every harness the package carries answers its adapter's word.
+const carried: string[] = JSON.parse(execFileSync(agentDistro, ['--list', '--json'], { encoding: 'utf8' }))
+  .harnesses.map((harness: { name: string }) => harness.name);
+assert.ok(carried.length > 0);
+for (const harness of carried) {
+  const { models } = await import(join(src, 'harness', `${harness}.ts`)) as { models: ModelSource };
+  const answer: Launch = parseLaunchAnswer(JSON.parse(execFileSync(agentDistro, ['--launch', harness], { encoding: 'utf8' })));
+  assert.deepEqual(answer, { model: models.launch }, harness);
+}
+// It runs no harness: a profile no launch could read fails `--models omp`,
+// whose launcher resolves it before listing, and leaves `--launch` answering.
+const unreadable = { ...process.env, AI_PROFILE: '/nonexistent/agent-distro-profile' };
+const listed = spawnSync(agentDistro, ['--models', 'omp'], { encoding: 'utf8', env: unreadable });
+assert.notEqual(listed.status, 0, '--models omp read a profile that does not exist');
+for (const harness of carried) {
+  const launched = spawnSync(agentDistro, ['--launch', harness], { encoding: 'utf8', env: unreadable });
+  assert.equal(launched.status, 0, `${harness}: ${launched.stderr}`);
+  assert.equal(launched.stderr, '', harness);
+}
+for (const [args, message] of [
+  [['--launch'], /usage: agent-distro --launch <harness>/],
+  [['--launch', 'claude', 'extra'], /usage: agent-distro --launch <harness>/],
+  [['--launch', 'nope'], /--launch takes one of .*claude/],
+] as const) {
+  const result = spawnSync(agentDistro, args, { encoding: 'utf8' });
+  assert.equal(result.status, 2, args.join(' '));
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, message);
+}
+for (const [bad, message] of [
+  [{}, /launch\.model/],
+  [{ model: { kind: 'flag', flag: '--model' }, extra: 1 }, /launch/],
+  [{ model: { kind: 'flag', flag: 'model' } }, /launch\.model\.flag is not an option/],
+  [{ model: { kind: 'sideways' } }, /launch\.model\.kind is not flag or config/],
+] as const) {
+  assert.throws(() => parseLaunchAnswer(structuredClone(bad)), message, JSON.stringify(bad));
+}
 
 // A stand-in launcher: prints `stdout` and `stderr`, exits `status`, and
 // records the arguments it was given.
@@ -140,4 +182,4 @@ assert.deepEqual(launchWords({ kind: 'config', variable: 'OPENCODE_CONFIG_CONTEN
   { env: { OPENCODE_CONFIG_CONTENT: '{"model":"litellm/open-large"}' }, args: [] });
 assert.throws(() => launchWords({ kind: 'flag', flag: '--model' }, 'two words'), /contains whitespace/);
 
-console.log(`--models: unlisted for claude and codex; omp ${omp.models.kind}, opencode, pi read; failures fail`);
+console.log(`--models: unlisted for claude and codex; omp ${omp.models.kind}, opencode, pi read; failures fail. --launch: ${carried.join(', ')}, without a launch`);
