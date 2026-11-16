@@ -99,6 +99,7 @@ agent-distro /nix/store/…-agent-distro-profile-juspay-skills omp   # a built p
 agent-distro --list                      # the profiles in effect, then harness title version, one per line
 agent-distro --list --json               # the same, as JSON (below)
 agent-distro --models omp                # the models omp offers from here, and how a launch takes one, as JSON (below)
+agent-distro --launch omp                # how a launch of omp takes a model, as JSON, without running omp (below)
 ```
 
 - **Precedence.** The positional profile is used exactly, alone. Otherwise the repository's profile is composed over the profiles of `AI_PROFILE` ([Profiles](#profiles)). `AI_HARNESS` takes precedence over a positional harness.
@@ -225,6 +226,19 @@ Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list`
 - **Three answers.** `listed` (possibly empty, when the harness has no model to offer), `unlisted` (the harness has no list command: a model is whatever the user names), or a failure.
 - **Failure.** A list command that fails, or prints what agent-distro cannot read, exits 1 with nothing on stdout and, on stderr, the command and everything it printed there — never an empty list. Its stdin is not a terminal, so a `secret` the profile still needs is a failure, not a prompt.
 - **Arguments.** Exactly one harness the package carries; anything else exits 2.
+
+### How a launch takes a model
+
+`agent-distro --launch <harness>` prints, on one line, only how a launch of that harness is given a model: the `launch` half of `--models`, keyed by what it takes.[^launch-type]
+
+```json
+{"model":{"kind":"flag","flag":"--model"}}
+{"model":{"kind":"config","variable":"OPENCODE_CONFIG_CONTENT","key":"model"}}
+```
+
+It reads the harness's adapter and nothing else: no launcher, no profile, no harness process. So it answers wherever the package is installed, even where `--models` fails today (a gateway down, a key the environment lacks). A program that starts a harness on a model it already has asks `--launch`; it asks `--models` only to offer or check one. It takes exactly one harness the package carries; anything else exits 2.
+
+[^launch-type]: Typed as `Launch` in [src/models.ts](https://github.com/juspay/agent-distro/blob/main/src/models.ts), with its checker `parseLaunchAnswer`.
 
 ### Plugins at launch
 
@@ -403,7 +417,7 @@ share/agent-distro/versions         # <harness>\t<title>\t<version>, one line pe
 share/agent-distro/answers          # one flag per line: what the picker answers without launching a harness
 ```
 
-`versions` lists the harness packages this build pinned, the same values `--list` prints, so the two cannot drift. `answers` names the flags this package's picker answers (`--list`, `--models`), so a program holding a package learns what it can ask from the package itself, never from a launch's error; a package without the file predates `--models`. A [profile](#profiles) needs no package of its own: any agent-distro reads one at launch.
+`versions` lists the harness packages this build pinned, the same values `--list` prints, so the two cannot drift. `answers` names the flags this package's picker answers (`--list`, `--models`, `--launch`), so a program holding a package learns what it can ask from the package itself, never from a launch's error; a package without the file predates `--models`, and one whose file lacks a flag predates that flag. A [profile](#profiles) needs no package of its own: any agent-distro reads one at launch.
 
 ## Library
 
@@ -891,7 +905,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
-| `models` | `--models`: `unlisted` for the harnesses without a list command, each list command's output read, a failed one failing the command, and the answer's type |
+| `models` | `--models`: `unlisted` for the harnesses without a list command, each list command's output read, a failed one failing the command, and the answer's type; `--launch`: every harness's adapter word, answered where a launch could not start |
 | `picker-layout` | the chooser's cell widths, truncation and box at common terminal sizes |
 | `picker-auth` | the auth probes over fixture homes and stores |
 

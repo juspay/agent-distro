@@ -34,6 +34,17 @@ export type ModelList = { kind: 'listed'; ids: string[] } | { kind: 'unlisted' }
 export type Models = { launch: ModelLaunch; models: ModelList };
 
 /**
+ * What `agent-distro --launch HARNESS` prints: how a launch of that harness
+ * takes a model. It is the adapter's own static word, answered without running
+ * the harness, so it cannot fail for the reasons a list can (a gateway down, a
+ * key the environment lacks): a consumer starting a harness on a model it
+ * already has asks this, never `--models`.
+ *
+ *   { "model": { "kind": "flag", "flag": "--model" } }
+ */
+export type Launch = { model: ModelLaunch };
+
+/**
  * What a harness's adapter says about its models: how a launch takes one, and
  * the arguments that make the harness print them with the reader of what it
  * printed, or `null` when the harness has no such command.
@@ -81,20 +92,20 @@ function kindOf(value: unknown, path: string): unknown {
   return kind;
 }
 
-function parseLaunch(value: unknown): ModelLaunch {
-  const kind = kindOf(value, 'models.launch');
+function parseLaunch(value: unknown, path: string): ModelLaunch {
+  const kind = kindOf(value, path);
   if (kind === 'flag') {
-    const { flag } = object(value, 'models.launch', ['kind', 'flag']);
-    if (typeof flag !== 'string' || !/^-\S+$/.test(flag)) throw new Error('models.launch.flag is not an option');
+    const { flag } = object(value, path, ['kind', 'flag']);
+    if (typeof flag !== 'string' || !/^-\S+$/.test(flag)) throw new Error(`${path}.flag is not an option`);
     return { kind, flag };
   }
   if (kind === 'config') {
-    const { variable, key } = object(value, 'models.launch', ['kind', 'variable', 'key']);
-    if (!isVariable(variable)) throw new Error('models.launch.variable is not a variable name');
-    if (typeof key !== 'string' || !key) throw new Error('models.launch.key is empty or not a string');
+    const { variable, key } = object(value, path, ['kind', 'variable', 'key']);
+    if (!isVariable(variable)) throw new Error(`${path}.variable is not a variable name`);
+    if (typeof key !== 'string' || !key) throw new Error(`${path}.key is empty or not a string`);
     return { kind, variable, key };
   }
-  throw new Error('models.launch.kind is not flag or config');
+  throw new Error(`${path}.kind is not flag or config`);
 }
 
 /** Check that `ids` are model ids, each once; throws naming the first bad one. */
@@ -124,5 +135,11 @@ function parseList(value: unknown): ModelList {
 /** Check a parsed `--models` value against `Models`; throws naming the first bad field. */
 export function parseModels(value: unknown): Models {
   const { launch, models } = object(value, 'models', ['launch', 'models']);
-  return { launch: parseLaunch(launch), models: parseList(models) };
+  return { launch: parseLaunch(launch, 'models.launch'), models: parseList(models) };
+}
+
+/** Check a parsed `--launch` value against `Launch`; throws naming the first bad field. */
+export function parseLaunchAnswer(value: unknown): Launch {
+  const { model } = object(value, 'launch', ['model']);
+  return { model: parseLaunch(model, 'launch.model') };
 }
