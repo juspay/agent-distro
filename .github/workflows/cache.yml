@@ -124,19 +124,26 @@ jobs:
           # pull request — and the action's default since #169, so the
           # expression that used to say it here would only drift from it.
 
-  # The content-addressed package and the index that names it, through the
-  # publisher `@kolu/surface` and this distribution now share
-  # (juspay/kolu#2294). The action installs the Nix it rewrites with, rewrites
-  # the package, runs a program out of the rewrite, pushes the closure, reads
-  # it back from the cache into a fresh store, and writes
-  # `<rev>/<system>/<attribute>.json` — plus `latest/` on a push to main — to
-  # the index `binary-cache.json` names (kept equal to lib/ca-index.nix). The
+  # The package, made fetchable, and the index that names it, through the
+  # publisher `@kolu/surface` and this distribution share (juspay/kolu#2294).
+  # On each system the action installs the Nix it rewrites with, builds the
+  # package, rewrites it content-addressed (Linux only) and runs a program out
+  # of the rewrite. It then pushes each closure WHOLE to the cache, nixpkgs
+  # paths included, because a host fetches with `nix copy --from <the cache>`,
+  # which reads no other cache. Then it reads every path it published back
+  # from that cache alone, each into an empty store: the signed package on
+  # both systems, and the rewrite on Linux. Only after that does it write
+  # `<rev>/<system>/<attribute>.json` (plus `latest/` on a push to main) to the
+  # index `binary-cache.json` names (kept equal to lib/ca-index.nix). A closure
+  # a host cannot fetch fails this job, and the index does not move. The
   # attribute is the one package's: `default` (src/update/ca-index.ts
   # `ATTRIBUTE`).
   #
   # Its own job, after the warm: the action's Nix has to be this job's only
   # Nix, and the signed closures `build` just pushed are what this job's builds
-  # then substitute instead of compiling.
+  # then substitute instead of compiling. The warm in `build` skips what
+  # cache.nixos.org signs, so it is a warm only; this job is what makes the
+  # package fetchable.
   publish:
     needs: build
     strategy:
@@ -168,14 +175,17 @@ jobs:
             echo "PACKAGES"; } >> "$GITHUB_OUTPUT"
 
       # Its client is the declaration's `pusher` — `{"kind": "odu"}` — not an
-      # input here: the action pushes with `odu cache push --cache
+      # input here: the action pushes with `odu cache push --whole --cache
       # https://cache.kolu.dev/kolu-r2`, run from its own pinned odu, and takes
       # `odu-cache-token` as the credential that push needs. The declaration
       # names the client and the cache names the address: the substituter's own
       # `nix-cache-info` carries the origin to push to and the bucket to push
       # into, so `pusher` is a kind and nothing else (juspay/kolu#2344,
       # juspay/odu#150 — `bucket` and `origin` are refused).
-      - uses: juspay/kolu/.github/actions/publish-closure@38ee53364cfcb5fe3a7dfe5e8ef7707bca039c74
+      #
+      # kolu master `d3f4185`: juspay/kolu#2400 merged, the whole push and the
+      # read-back of every published path (juspay/kolu#2398).
+      - uses: juspay/kolu/.github/actions/publish-closure@d3f418542a8db4821cad5f2a7042b2036a9bd2da
         with:
           installables: ${{ steps.package.outputs.installables }}
           # Where the package goes and where its index is written: the
@@ -191,5 +201,5 @@ jobs:
           smoke: ${{ steps.package.outputs.smoke }}
           # The write token for the `kolu-r2` bucket, exported by the action as
           # `ODU_CACHE_TOKEN`. A fork pull request has no secret: the action
-          # rewrites, smokes and import-verifies, and pushes nothing.
+          # rewrites and smokes, and pushes and verifies nothing.
           odu-cache-token: ${{ secrets.ODU_CACHE_TOKEN }}

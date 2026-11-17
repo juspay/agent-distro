@@ -2,6 +2,14 @@
 # must repeat it literally (flake attributes cannot be computed), so
 # .github/scripts/check-cache-config.py keeps the copies equal.
 #
+# THIS CACHE HOLDS THE WHOLE CLOSURE of every path the index (lib/ca-index.nix)
+# names, and a fetcher reads no other cache. A host takes the package with
+# `nix copy --from <url> <path>`, which stops at the first path this cache
+# lacks, so nothing it needs may be left to cache.nixos.org. The publisher
+# (kolu's `publish-closure` action, in cache.yml) makes that true: it pushes
+# each closure whole and imports every published path from this cache alone,
+# into an empty store, before the index names it.
+#
 # It is odu's cache (`odu cache`): one bucket, read straight from the store it
 # lives in (`url` is that store's URL with the bucket as a path), and the server
 # signs every path on ingest. `pusher` is how a publisher knows WHICH client
