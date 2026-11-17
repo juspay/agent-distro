@@ -9,9 +9,9 @@
       },
       "branch": "main",
       "submodules": false,
-      "revision": "2c0782ecf4d07e4395cb56b33555fa4eb30f6784",
-      "url": "https://github.com/sadjow/claude-code-nix/archive/2c0782ecf4d07e4395cb56b33555fa4eb30f6784.tar.gz",
-      "hash": "sha256-ayfDlD5d9U5b06xxwZndph+/tRgusLaKg4Dcj7bvnEM="
+      "revision": "ab27a02c0f2d046e8d4ed53fb03c0649bdfae191",
+      "url": "https://github.com/sadjow/claude-code-nix/archive/ab27a02c0f2d046e8d4ed53fb03c0649bdfae191.tar.gz",
+      "hash": "sha256-JggThKdK7+7Dm0J2Mg6k3F7+rdU4uD25MW1t48FeEB4="
     }
   },
   "version": 8
