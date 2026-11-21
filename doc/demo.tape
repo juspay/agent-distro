@@ -1,36 +1,36 @@
-# The README's demo: switch profile, filter to a harness, land in it.
-# Re-record with `just demo`, which assembles doc/demo.gif from the frames
-# this writes.
+# The website's demo: in a fresh copy of the template, open the picker, filter
+# to one agent, and print its version. `just demo` sets up the scratch
+# repository and the empty home this runs in, and assembles doc/demo.gif,
+# doc/demo.png and doc/og.png from the frames this writes.
 Output "doc/frames/"
 
 Set Shell bash
 Set FontSize 20
-Set Width 1400
-Set Height 460
+Set Width 1100
+Set Height 440
 Set Padding 30
-Set WaitTimeout 120s
+Set WaitTimeout 60s
 
-# Record this checkout, not the published flake: the command typed below is
-# the one users run, and shows what it will draw once this checkout is on main.
+# The command typed below is the one users run. Here it runs the picker that
+# `just demo` built from this checkout, so the take shows what this checkout
+# draws.
 Hide
-Type `picker=$(nix build --no-link --print-out-paths . 2>/dev/null); nix() { if [ "$1 $2" = "run github:juspay/agent-distro" ]; then shift 2; "$picker/bin/agent-distro" "$@"; else command nix "$@"; fi; }; clear`
+Type `nix() { if [ "$1 $2" = "run github:juspay/agent-distro" ]; then shift 2; agent-distro "$@"; else command nix "$@"; fi; }; cd /tmp/agent-distro-demo/my-distribution && clear`
 Enter
 Wait
 Show
 
-Type "XDG_STATE_HOME=$(mktemp -d) nix run github:juspay/agent-distro -- --version"
+Type "nix run github:juspay/agent-distro -- --version"
 Sleep 500ms
 Enter
 Wait+Screen /Enter launch/
 Sleep 1500ms
-Right
-Sleep 1200ms
-Left
-Sleep 800ms
 Type "/"
 Sleep 400ms
 Type@150ms "claude"
-Sleep 1200ms
+# doc/demo.png is the frame 4.6 seconds before the end: the list filtered to
+# one agent, inside these two seconds. `just demo` cuts doc/og.png from it.
+Sleep 2s
 Enter
 Wait+Screen /\(Claude Code\)/
 Sleep 3s
