@@ -12,9 +12,9 @@
       "release_prefix": null,
       "submodules": false,
       "version": "v19.1.0",
-      "revision": "0f0ef9d44f1f5f4faf31a7461c8842e2ba4cb61f",
+      "revision": "c61a4881a55389ca576662d62dbee0399463a0c1",
       "url": "https://api.github.com/repos/can1357/oh-my-pi/tarball/refs/tags/v19.1.0",
-      "hash": "sha256-PagAV3BXWfh6XbgDEeLO/vIRnuhTTNho9FtqdQVG3Aw="
+      "hash": "sha256-ev+4PEKRCMX0oYnUFdZNNAUYcjeMdnGozr33fn0LlCs="
     }
   },
   "version": 8
