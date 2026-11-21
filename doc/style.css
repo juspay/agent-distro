@@ -356,6 +356,7 @@ table.cmp :is(th, td):first-child { width: 8.5rem; padding-left: 0; }
 table.cmp tbody th { color: var(--text-2); font-weight: 500; }
 table.cmp :is(th, td):nth-child(2) { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); font-weight: 600; }
 table.cmp thead th:nth-child(2) { color: var(--accent); }
+table.cmp thead a { text-decoration: underline; text-decoration-color: var(--line-2); }
 .compare .prose { margin-top: 18px; max-width: none; }
 .compare .prose a { overflow-wrap: anywhere; }
 .fit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: stretch; margin-top: 28px; }

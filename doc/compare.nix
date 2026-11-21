@@ -18,7 +18,8 @@ in
 
   others = [
     { key = "apm"; name = "APM"; url = apm; }
-    { key = "skills"; name = "skills"; url = skills; }
+    # The backslash keeps the apostrophe straight through pandoc's smart quotes.
+    { key = "skills"; name = "Vercel\\'s skills"; url = skills; }
     { key = "llmAgents"; name = "llm-agents.nix"; url = llmAgents; }
   ];
 
