@@ -61,22 +61,44 @@ site:
 site-serve:
     nix run ./doc
 
-# Re-record the demo GIF and the website's still images (needs network)
+# Re-record the demo GIF and the website's still images (needs network).
+# The take runs in a fresh copy of templates/default, with an empty home and
+# none of your environment, so it shows no account and no path of yours.
 demo:
-    rm -rf doc/frames
-    nix run nixpkgs#vhs -- doc/demo.tape
-    nix shell nixpkgs#ffmpeg -c ffmpeg -v error -y \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Build before the fence: Nix with an empty home would skip the binary
+    # cache and compile.
+    picker=$(nix build --no-link --print-out-paths .)
+    vhs=$(nix build --no-link --print-out-paths nixpkgs#vhs)
+    ffmpeg=$(nix build --no-link --print-out-paths nixpkgs#ffmpeg.bin)/bin/ffmpeg
+    # The tape cds here; doc/demo.tape names the same path.
+    take=/tmp/agent-distro-demo
+    root=$(mktemp -d /tmp/agent-distro-demo-home.XXXXXX)
+    trap 'rm -rf "$take" "$root" doc/frames' EXIT
+    rm -rf "$take" doc/frames
+    mkdir -p "$take" "$root"/{home,state,config,cache,data}
+    cp -R templates/default "$take/my-distribution"
+    chmod -R u+w "$take/my-distribution"
+    fenced() {
+      env -i PATH="$picker/bin:$PATH" TERM="${TERM:-xterm-256color}" \
+        HOME="$root/home" XDG_STATE_HOME="$root/state" XDG_CONFIG_HOME="$root/config" \
+        XDG_CACHE_HOME="$root/cache" XDG_DATA_HOME="$root/data" "$@"
+    }
+    fenced git -C "$take/my-distribution" init -q
+    fenced "$vhs/bin/vhs" doc/demo.tape
+    # The canvas is the tape's Width and Height; the frames sit at its Padding.
+    "$ffmpeg" -v error -y \
         -framerate 50 -i doc/frames/frame-text-%05d.png \
         -framerate 50 -i doc/frames/frame-cursor-%05d.png \
-        -filter_complex "color=c=0x171717:s=1400x460:r=50[bg];[bg][0]overlay=30:30:shortest=1[t];[t][1]overlay=30:30,fps=20,split[a][b];[a]palettegen=max_colors=32[p];[b][p]paletteuse=dither=none" \
+        -filter_complex "color=c=0x171717:s=1100x440:r=50[bg];[bg][0]overlay=30:30:shortest=1[t];[t][1]overlay=30:30,fps=20,split[a][b];[a]palettegen=max_colors=32[p];[b][p]paletteuse=dither=none" \
         doc/demo.gif
-    nix shell nixpkgs#ffmpeg -c ffmpeg -v error -y \
-        -ss 7 -i doc/demo.gif -frames:v 1 doc/demo.png
-    nix shell nixpkgs#ffmpeg -c ffmpeg -v error -y \
-        -i doc/demo.png \
-        -vf "crop=1280:330:30:35,scale=1140:-2,pad=1200:630:(ow-iw)/2:(oh-ih)/2:color=0x171717" \
+    # The still: the filtered list, 4.6 seconds before the end (doc/demo.tape).
+    "$ffmpeg" -v error -y -sseof -4.6 -i doc/demo.gif -frames:v 1 doc/demo.png
+    # og.png: the picker's box and its key line, on a 1200x630 card.
+    "$ffmpeg" -v error -y -i doc/demo.png \
+        -vf "crop=1024:330:26:40,scale=1140:-2,pad=1200:630:(ow-iw)/2:(oh-ih)/2:color=0x171717" \
         doc/og.png
-    rm -rf doc/frames
 
 # ── CI, as odu runs it ──────────────────────────────────────────────────────
 #
