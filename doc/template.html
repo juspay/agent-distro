@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>$title$ · your team's coding agents, in one command</title>
+<title>$title$: one command starts an AI coding agent, and one file sets it up</title>
 <meta name="description" content="$description$">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1014">
@@ -12,15 +12,15 @@
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="agent-distro">
-<meta property="og:title" content="agent-distro — your team's coding agents, in one command">
+<meta property="og:title" content="agent-distro: one command starts an AI coding agent, and one file sets it up">
 <meta property="og:description" content="$description$">
 <meta property="og:url" content="https://agent-distro.kolu.dev/">
 <meta property="og:image" content="https://agent-distro.kolu.dev/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The agent-distro picker in a terminal: two profiles, six harnesses with their versions">
+<meta property="og:image:alt" content="The agent-distro picker in a terminal. Its header names the profile my-distribution, and its list is filtered to Claude Code.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="agent-distro — your team's coding agents, in one command">
+<meta name="twitter:title" content="agent-distro: one command starts an AI coding agent, and one file sets it up">
 <meta name="twitter:description" content="$description$">
 <meta name="twitter:image" content="https://agent-distro.kolu.dev/og.png">
 <link rel="stylesheet" href="/style.css">
@@ -42,7 +42,8 @@
       <a href="#quick-start">Quick start</a>
       <a href="#install">Install</a>
       <a href="#profiles">Profiles</a>
-      <a href="#harnesses">Harnesses</a>
+      <a href="#agents">Agents</a>
+      <a href="#compare">Compare</a>
       <a href="https://github.com/juspay/agent-distro" class="top-github">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
         <span>GitHub</span>
@@ -59,67 +60,110 @@
   <section class="hero" aria-labelledby="hero-title">
     <div class="wrap hero-inner">
       <img class="hero-logo" src="/logo.svg" alt="" width="64" height="64">
-      <h1 id="hero-title" class="hero-title">Your team's coding agents,<br>in <em>one</em> command.</h1>
-      <p class="hero-lede">Package your skills, MCP servers and harness settings once. Run them in Claude Code, Codex, OpenCode, Oh My Pi and Pi, each at its latest release, with nothing to install.</p>
+      <h1 id="hero-title" class="hero-title">agent-distro</h1>
+      <p class="hero-tagline">One command starts an AI coding agent. One file in your repository sets it up.</p>
+      <p class="hero-lede">agent-distro is an open-source command that runs $agents.count$ AI coding agents: $agents.list$. You pick an agent, and Nix fetches it, so you install none of the agents yourself. Nix is a package manager for Linux and macOS.</p>
+      <p class="hero-lede">You put a <code>plugin.json</code> file in your repository. It names the skills and the MCP servers that your team uses. A skill is a file of instructions that an agent reads. An MCP server is a program that gives an agent tools. Every agent that you start in the repository loads them. The file and its skills are a profile. The documentation calls an agent a harness.</p>
       <div class="command">
         <span class="command-prompt" aria-hidden="true">$$</span>
-        <code class="command-text">nix run github:juspay/agent-distro</code>
+        <code class="command-text">nix run github:<wbr>juspay/agent-distro</code>
         <button class="copy copy-command" type="button" data-copy="nix run github:juspay/agent-distro" aria-label="Copy the command">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
           <span class="copy-label">Copy</span>
         </button>
       </div>
       <p class="hero-actions">
-        <a class="button primary" href="#quick-start">Quick start</a>
-        <a class="button" href="#install">Install &amp; keep updated</a>
-        <a class="button" href="#profiles">Profiles</a>
+        <a class="button primary" href="#demo">Watch the recording</a>
+        <a class="button" href="#needs">What it takes today</a>
       </p>
     </div>
   </section>
 
-  <section class="demo wrap" aria-label="Demo">
+  <section class="demo wrap" id="demo" aria-label="The recording">
+    <p class="scroll-hint">The recording scrolls sideways.</p>
     <figure class="terminal">
       <div class="terminal-bar" aria-hidden="true">
         <span class="dot"></span><span class="dot"></span><span class="dot"></span>
         <span class="terminal-name">agent-distro</span>
       </div>
-      <picture>
-        <source srcset="/demo.png" media="(prefers-reduced-motion: reduce)">
-        <img class="terminal-screen" src="/demo.gif" alt="A terminal: nix run github:juspay/agent-distro opens a picker with two profiles and six harnesses; the filter narrows to Claude Code, Enter launches it." width="1400" height="460" loading="eager" decoding="async">
-      </picture>
-      <figcaption>Pick a profile and a harness, or filter with <kbd>/</kbd>. Arguments after <code>--</code> go straight to the harness.</figcaption>
+      <div class="terminal-scroll">
+        <picture>
+          <source srcset="/demo.png" media="(prefers-reduced-motion: reduce)">
+          <img class="terminal-screen" src="/demo.gif" alt="A terminal in a copy of the template repository. The command nix run github:juspay/agent-distro -- --version opens the picker. Its header names the profile my-distribution, and it lists $agents.count$ agents with their versions. Typing /claude narrows the list to Claude Code. Enter prints the profile line and the version of Claude Code." width="1100" height="440" loading="eager" decoding="async">
+        </picture>
+      </div>
+      <figcaption>The real picker, in a fresh copy of the project's template repository. The home directory is empty, so each agent reads "Not signed in". The take ends at the agent's version line, because the command passes <code>--version</code> to the agent after <code>--</code>.</figcaption>
     </figure>
   </section>
 
-  <section class="props wrap" aria-label="Why agent-distro">
-    <ul class="prop-grid">
-      <li class="prop" data-icon="install">
-        <h2>Nothing to install</h2>
-        <p>Nix fetches the agent you pick; arguments after <code>--</code> go straight to it.</p>
-      </li>
-      <li class="prop" data-icon="update">
-        <h2>Always current</h2>
-        <p>Harnesses follow upstream daily, and a build lands only once the Linux/macOS builds and NixOS VM tests pass. <a href="#install">Install</a> it and your machine follows too, four times a day, from the binary cache, never compiling.</p>
-      </li>
-      <li class="prop" data-icon="once">
-        <h2>Write once</h2>
-        <p>One <a href="https://agent-plugins.org">Agent Plugins</a> directory works in every harness; the per-harness translation is done for you.</p>
-      </li>
-      <li class="prop" data-icon="compose">
-        <h2>Composes with your setup</h2>
-        <p>Your own plugins, settings, credentials, and sessions stay in place.</p>
-      </li>
-      <li class="prop" data-icon="yours">
-        <h2>Make it yours</h2>
-        <p><code>nix flake init -t github:juspay/agent-distro</code> starts a distribution with your plugins and, optionally, the environment and settings they run with.</p>
-      </li>
+  <section class="facts wrap" aria-label="Why agent-distro">
+    <ul class="points">
+      <li><b>One file sets up every agent.</b> <span>The <code>plugin.json</code> in your repository names your skills and MCP servers once. Each of the $agents.count$ agents loads them when it starts there.</span></li>
+      <li><b>The agents stay current.</b> <span>The project looks for new releases of the agents four times a day. A new release reaches the <code>main</code> branch after the builds and the tests in virtual machines pass.</span></li>
+      <li><b>Nothing is copied into your repository.</b> <span>agent-distro reads <code>plugin.json</code> each time an agent starts. You commit no generated directory for each agent.</span></li>
     </ul>
+    <p class="honest" id="needs"><b>What it takes today.</b> You need Nix, the package manager that fetches the agents. agent-distro runs on x86_64 Linux, ARM Linux, and Apple Silicon Macs. It does not run on Windows or on an Intel Mac. Each agent needs your own account, or a key that your profile asks for. On ARM Linux the first run compiles, because the project's binary cache holds builds for x86_64 Linux and Apple Silicon only.</p>
   </section>
 
-  <section class="latest wrap" aria-labelledby="latest-title">
+  <section class="profile wrap" aria-labelledby="profile-title">
     <div class="section-head">
-      <h2 id="latest-title">Every harness, at its latest release</h2>
-      <p>These are the versions this site was built from. The daily update moves them forward once the builds and VM tests pass.</p>
+      <h2 id="profile-title">A profile is one file in your repository</h2>
+      <p>A profile is a <code>plugin.json</code> file and the skills beside it. agent-distro reads it each time an agent starts, and writes nothing into your repository.</p>
+    </div>
+    <div class="profile-grid">
+      <div class="prose">
+        <p>The smallest profile is four lines:</p>
+        <pre><code>{
+  "$$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "my-repo"
+}</code></pre>
+        <p>To start a profile with a sample skill, run this command in your repository:</p>
+        <pre><code>nix flake init -t github:juspay/agent-distro</code></pre>
+      </div>
+      <div class="prose">
+        <p>The file follows the <a href="https://agent-plugins.org/specification/">Agent Plugins format</a>, which holds skills and MCP servers. Under <code>extensions."asia.nixos.agent-distro"</code>, a profile can add four more things:</p>
+        <ul>
+          <li><code>plugins</code>: more plugins, by path or by flake reference.</li>
+          <li><code>packages</code>: programs from nixpkgs, the Nix package collection, put on <code>PATH</code> for the MCP servers.</li>
+          <li><code>env</code>: environment variables. agent-distro asks for a <code>secret</code> one and never writes it to a file.</li>
+          <li><code>settings</code>: default settings for Oh My Pi and OpenCode only.</li>
+        </ul>
+        <p>Read <a href="#profiles">how profiles work</a>.</p>
+      </div>
+    </div>
+    <div class="flow" role="img" aria-label="A drawing. Your profile holds skills, MCP servers, environment variables, agent settings, and Nix packages. agent-distro reads it when an agent starts and starts the agent with it. The agents are $agents.list$.">
+      <div class="flow-node flow-profile">
+        <span class="flow-label">Your profile</span>
+        <ul>
+          <li>Skills and MCP servers <span class="flow-sub">in the Agent Plugins format</span></li>
+          <li>Environment variables <span class="flow-opt">optional</span> <span class="flow-sub">a <code>secret</code> one is asked for, never written to a file</span></li>
+          <li>Agent settings <span class="flow-opt">optional</span> <span class="flow-sub">Oh My Pi's model roles, OpenCode's model</span></li>
+          <li>Nix packages <span class="flow-opt">optional</span> <span class="flow-sub">on <code>PATH</code> for the MCP servers</span></li>
+        </ul>
+      </div>
+      <div class="flow-arrow" aria-hidden="true"></div>
+      <div class="flow-node flow-core">
+        <img src="/logo.svg" alt="" width="40" height="40">
+        <span class="flow-label">agent-distro</span>
+        <p>reads it when an agent starts,<br>and points the agent at it</p>
+      </div>
+      <div class="flow-arrow" aria-hidden="true"></div>
+      <div class="flow-node flow-harnesses">
+        <span class="flow-label">Every agent</span>
+        <ul class="flow-chips">
+        $for(harnesses)$
+          <li>$harnesses.title$</li>
+        $endfor$
+        </ul>
+      </div>
+    </div>
+    <p class="caption">A drawing of how a profile reaches each agent. The recording above is the real program.</p>
+  </section>
+
+  <section class="latest wrap" id="agents" aria-labelledby="latest-title">
+    <div class="section-head">
+      <h2 id="latest-title">The $agents.count$ agents, at the versions this page was built from</h2>
+      <p>The project's lock file pins these versions. Four times a day, an update moves them to new releases that pass the builds and the tests.</p>
     </div>
     <ul class="harness-grid">
     $for(harnesses)$
@@ -135,36 +179,70 @@
     </ul>
   </section>
 
-  <section class="fits wrap" aria-labelledby="fits-title">
+  <section class="compare wrap" id="compare" aria-labelledby="compare-title">
     <div class="section-head">
-      <h2 id="fits-title">How it fits together</h2>
-      <p>A profile is data. agent-distro reads it once per launch, and each harness starts with your plugins, environment and settings already in place.</p>
+      <h2 id="compare-title">How agent-distro compares with $compare.names$</h2>
+      <p>Where agent-distro is behind, the table says so.</p>
     </div>
-    <div class="flow" role="img" aria-label="Your profile, holding plugins, environment variables and settings, flows into agent-distro, which launches every harness.">
-      <div class="flow-node flow-profile">
-        <span class="flow-label">Your profile</span>
+    <p class="scroll-hint">The table scrolls sideways.</p>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead>
+          <tr><td></td><th scope="col">agent-distro</th>$for(compare.others)$<th scope="col">$compare.others.name$</th>$endfor$</tr>
+        </thead>
+        <tbody>
+        $for(compare.rows)$
+          <tr><th scope="row">$compare.rows.label$</th><td>$compare.rows.own$</td>$for(compare.rows.cells)$<td>$compare.rows.cells.text$</td>$endfor$</tr>
+        $endfor$
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">Each fact about another product comes from that product's own repository, read on $compare.readOn$. The facts in full, with their sources, are under the table.</p>
+    <div class="prose">
+      <details>
+        <summary>The facts in full, and their sources</summary>
         <ul>
-          <li><a href="https://agent-plugins.org">Agent Plugins</a> <span class="flow-sub">skills · MCP servers</span></li>
-          <li>Environment variables <span class="flow-opt">optional</span> <span class="flow-sub">a <code>secret</code> one is asked for, never written to a file</span></li>
-          <li>Harness settings <span class="flow-opt">optional</span> <span class="flow-sub">OMP's roles, OpenCode's provider</span></li>
-          <li>Nix packages <span class="flow-sub">anything in <a href="https://search.nixos.org/packages">nixpkgs</a>, on <code>PATH</code> for the plugins' MCP servers</span></li>
-        </ul>
-      </div>
-      <div class="flow-arrow" aria-hidden="true"></div>
-      <div class="flow-node flow-core">
-        <img src="/logo.svg" alt="" width="40" height="40">
-        <span class="flow-label">agent-distro</span>
-        <p>reads it once,<br>writes each harness's config</p>
-      </div>
-      <div class="flow-arrow" aria-hidden="true"></div>
-      <div class="flow-node flow-harnesses">
-        <span class="flow-label">Every harness</span>
-        <ul class="flow-chips">
-        $for(harnesses)$
-          <li>$harnesses.title$</li>
+        $for(compare.facts)$
+          <li><a href="$compare.facts.url$">$compare.facts.name$</a>
+            <ul>
+            $for(compare.facts.facts)$
+              <li>$compare.facts.facts.label$: $compare.facts.facts.detail$. <a href="$compare.facts.facts.source$">$compare.facts.facts.site$</a></li>
+            $endfor$
+            </ul>
+          </li>
         $endfor$
         </ul>
+      </details>
+    </div>
+    <div class="fit">
+      <div class="fit-no">
+        <h3>When agent-distro is the wrong choice</h3>
+        <p>agent-distro is the wrong choice today if one of these is true:</p>
+        <ul>
+          <li>You do not want to install Nix.</li>
+          <li>You use Windows or an Intel Mac.</li>
+          <li>Your agent is not one of the $agents.count$.</li>
+          <li>Your setup needs hooks, prompts, or subagents.</li>
+          <li>You need a lockfile, or an organization's policy for what agents load.</li>
+        </ul>
       </div>
+      <div class="fit-yes">
+        <h3>When agent-distro may suit you</h3>
+        <p>agent-distro may suit you if one of these is true:</p>
+        <ul>
+          <li>Your team uses more than one of the $agents.count$ agents and wants the same skills in each.</li>
+          <li>You use Nix already.</li>
+          <li>You want the agents kept current without an installer for each.</li>
+          <li>You do not want a generated directory for each agent in your repository.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="updates wrap" aria-labelledby="updates-title">
+    <div class="section-head">
+      <h2 id="updates-title">Home Manager keeps the agents on your machine current</h2>
+      <p>Home Manager is a Nix tool that manages the programs of your user account. Its agent-distro module puts every agent on your <code>PATH</code>. Your machine then checks for a new build four times a day. It installs only what the binary cache holds, so it never compiles. Read <a href="#install">how to install and keep the agents updated</a>.</p>
     </div>
   </section>
 
@@ -172,10 +250,10 @@
     <div class="kolu-card">
       <div class="kolu-text">
         <p class="kolu-eyebrow">Also inside Kolu</p>
-        <h2 id="kolu-title">Type <code>claude</code>. It's already there.</h2>
-        <p><a href="https://kolu.dev">Kolu</a>, the terminal workspace for running coding agents on a canvas of tiles, ships agent-distro built in. Choose a profile once and every new terminal, local or remote, has the agents on its <code>PATH</code>, kept current four times a day, each started with Kolu's plugin loaded so it can drive other tiles.</p>
+        <h2 id="kolu-title">Kolu can put the agents in every new terminal</h2>
+        <p><a href="https://kolu.dev">Kolu</a> adds no agents until you switch them on. With the switch on, every new terminal has the agents on its <code>PATH</code>, kept up to date. Each agent starts with Kolu's plugin loaded, so it can drive your other Kolu terminals.</p>
       </div>
-      <a class="button" href="https://kolu.dev/agents/">Agents in Kolu</a>
+      <a class="button" href="https://kolu.dev/agents/">Read how Kolu runs the agents</a>
     </div>
   </section>
 

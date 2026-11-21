@@ -1,6 +1,6 @@
 ---
 title: agent-distro
-description: "An Agent Plugin in your repository is all the setup your coding agents need. agent-distro runs Oh My Pi, Claude Code, Codex, OpenCode and Pi, and each picks up the repository's plugin.json — skills, MCP servers, packages, environment, harness settings — the moment you launch it there."
+description: "agent-distro is an open-source command that starts an AI coding agent through Nix. A plugin.json file in your repository names the skills and MCP servers that every agent loads when it starts there."
 ---
 
 ## Quick start
@@ -13,7 +13,7 @@ nix run github:juspay/agent-distro
 
 That is the whole setup. The repository's `plugin.json` is the profile: its skills, MCP
 servers, packages, environment and harness settings are in effect for that launch. The
-minimal manifest is five lines:
+minimal manifest is four lines:
 
 ```json
 {
