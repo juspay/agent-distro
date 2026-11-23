@@ -26,9 +26,15 @@ assert (config.read_bytes(), config.stat().st_ino, config.stat().st_mtime_ns) ==
 if 'acme.spec-fixture' in expected:
     spec = os.environ['AGENT_DISTRO_TEST_SPEC']
     for plugins in (None, spec):
-        with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as records:
+        # OMP starts a server only when a session needs it, and remembers what
+        # the server offered in its daemon's directory, so a launch after one
+        # that already met this server starts nothing to observe. A daemon
+        # directory of its own makes each launch meet the server anew.
+        with tempfile.TemporaryDirectory() as launch, tempfile.TemporaryDirectory() as records, \
+                tempfile.TemporaryDirectory() as daemon:
             launch = os.path.realpath(launch)
-            extra = dict(os.environ, AGENT_DISTRO_SETTINGS='0', FIXTURE_RECORDS=records)
+            extra = dict(os.environ, AGENT_DISTRO_SETTINGS='0', FIXTURE_RECORDS=records,
+                         OMP_DAEMON_DIR=daemon)
             if plugins is not None:
                 extra['AGENT_DISTRO_PLUGINS'] = plugins
             # A prompt run needs a model to finish; it starts the plugin servers first.
