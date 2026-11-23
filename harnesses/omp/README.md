@@ -25,5 +25,9 @@ above it keeps the wrapping it had, because OMP no longer rewrites it. Set
 (`append` is the third value: reprint below the old scrollback instead of
 erasing it).
 
-OMP uses an npins release pin. Its source build is loaded from upstream's lock,
-except that every nixpkgs in it is the distribution's shared nixpkgs.
+OMP uses an npins release pin, fetched by the revision npins resolved its tag
+to rather than by the tag: upstream re-points release tags after publishing,
+and a fetch by tag then fails the pinned hash. A moved tag changes nothing that
+is built; the pin moves only when npins writes a new revision. Its source build is
+loaded from upstream's lock, except that every nixpkgs in it is the
+distribution's shared nixpkgs.
