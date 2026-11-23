@@ -55,7 +55,7 @@
       "flake": false,
       "locked": {
         "lastModified": 1795216971,
-        "narHash": "sha256-gBaW4e41gm8xPYL+diNLjHaEkVATaWwPNjgKLixLCXs=",
+        "narHash": "sha256-KJdQYA23sKvF5bpRhcQwSyS7LHOH0G/9cmue0JVQl5g=",
         "owner": "juspay",
         "repo": "kolu",
         "rev": "d0ea69ca664bf011a3f1571bf27cdc8f80b8eaf9",
