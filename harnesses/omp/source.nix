@@ -8,9 +8,13 @@ let
   sources = builtins.fromJSON (builtins.readFile ./npins/sources.json);
   pin = sources.pins.oh-my-pi;
   inherit (pin.repository) owner repo;
-  byRevision = pin // { url = "https://api.github.com/repos/${owner}/${repo}/tarball/${pin.revision}"; };
+  byRevision = sources // {
+    pins = sources.pins // {
+      oh-my-pi = pin // { url = "https://api.github.com/repos/${owner}/${repo}/tarball/${pin.revision}"; };
+    };
+  };
 in
 import ../../lib/flake-source.nix {
   inherit pkgs;
-  src = (import ./npins { input = sources // { pins = sources.pins // { oh-my-pi = byRevision; }; }; }).oh-my-pi;
+  src = (import ./npins { input = byRevision; }).oh-my-pi;
 }
