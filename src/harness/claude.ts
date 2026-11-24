@@ -98,6 +98,18 @@ const SESSION_DEFAULTS: SessionDefault[] = [
     settings: { attribution: { commit: '', pr: '' } },
     decidedBy: ['attribution', 'includeCoAuthoredBy'],
   },
+  // After a turn Claude Code asks the session's model, over the whole
+  // conversation, for a guess at the next prompt and shows it greyed out in the
+  // input box — one more billed request; the same key hides the example a fresh
+  // session shows. The `/config` toggle cannot keep it on across launches:
+  // turning it on deletes the key rather than writing `true`, so a user who
+  // wants suggestions writes `true` themselves (or sets
+  // `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION`, which outranks every settings file).
+  {
+    name: 'prompt suggestions',
+    settings: { promptSuggestionEnabled: false },
+    decidedBy: ['promptSuggestionEnabled'],
+  },
 ];
 
 /**
