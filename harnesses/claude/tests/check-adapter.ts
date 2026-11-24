@@ -74,15 +74,24 @@ test('a default the user has decided stands down, and only that one', () => {
   assert.deepEqual(settingsArguments({ HOME: home, CLAUDE_CONFIG_DIR: config }, cwd, TABLE), []);
 });
 
-test('the shipped table leaves out attribution of Claude Code\'s own', () => {
+/** What the shipped table settles when the user has decided none of it. */
+const ATTRIBUTION = { attribution: { commit: '', pr: '' } };
+const SUGGESTIONS = { promptSuggestionEnabled: false };
+
+test('the shipped table leaves out attribution of Claude Code\'s own and prompt suggestions', () => {
   const { home, cwd } = places();
-  const hidden = flag({ attribution: { commit: '', pr: '' } });
-  assert.deepEqual(settingsArguments({ HOME: home }, cwd), hidden);
-  // Either spelling of the decision — the current one and the deprecated one.
-  for (const settings of ['{"attribution":{"pr":"Ours"}}', '{"includeCoAuthoredBy":true}']) {
+  assert.deepEqual(settingsArguments({ HOME: home }, cwd), flag({ ...ATTRIBUTION, ...SUGGESTIONS }));
+  // Either spelling of the attribution decision — the current one and the
+  // deprecated one — leaves the other row standing, and so does the user's
+  // own say on suggestions.
+  for (const [settings, rest] of [
+    ['{"attribution":{"pr":"Ours"}}', SUGGESTIONS],
+    ['{"includeCoAuthoredBy":true}', SUGGESTIONS],
+    ['{"promptSuggestionEnabled":true}', ATTRIBUTION],
+  ] as const) {
     const launch = places();
     writeFileSync(join(launch.cwd, '.claude/settings.json'), settings);
-    assert.deepEqual(settingsArguments({ HOME: launch.home }, launch.cwd), [], settings);
+    assert.deepEqual(settingsArguments({ HOME: launch.home }, launch.cwd), flag(rest), settings);
   }
 });
 
@@ -94,8 +103,8 @@ test('the launcher evaluates those words, for the environment it runs in', () =>
     assert.equal(result.status, 0, result.stderr);
     return result.stdout;
   };
-  assert.equal(words(), `${flag({ attribution: { commit: '', pr: '' } }).join(' ')}\n`);
-  writeFileSync(join(cwd, '.claude/settings.json'), '{"includeCoAuthoredBy":false}');
+  assert.equal(words(), `${flag({ ...ATTRIBUTION, ...SUGGESTIONS }).join(' ')}\n`);
+  writeFileSync(join(cwd, '.claude/settings.json'), '{"includeCoAuthoredBy":false,"promptSuggestionEnabled":true}');
   assert.equal(words(), '\n');
   // Any other usage is a launcher that no longer matches this module.
   const wrong = spawnSync(process.execPath, [join(src, 'harness/claude.ts')], { encoding: 'utf8' });

@@ -17,12 +17,16 @@ let
   # 3.7 MB session, measured, even for one column — which a terminal relayed
   # to a viewer (kolu, ssh, a phone) has to deliver every time; `preserve`
   # repaints the visible screen alone, leaving older scrollback wrapped the
-  # way it already was. A user-set value, including `false` or `rebuild`, is
-  # never replaced.
+  # way it already was. Composer predictions, on by default since OMP 19.0.0,
+  # ask the active model after every completed turn for a guess at the next
+  # message and show it as ghost text in the empty input box: one more billed
+  # request over the whole conversation each turn, so they are off. A
+  # user-set value, including `false`, `rebuild` or `true`, is never replaced.
   alwaysDefaults = (formats.yaml { }).generate "omp-config.yml" {
     hideThinkingBlock = true;
     task.showResolvedModelBadge = true;
     tui.resizeScrollback = "preserve";
+    composer.predictions = false;
   };
 
   initialization = ''

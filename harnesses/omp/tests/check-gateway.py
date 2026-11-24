@@ -52,6 +52,7 @@ opted_out = machine.succeed(f"cat {CONFIG}")
 assert "hideThinkingBlock: true" in opted_out, opted_out
 assert "showResolvedModelBadge: true" in opted_out, opted_out
 assert "resizeScrollback: preserve" in opted_out, opted_out
+assert "predictions: false" in opted_out, opted_out
 assert "modelRoles" not in opted_out, opted_out
 
 # A launch with settings fills the roles the profile names, absent keys only.
@@ -61,22 +62,26 @@ assert effective_setting("modelRoles") == roles, effective_setting("modelRoles")
 assert effective_setting("task.showResolvedModelBadge") is True
 assert effective_setting("hideThinkingBlock") is True
 assert effective_setting("tui.resizeScrollback") == "preserve"
+assert effective_setting("composer.predictions") is False
 # Whether the gateway serves anything is OMP's business: the wrapper hands it
 # no model list to keep.
 machine.fail("test -e /home/testuser/.omp/agent/models.yml")
 
 # A user's own value is never replaced: an expensive primary, a display
-# default turned off and OMP's own scrollback rebuild on resize all survive,
-# with the profile's other keys filled in around them and the comments kept.
-old_config = "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\ntask:\n  showResolvedModelBadge: false\ntui:\n  resizeScrollback: rebuild\n"
+# default turned off, OMP's own scrollback rebuild on resize and composer
+# predictions turned back on all survive, with the profile's other keys filled
+# in around them and the comments kept.
+old_config = "# user settings\nsetupVersion: 2\nmodelRoles:\n  default: 'anthropic/expensive:high' # keep choice\ntask:\n  showResolvedModelBadge: false\ntui:\n  resizeScrollback: rebuild\ncomposer:\n  predictions: true\n"
 write_config(CONFIG, old_config)
 run_as_user("omp --version")
 config = machine.succeed(f"cat {CONFIG}")
 for expected in ["# user settings", "setupVersion: 2", "default: 'anthropic/expensive:high' # keep choice",
-                 "showResolvedModelBadge: false", "resizeScrollback: rebuild", "hideThinkingBlock: true"]:
+                 "showResolvedModelBadge: false", "resizeScrollback: rebuild", "predictions: true",
+                 "hideThinkingBlock: true"]:
     assert expected in config, config
 assert effective_setting("task.showResolvedModelBadge") is False
 assert effective_setting("tui.resizeScrollback") == "rebuild"
+assert effective_setting("composer.predictions") is True
 assert effective_setting("modelRoles")["default"] == "anthropic/expensive:high"
 assert effective_setting("modelRoles")["slow"] == roles["slow"]
 

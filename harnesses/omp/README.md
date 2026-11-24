@@ -23,7 +23,12 @@ one-column change), which a relayed terminal has to deliver every time.
 above it keeps the wrapping it had, because OMP no longer rewrites it. Set
 `tui.resizeScrollback: rebuild` in `config.yml` for upstream's behaviour
 (`append` is the third value: reprint below the old scrollback instead of
-erasing it).
+erasing it). Every profile also fills `composer.predictions: false`: since
+19.0.0 OMP asks the model, after every completed turn, for a guess at your
+next message and shows it greyed out in the empty input box, and each guess
+is one more billed request over the whole conversation. Set
+`composer.predictions: true` in `config.yml`, or turn on Composer Predictions
+in `/settings`, to have them back.
 
 OMP uses an npins release pin, fetched by the revision npins resolved its tag
 to rather than by the tag: upstream re-points release tags after publishing,
