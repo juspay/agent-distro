@@ -6,7 +6,10 @@ shared background server cannot supply another session's config. There is no
 `small_model`: a profile points the faster model at the title agent
 (`agents.title.model`). For scripted runs use `opencode run --standalone`; for
 inspection use `opencode api --standalone` because `debug config` and
-`mcp list` attach to the shared service.
+`mcp list` attach to the shared service. With 2.4.1 a one-shot `api
+--standalone` answers before its plugins settle, so it lists none of the
+models a plugin discovers: for those, start `opencode serve` and read it with
+`opencode api --server <url>` once it has listed a model.
 
 `AGENT_DISTRO_PLUGINS` reaches it through OpenCode's adapter, and each stdio MCP
 server runs through a generated launcher in the launch directory (doc/index.md,
