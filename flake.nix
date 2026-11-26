@@ -63,15 +63,16 @@
         packages = agentDistro;
         mkProfile = api.mkProfile;
         defaultFlake = "github:juspay/agent-distro";
-        inherit cache caIndex;
+        inherit cache caIndex harnesses;
       };
       apps = lib.genAttrs systems (system: {
         default = { type = "app"; program = lib.getExe agentDistro.${system}; };
         check-profile = { type = "app"; program = lib.getExe checkers.${system}; };
       });
 
-      # Upstream's own packages, for the daily update to report: a harness
-      # version is a property of the lock, not of any profile.
+      # Upstream's own packages, for the daily update to report (a harness
+      # version is a property of the lock, not of any profile) and for the
+      # OMP auth broker service, which runs OMP without the launcher.
       inherit harnesses;
       harnessMeta = versions: lib.mapAttrs
         (name: meta: {

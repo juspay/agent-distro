@@ -281,6 +281,9 @@
           lib-exports = import ./test-lib-exports.nix {
             inherit pkgs nixpkgs agent-distro home-manager;
           };
+          auth-broker = import ./test-auth-broker.nix {
+            inherit pkgs nixpkgs agent-distro home-manager;
+          };
           auto-update = pkgs.testers.runNixOSTest (import ./test-auto-update.nix {
             inherit pkgs agent-distro home-manager;
           });
