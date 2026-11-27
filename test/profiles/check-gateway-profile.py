@@ -61,7 +61,7 @@ codex_support.assert_preserved()
 
 # Claude Code: the same plugins and skills, for the session, and both
 # plugins' servers, Kolu's connected.
-plugins = json.loads(claude_support.run('plugin', 'list', '--json'))
+plugins = claude_support.listed()
 assert {p['id'] for p in plugins} == {p + '@inline' for p in expected}, plugins
 assert all(p['enabled'] and p['scope'] == 'session' for p in plugins), plugins
 for plugin, names in expected.items():
