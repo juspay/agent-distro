@@ -1,6 +1,6 @@
 # homeManagerModules.omp-auth-broker, VM-free: the unit and variables each
-# side generates, the assertions, and the start program refusing to start
-# without a token or a Tailscale address.
+# side generates, the assertions, and the start program: what it hands OMP,
+# and its refusals without a token or a Tailscale address.
 { pkgs, nixpkgs, agent-distro, home-manager }:
 let
   inherit (nixpkgs) lib;
@@ -22,13 +22,19 @@ let
   # Home Manager stores ExecStart as a list.
   start = builtins.head (lib.toList unit.Service.ExecStart);
   noToken = homeOf "x86_64-linux" { serve.enable = true; };
-  # The start program is a plain function, without Home Manager.
+  # The start program is a plain function, without Home Manager; a stand-in
+  # OMP records the arguments and environment it is started with.
+  standIn = pkgs.writeShellScriptBin "omp" ''
+    { printf '%s\n' "$*"; env; } > "$HOME/ran"
+  '';
   fixedStart = lib.getExe (import "${agent-distro}/harnesses/omp/auth-broker.nix" {
     inherit pkgs;
-    package = agent-distro.harnesses.${pkgs.stdenv.hostPlatform.system}.omp;
+    package = standIn;
     address = "127.0.0.1";
     port = 9999;
   });
+  # What moves the token file or agent.db, or makes OMP a client.
+  cleared = [ "OMP_AUTH_BROKER_URL" "OMP_AUTH_BROKER_TOKEN" "PI_CONFIG_DIR" "OMP_PROFILE" "PI_PROFILE" "PI_CODING_AGENT_DIR" "XDG_DATA_HOME" ];
 
   url = "http://broker-host:8765";
   client = homeOf "x86_64-linux" { inherit url tokenFile; };
@@ -38,16 +44,13 @@ let
   both = homeWith [ agent-distro.homeManagerModules.default agent-distro.homeManagerModules.omp-auth-broker ]
     "x86_64-linux" { inherit url; };
 in
-# The server: a user service with the stop timeout a saved refresh needs, and
-# no variable that would make it a client or move its token or store.
+# The server: a user service with the stop timeout a saved refresh needs.
 assert failed server == [ ];
 assert unit.Unit.StartLimitIntervalSec == 0;
 assert unit.Service.Restart == "on-failure";
 assert unit.Service.RestartSec == "5s";
 assert unit.Service.TimeoutStopSec == 130;
 assert unit.Install.WantedBy == [ "default.target" ];
-assert builtins.all (name: lib.elem name (lib.splitString " " unit.Service.UnsetEnvironment))
-  [ "OMP_AUTH_BROKER_URL" "OMP_AUTH_BROKER_TOKEN" "PI_CONFIG_DIR" "OMP_PROFILE" "PI_PROFILE" "PI_CODING_AGENT_DIR" "XDG_DATA_HOME" ];
 assert !(server.home.sessionVariables ? OMP_AUTH_BROKER_URL);
 assert !(server.systemd.user.sessionVariables ? OMP_AUTH_BROKER_URL);
 assert server.home.file ? ".omp/auth-broker.token";
@@ -74,10 +77,6 @@ pkgs.runCommand "omp-auth-broker" { } ''
   # The token file is a link to where the secret manager puts it, so the
   # store holds the path and never the token.
   [ "$(readlink ${server.home.file.".omp/auth-broker.token".source})" = ${tokenFile} ]
-  # An explicit address and port, and no Tailscale lookup.
-  grep -qF -- '--bind="$address:9999"' ${fixedStart}
-  grep -qF -- "127.0.0.1" ${fixedStart}
-  if grep -q tailscale ${fixedStart}; then echo "a fixed address still asks Tailscale" >&2; exit 1; fi
 
   export HOME=$PWD/home
   mkdir -p "$HOME"
@@ -91,5 +90,13 @@ pkgs.runCommand "omp-auth-broker" { } ''
   echo test-token > "$HOME/.omp/auth-broker.token"
   if ${start} 2>err; then echo "started without Tailscale" >&2; exit 1; fi
   grep -q "is Tailscale up?" err
+  # A fixed address: no Tailscale lookup, so it starts in the sandbox, and
+  # every variable that would move the token or the store, or make OMP a
+  # client, is cleared whoever started it.
+  ${lib.concatMapStringsSep " " (name: "${name}=set") cleared} ${fixedStart}
+  [ "$(head -n 1 "$HOME/ran")" = "auth-broker serve --bind=127.0.0.1:9999" ]
+  for name in ${lib.concatStringsSep " " cleared}; do
+    if grep -q "^$name=" "$HOME/ran"; then echo "$name reached omp" >&2; exit 1; fi
+  done
   touch "$out"
 ''

@@ -57,6 +57,12 @@
           imports = [ (import found.module { packages = lib.mapAttrs (_: set: set.${found.harness}) harnesses; }) ];
         })
         (import ./lib/harness-modules.nix);
+      core = import ./modules/home-manager.nix {
+        packages = agentDistro;
+        mkProfile = api.mkProfile;
+        defaultFlake = "github:juspay/agent-distro";
+        inherit cache caIndex;
+      };
     in
     {
       packages = lib.genAttrs systems (system: lib.removeAttrs launchers.${system} [ "picker" "package" ] // {
@@ -69,17 +75,13 @@
         check-profile = checkers.${system};
       });
       homeManagerModules = harnessModules // {
-        default = {
+        # The core module itself, at the level a consumer imports it, so its
+        # definitions keep their place; keyed, and importing every harness
+        # module.
+        default = lib.mirrorFunctionArgs core (args: core args // {
           key = "agent-distro#homeManagerModules.default";
-          imports = [
-            (import ./modules/home-manager.nix {
-              packages = agentDistro;
-              mkProfile = api.mkProfile;
-              defaultFlake = "github:juspay/agent-distro";
-              inherit cache caIndex;
-            })
-          ] ++ lib.attrValues harnessModules;
-        };
+          imports = lib.attrValues harnessModules;
+        });
       };
       apps = lib.genAttrs systems (system: {
         default = { type = "app"; program = lib.getExe agentDistro.${system}; };

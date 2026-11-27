@@ -17,8 +17,9 @@ in
         OMP's auth broker on this machine, as the systemd user service
         `omp-auth-broker`. It serves the logins in `~/.omp/agent/agent.db` to
         every client holding the token, whatever `PI_CODING_AGENT_DIR` or
-        `XDG_DATA_HOME` say; OMP on this machine keeps using that store
-        directly, so set `url` only on clients'';
+        `XDG_DATA_HOME` say. OMP on this machine reads that store directly as
+        long as it uses the default one (no `PI_CODING_AGENT_DIR`, no
+        `$XDG_DATA_HOME/omp`), so set `url` only on clients'';
       address = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
@@ -106,10 +107,6 @@ in
           # On SIGTERM the broker saves a refresh still in flight, waiting up
           # to 125 s; killing it sooner leaves a spent refresh token.
           TimeoutStopSec = 130;
-          # The broker is no client, reads the default profile's token file,
-          # and serves ~/.omp/agent/agent.db: every variable that would move
-          # one of those is cleared.
-          UnsetEnvironment = "OMP_AUTH_BROKER_URL OMP_AUTH_BROKER_TOKEN PI_CONFIG_DIR OMP_PROFILE PI_PROFILE PI_CODING_AGENT_DIR XDG_DATA_HOME";
         };
         Install.WantedBy = [ "default.target" ];
       };

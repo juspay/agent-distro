@@ -68,17 +68,21 @@ check is `tests/auth-broker.nix`, run as `omp-auth-broker`.
   unit cannot order itself after the system's `tailscaled`, so
   `Restart=on-failure`, `RestartSec=5s` and `StartLimitIntervalSec=0` retry
   until there is one, and no address is written into the unit.
-- **What the unit clears.** `OMP_AUTH_BROKER_URL` and `OMP_AUTH_BROKER_TOKEN`
-  (the broker is no client); `PI_CONFIG_DIR`, `OMP_PROFILE` and `PI_PROFILE`
-  (they move the token file); `PI_CODING_AGENT_DIR` and `XDG_DATA_HOME` (they
-  move `agent.db`). So the broker always serves `~/.omp/agent/agent.db` with
-  `~/.omp/auth-broker.token`, whatever the user manager's environment says.
+- **What the program clears.** `OMP_AUTH_BROKER_URL` and
+  `OMP_AUTH_BROKER_TOKEN` (the broker is no client); `PI_CONFIG_DIR`,
+  `OMP_PROFILE` and `PI_PROFILE` (they move the token file);
+  `PI_CODING_AGENT_DIR` and `XDG_DATA_HOME` (they move `agent.db`). The
+  program clears them itself, not the unit, so whoever starts it the broker
+  serves `~/.omp/agent/agent.db` with `~/.omp/auth-broker.token`, the file
+  its token check looked at. The check proves it by running the program
+  against a stand-in OMP with all seven set.
 - **Stop timeout.** On SIGTERM the broker waits up to 125 s to save a refresh
   in flight; upstream asks a supervisor to allow 130, which `TimeoutStopSec`
   does. A kill sooner leaves a spent refresh token.
-- **Broker or client, not both.** OMP on the broker reads its store directly,
-  and SQLite leases coordinate its refreshes with the broker's; an assertion
-  refuses `serve.enable` with `url`.
+- **Broker or client, not both.** OMP on the broker reads that store
+  directly, as long as it uses the default one (no `PI_CODING_AGENT_DIR`, no
+  `$XDG_DATA_HOME/omp`), and SQLite leases coordinate its refreshes with the
+  broker's; an assertion refuses `serve.enable` with `url`.
 - **What the system provides.** Home Manager cannot open the port in the
   firewall or enable lingering; the user documentation names the NixOS
   options for both.
