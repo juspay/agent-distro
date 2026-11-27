@@ -1,64 +1,75 @@
-# The OMP auth broker options, VM-free: the unit and variables each side
-# generates, the assertions, and the service's start script refusing to start
+# homeManagerModules.omp-auth-broker, VM-free: the unit and variables each
+# side generates, the assertions, and the start program refusing to start
 # without a token or a Tailscale address.
 { pkgs, nixpkgs, agent-distro, home-manager }:
 let
   inherit (nixpkgs) lib;
-  homeOf = system: broker: (home-manager.lib.homeManagerConfiguration {
+  homeWith = modules: system: broker: (home-manager.lib.homeManagerConfiguration {
     pkgs = nixpkgs.legacyPackages.${system};
-    modules = [
-      agent-distro.homeManagerModules.default
-      {
-        home = { username = "testuser"; homeDirectory = "/home/testuser"; stateVersion = "24.05"; };
-        # No `services.agent-distro.enable`: the broker stands on its own.
-        services.agent-distro.omp.authBroker = broker;
-      }
-    ];
+    modules = modules ++ [{
+      home = { username = "testuser"; homeDirectory = "/home/testuser"; stateVersion = "24.05"; };
+      services.agent-distro.omp.authBroker = broker;
+    }];
   }).config;
+  # The feature alone: no updater, no shims, no `services.agent-distro.enable`.
+  homeOf = homeWith [ agent-distro.homeManagerModules.omp-auth-broker ];
   failed = config: builtins.filter (a: !a.assertion) config.assertions;
+  refused = config: !(builtins.tryEval config.home.activationPackage.drvPath).success;
   tokenFile = "/run/secrets/omp-auth-broker-token";
 
   server = homeOf "x86_64-linux" { serve.enable = true; inherit tokenFile; };
-  unit = server.systemd.user.services.agent-distro-omp-auth-broker;
-  fixed = homeOf "x86_64-linux" { serve = { enable = true; address = "127.0.0.1"; port = 9999; }; };
+  unit = server.systemd.user.services.omp-auth-broker;
   # Home Manager stores ExecStart as a list.
-  startOf = config: builtins.head (lib.toList config.systemd.user.services.agent-distro-omp-auth-broker.Service.ExecStart);
-  start = startOf server;
-  fixedStart = startOf fixed;
+  start = builtins.head (lib.toList unit.Service.ExecStart);
+  noToken = homeOf "x86_64-linux" { serve.enable = true; };
+  # The start program is a plain function, without Home Manager.
+  fixedStart = lib.getExe (import "${agent-distro}/harnesses/omp/auth-broker.nix" {
+    inherit pkgs;
+    package = agent-distro.harnesses.${pkgs.stdenv.hostPlatform.system}.omp;
+    address = "127.0.0.1";
+    port = 9999;
+  });
 
   url = "http://broker-host:8765";
   client = homeOf "x86_64-linux" { inherit url tokenFile; };
   darwinClient = homeOf "aarch64-darwin" { inherit url; };
+  # `default` composes every harness module; importing this one beside it too
+  # declares nothing twice.
+  both = homeWith [ agent-distro.homeManagerModules.default agent-distro.homeManagerModules.omp-auth-broker ]
+    "x86_64-linux" { inherit url; };
 in
 # The server: a user service with the stop timeout a saved refresh needs, and
-# no broker variables of its own.
+# no variable that would make it a client or move its token or store.
 assert failed server == [ ];
 assert unit.Unit.StartLimitIntervalSec == 0;
 assert unit.Service.Restart == "on-failure";
 assert unit.Service.RestartSec == "5s";
 assert unit.Service.TimeoutStopSec == 130;
 assert unit.Install.WantedBy == [ "default.target" ];
-assert lib.hasInfix "OMP_AUTH_BROKER_URL" unit.Service.UnsetEnvironment;
+assert builtins.all (name: lib.elem name (lib.splitString " " unit.Service.UnsetEnvironment))
+  [ "OMP_AUTH_BROKER_URL" "OMP_AUTH_BROKER_TOKEN" "PI_CONFIG_DIR" "OMP_PROFILE" "PI_PROFILE" "PI_CODING_AGENT_DIR" "XDG_DATA_HOME" ];
 assert !(server.home.sessionVariables ? OMP_AUTH_BROKER_URL);
 assert !(server.systemd.user.sessionVariables ? OMP_AUTH_BROKER_URL);
 assert server.home.file ? ".omp/auth-broker.token";
 # Without a token file the module leaves ~/.omp/auth-broker.token alone.
-assert !(fixed.home.file ? ".omp/auth-broker.token");
+assert !(noToken.home.file ? ".omp/auth-broker.token");
 # The client: the URL reaches shells and user services alike.
 assert failed client == [ ];
 assert client.home.sessionVariables.OMP_AUTH_BROKER_URL == url;
 assert client.systemd.user.sessionVariables.OMP_AUTH_BROKER_URL == url;
-assert !(client.systemd.user.services ? agent-distro-omp-auth-broker);
+assert !(client.systemd.user.services ? omp-auth-broker);
 assert client.home.file ? ".omp/auth-broker.token";
 assert failed darwinClient == [ ];
 assert darwinClient.home.sessionVariables.OMP_AUTH_BROKER_URL == url;
+assert failed both == [ ];
+assert both.home.sessionVariables.OMP_AUTH_BROKER_URL == url;
 # Server and client on one machine, or a server without systemd, are refused.
-assert !(builtins.tryEval (homeOf "x86_64-linux" { serve.enable = true; inherit url; }).home.activationPackage.drvPath).success;
-assert !(builtins.tryEval (homeOf "aarch64-darwin" { serve.enable = true; }).home.activationPackage.drvPath).success;
+assert refused (homeOf "x86_64-linux" { serve.enable = true; inherit url; });
+assert refused (homeOf "aarch64-darwin" { serve.enable = true; });
 # Nothing set, nothing generated.
 assert !((homeOf "x86_64-linux" { }).home.sessionVariables ? OMP_AUTH_BROKER_URL);
-assert !((homeOf "x86_64-linux" { }).systemd.user.services ? agent-distro-omp-auth-broker);
-pkgs.runCommand "auth-broker" { } ''
+assert !((homeOf "x86_64-linux" { }).systemd.user.services ? omp-auth-broker);
+pkgs.runCommand "omp-auth-broker" { } ''
   set -u
   # The token file is a link to where the secret manager puts it, so the
   # store holds the path and never the token.

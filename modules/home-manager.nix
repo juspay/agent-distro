@@ -2,7 +2,7 @@
 # Shims, the updater and the state directory are built by lib/ so any Nix
 # consumer can run the same update machinery; only the OS glue (systemd,
 # launchd, activation) belongs to Home Manager.
-{ packages, harnesses, mkProfile, defaultFlake ? null, cache, caIndex ? import ../lib/ca-index.nix }:
+{ packages, mkProfile, defaultFlake ? null, cache, caIndex ? import ../lib/ca-index.nix }:
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.agent-distro;
@@ -64,8 +64,6 @@ let
   updaterCommand = lib.escapeShellArgs updater.command;
 in
 {
-  imports = [ (import ./omp-auth-broker.nix { inherit harnesses; }) ];
-
   options.services.agent-distro = {
     enable = lib.mkEnableOption "scheduled updates of every harness";
     profiles = lib.mkOption {

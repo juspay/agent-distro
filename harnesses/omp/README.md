@@ -36,3 +36,49 @@ and a fetch by tag then fails the pinned hash. A moved tag changes nothing that
 is built; the pin moves only when npins writes a new revision. Its source build is
 loaded from upstream's lock, except that every nixpkgs in it is the
 distribution's shared nixpkgs.
+
+## Auth broker
+
+`home-manager/auth-broker.nix` is the Home Manager glue for
+`services.agent-distro.omp.authBroker`, exported as
+`homeManagerModules.omp-auth-broker`; `auth-broker.nix` is the program its
+unit runs, a plain function of `pkgs`, OMP's package, the address and the
+port, so a NixOS unit can run the same program without Home Manager. Its
+check is `tests/auth-broker.nix`, run as `omp-auth-broker`.
+
+- **Upstream's OMP, not the launcher.** The unit runs
+  `agent-distro.harnesses.<system>.omp`: the launcher prompts for a profile's
+  `secret` variables and stops when stdin is not a terminal, so it cannot run
+  as a service. That OMP moves when the configuration is rebuilt, not with the
+  scheduled updates; upstream tolerates a broker and clients of different
+  versions.
+- **The token file.** OMP reads the bearer token from
+  `<config-root>/auth-broker.token`, `~/.omp/auth-broker.token` for the
+  default profile, on the broker and on a client. `tokenFile` makes that path
+  an out-of-store symlink to the secret manager's file, so the store holds the
+  path, never the token. OMP's other routes are not used:
+  `OMP_AUTH_BROKER_TOKEN` would put the token in the environment, and
+  `auth.broker.token` lives in `config.yml`, which OMP and the launcher both
+  write.
+- **Never without a token.** Upstream `serve` writes a fresh token when the
+  file is missing, which no client would know, so the program refuses to
+  start without one.
+- **The address.** With no `serve.address`, the program reads
+  `tailscale ip -4` at each start and fails while there is no IPv4. A user
+  unit cannot order itself after the system's `tailscaled`, so
+  `Restart=on-failure`, `RestartSec=5s` and `StartLimitIntervalSec=0` retry
+  until there is one, and no address is written into the unit.
+- **What the unit clears.** `OMP_AUTH_BROKER_URL` and `OMP_AUTH_BROKER_TOKEN`
+  (the broker is no client); `PI_CONFIG_DIR`, `OMP_PROFILE` and `PI_PROFILE`
+  (they move the token file); `PI_CODING_AGENT_DIR` and `XDG_DATA_HOME` (they
+  move `agent.db`). So the broker always serves `~/.omp/agent/agent.db` with
+  `~/.omp/auth-broker.token`, whatever the user manager's environment says.
+- **Stop timeout.** On SIGTERM the broker waits up to 125 s to save a refresh
+  in flight; upstream asks a supervisor to allow 130, which `TimeoutStopSec`
+  does. A kill sooner leaves a spent refresh token.
+- **Broker or client, not both.** OMP on the broker reads its store directly,
+  and SQLite leases coordinate its refreshes with the broker's; an assertion
+  refuses `serve.enable` with `url`.
+- **What the system provides.** Home Manager cannot open the port in the
+  firewall or enable lingering; the user documentation names the NixOS
+  options for both.

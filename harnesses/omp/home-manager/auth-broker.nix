@@ -1,54 +1,24 @@
-# OMP's auth broker: one machine keeps the logins and refreshes them; the
-# others borrow access tokens from it. OMP rotates an OAuth refresh token on
-# every use, so a login copied to two machines dies on whichever refreshes
-# second — the broker keeps the only copy. Independent of
-# `services.agent-distro.enable`: a broker host need not install the harnesses.
-{ harnesses }:
+# OMP's auth broker, as Home Manager glue: the options, the user unit, the
+# token link and the client's variable. The program the unit runs is
+# ../auth-broker.nix. `packages.<system>` is OMP's upstream package.
+{ packages }:
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.agent-distro.omp.authBroker;
-  # Where OMP reads its bearer token, client and server alike: the default
-  # profile's config root under $HOME (packages/coding-agent/src/cli/
-  # auth-broker-cli.ts `getTokenFilePath`, packages/ai/src/auth-broker/
-  # discover.ts `getAuthBrokerTokenFilePath`).
+  # The default profile's token file, where OMP reads it on the broker and on
+  # a client (oh-my-pi packages/ai/src/auth-broker/discover.ts
+  # `getAuthBrokerTokenFilePath`).
   tokenPath = ".omp/auth-broker.token";
-  # `serve` writes a fresh token when the file is missing, which no client
-  # would know; so the service never starts without one. The address is read
-  # at each start, so a Tailscale address is never written into the unit.
-  serve = pkgs.writeShellApplication {
-    name = "agent-distro-omp-auth-broker";
-    text = ''
-      token="$HOME/"${lib.escapeShellArg tokenPath}
-      if [ ! -r "$token" ] || [ ! -s "$token" ]; then
-        echo "agent-distro-omp-auth-broker: error: no token at $token; set services.agent-distro.omp.authBroker.tokenFile or place it there" >&2
-        exit 1
-      fi
-      ${if cfg.serve.address != null then ''
-        address=${lib.escapeShellArg cfg.serve.address}
-      '' else ''
-        if ! addresses=$(${lib.getExe pkgs.tailscale} ip -4); then
-          echo "agent-distro-omp-auth-broker: error: no Tailscale address; is Tailscale up?" >&2
-          exit 1
-        fi
-        address=''${addresses%%$'\n'*}
-        if ! [[ "$address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "agent-distro-omp-auth-broker: error: no Tailscale IPv4 address; is Tailscale up?" >&2
-          exit 1
-        fi
-      ''}
-      exec ${lib.getExe cfg.serve.package} auth-broker serve --bind="$address:${toString cfg.serve.port}"
-    '';
-  };
 in
 {
   options.services.agent-distro.omp.authBroker = {
     serve = {
       enable = lib.mkEnableOption ''
-        OMP's auth broker on this machine, as a systemd user service. It
-        serves the logins in this machine's OMP credential store
-        (`~/.omp/agent/agent.db`) to every client holding the token. OMP on
-        this machine keeps using that store directly; set `url` only on
-        clients'';
+        OMP's auth broker on this machine, as the systemd user service
+        `omp-auth-broker`. It serves the logins in `~/.omp/agent/agent.db` to
+        every client holding the token, whatever `PI_CODING_AGENT_DIR` or
+        `XDG_DATA_HOME` say; OMP on this machine keeps using that store
+        directly, so set `url` only on clients'';
       address = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
@@ -68,13 +38,12 @@ in
       };
       package = lib.mkOption {
         type = lib.types.package;
-        default = harnesses.${pkgs.stdenv.hostPlatform.system}.omp;
+        default = packages.${pkgs.stdenv.hostPlatform.system};
         defaultText = lib.literalExpression "agent-distro.harnesses.\${system}.omp";
         description = ''
           The OMP the broker runs: upstream's own, without agent-distro's
-          launcher, which prompts for a profile's secrets and so cannot run
-          as a service. It moves when this configuration is rebuilt, not
-          with the scheduled updates.
+          launcher. It moves when this configuration is rebuilt, not with the
+          scheduled updates.
         '';
       };
     };
@@ -95,10 +64,10 @@ in
       example = "/run/agenix/omp-auth-broker-token";
       description = ''
         A file holding the broker's bearer token, put there by your secret
-        manager (agenix, sops-nix, …), never by Nix: `~/.omp/auth-broker.token`,
-        where OMP reads it on the broker and on every client, becomes a
-        symlink to it, so the token stays out of the Nix store and out of the
-        environment. `null` leaves that file to you.
+        manager (agenix, sops-nix, …), never by Nix. `~/.omp/auth-broker.token`,
+        where OMP's default profile reads it on the broker and on a client,
+        becomes a symlink to it, so the token stays out of the Nix store and
+        out of the environment. `null` leaves that file to you.
       '';
     };
   };
@@ -120,7 +89,7 @@ in
       home.file.${tokenPath}.source = config.lib.file.mkOutOfStoreSymlink cfg.tokenFile;
     })
     (lib.mkIf cfg.serve.enable {
-      systemd.user.services.agent-distro-omp-auth-broker = {
+      systemd.user.services.omp-auth-broker = {
         Unit = {
           Description = "OMP auth broker";
           # Waiting for Tailscale or for the token is a failed start, retried
@@ -128,15 +97,19 @@ in
           StartLimitIntervalSec = 0;
         };
         Service = {
-          ExecStart = lib.getExe serve;
+          ExecStart = lib.getExe (import ../auth-broker.nix {
+            inherit pkgs;
+            inherit (cfg.serve) package address port;
+          });
           Restart = "on-failure";
           RestartSec = "5s";
           # On SIGTERM the broker saves a refresh still in flight, waiting up
           # to 125 s; killing it sooner leaves a spent refresh token.
           TimeoutStopSec = 130;
-          # The broker is no broker client, and serves the default profile's
-          # store with the token file above.
-          UnsetEnvironment = "OMP_AUTH_BROKER_URL OMP_AUTH_BROKER_TOKEN PI_CONFIG_DIR OMP_PROFILE PI_PROFILE";
+          # The broker is no client, reads the default profile's token file,
+          # and serves ~/.omp/agent/agent.db: every variable that would move
+          # one of those is cleared.
+          UnsetEnvironment = "OMP_AUTH_BROKER_URL OMP_AUTH_BROKER_TOKEN PI_CONFIG_DIR OMP_PROFILE PI_PROFILE PI_CODING_AGENT_DIR XDG_DATA_HOME";
         };
         Install.WantedBy = [ "default.target" ];
       };

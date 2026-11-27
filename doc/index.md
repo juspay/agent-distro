@@ -303,40 +303,6 @@ services.agent-distro.profiles = [ inputs.skills "github:ekala-project/ekala-ai-
 
 [^hm-prune]: At activation its prune stage deletes sibling state directories left from an earlier flake/profile choice.
 
-### Share OMP's logins between machines {#omp-auth-broker}
-
-OMP can keep its logins on one machine, the broker, and lend them to your others over a private network such as a tailnet. Copying the login itself does not work: OMP rotates an OAuth refresh token every time it uses one, so of two machines holding the same copy, whichever refreshes second is logged out.[^rotate] The broker holds the only copy, refreshes it, and hands the other machines access tokens.
-
-On the broker:
-
-```nix
-services.agent-distro.omp.authBroker = {
-  serve.enable = true;                                # listens on this machine's Tailscale IPv4, port 8765
-  tokenFile = "/run/agenix/omp-auth-broker-token";    # placed by your secret manager
-};
-```
-
-On every other machine:
-
-```nix
-services.agent-distro.omp.authBroker = {
-  url = "http://broker-host:8765";
-  tokenFile = "/run/agenix/omp-auth-broker-token";
-};
-```
-
-- **The token.** One shared secret, any random string, on every machine. Your secret manager (agenix, sops-nix, …) writes it; `tokenFile` makes `~/.omp/auth-broker.token`, where OMP reads it, a link to that file, so the token is never in the Nix store or the environment.[^broker-token]
-- **The broker** runs `omp auth-broker serve` as the user service `agent-distro-omp-auth-broker`, serving the logins in that machine's own OMP store. OMP there keeps using that store directly, which is why a machine takes `serve.enable` or `url`, never both. Until Tailscale has an address and the token is in place, the service fails to start and tries again every 5 seconds.[^broker-service]
-- **A client** gets `OMP_AUTH_BROKER_URL` in login shells and in systemd user services, and from then on ignores the logins in its own store.[^broker-local] Check it with `omp auth-broker status`.
-- **Moving logins you already have.** On the machine that holds them, quit every running OMP, then run `omp auth-broker migrate --from-local --include-oauth` with the URL set, and `omp auth-broker logout <provider>` for each provider it uploaded. That command logs the machine's own store out, not the broker's.
-- **Never `/logout` on a client.** Inside OMP it logs the account out of the broker, and so out of every machine.
-- **When the broker is down.** A client keeps the broker's last answer for an hour, encrypted with the token. Within that hour OMP starts without the broker, and works until an access token needs refreshing. After that hour, interactive OMP refuses to start until the broker answers. `omp -p` and other non-interactive commands retry for 30 seconds first.
-
-[^rotate]: Anthropic's refresh tokens are single-use, and a refresh that loses that race disables the login on the losing machine.
-[^broker-token]: Without `tokenFile`, the file is yours to place. OMP's other ways in, the `OMP_AUTH_BROKER_TOKEN` variable and `auth.broker.token` in its `config.yml`, also work, but the module uses neither: one would put the token in the environment, and the other is a file OMP edits itself. The service never starts without the file, because `serve` would otherwise generate a token of its own that no client knows.
-[^broker-service]: It runs upstream's OMP, `agent-distro.harnesses.<system>.omp`, rather than the launcher, which asks for a profile's secrets on a terminal. That OMP moves when you rebuild your configuration, not with the scheduled updates. `serve.address` sets a fixed address instead, and `serve.port` the port. The broker speaks plain HTTP, so listen only on a private network. On a stop, it waits up to 125 seconds to save a refresh in flight, and the service allows 130. It runs OMP's default profile, with `OMP_PROFILE`, `PI_PROFILE` and `PI_CONFIG_DIR` cleared.
-[^broker-local]: Except a provider the broker stores but will not serve back, which OMP keeps in the local store. Keys OMP reads from environment variables stay local too.
-
 ### Without Home Manager
 
 Update by hand:
@@ -416,7 +382,7 @@ nix copy --from https://cache.kolu.dev/kolu-r2 /nix/store/…-agent-distro
 | What was updated or failed | `~/.local/state/agent-distro/history.log`[^history-log] |
 | Full run output, Linux | `journalctl --user -u agent-distro-update` |
 | Full run output, macOS | `~/.local/state/agent-distro/<source>/update.log` |
-| OMP auth broker not answering | `systemctl --user status agent-distro-omp-auth-broker` and `journalctl --user -u agent-distro-omp-auth-broker` on the broker; `omp auth-broker status` on a client |
+| OMP auth broker not answering | `systemctl --user status omp-auth-broker` and `journalctl --user -u omp-auth-broker` on the broker; `omp auth-broker status` on a client |
 
 [^history-log]: Update and failure events, in your local timezone, e.g. `2026-10-01T23:03:17+05:30 updated: Pi 0.99.2 → 1.0.0`; unchanged runs add nothing. It is trimmed back to its last 1000 lines once it has grown past them, and a scheduled run on macOS cuts `update.log` to its last 1 MB.
 
@@ -872,6 +838,44 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 | OpenCode | `opencode` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/opencode/README.md) |
 | Pi | `pi` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/pi/README.md) |
 
+### Share OMP's logins between machines {#omp-auth-broker}
+
+OMP can keep its logins on one machine, the broker, and lend them to your others over a private network such as a tailnet. Copying a login does not work: OMP rotates an OAuth refresh token every time it uses one, so of two machines holding the same copy, whichever refreshes second is logged out. The broker holds the only copy, refreshes it, and hands the other machines access tokens.
+
+[With Home Manager](#install), `homeManagerModules.default` already carries these options; a machine that only runs the broker can import `homeManagerModules.omp-auth-broker` alone. On the broker:
+
+```nix
+services.agent-distro.omp.authBroker = {
+  serve.enable = true;                                # listens on this machine's Tailscale IPv4, port 8765
+  tokenFile = "/run/agenix/omp-auth-broker-token";    # placed by your secret manager
+};
+```
+
+On every other machine:
+
+```nix
+services.agent-distro.omp.authBroker = {
+  url = "http://broker-host:8765";
+  tokenFile = "/run/agenix/omp-auth-broker-token";
+};
+```
+
+The broker's own system has to let the clients in and keep the service running, which Home Manager cannot do. On NixOS:
+
+```nix
+networking.firewall.interfaces.tailscale0.allowedTCPPorts = [ 8765 ];   # the firewall is on by default
+users.users.me.linger = true;   # start your user services at boot and keep them after you log out
+```
+
+- **The token.** One shared secret, any random string, in the same file on every machine, written by your secret manager (agenix, sops-nix, …). `tokenFile` links `~/.omp/auth-broker.token`, where OMP's default profile reads it, to that file, so the token is never in the Nix store or the environment.
+- **The broker** is the user service `omp-auth-broker`, serving the logins in `~/.omp/agent/agent.db`. OMP on that machine keeps using that store directly, which is why a machine takes `serve.enable` or `url`, never both. Until Tailscale has an address and the token is in place, the service fails to start and tries again every 5 seconds. `serve.address` sets a fixed address instead, and `serve.port` the port; the broker speaks plain HTTP, so listen only on a private network.
+- **A client** gets `OMP_AUTH_BROKER_URL` in login shells and in systemd user services, and from then on ignores the logins in its own store, except one the broker will not serve back. Check it with `omp auth-broker status`.
+- **Moving logins you already have.** On the machine that holds them, quit every running OMP, then run `omp auth-broker migrate --from-local --include-oauth` with the URL set, and `omp auth-broker logout <provider>` for each provider it uploaded. That command logs the machine's own store out, not the broker's.
+- **Never `/logout` on a client.** Inside OMP it logs the account out of the broker, and so out of every machine.
+- **When the broker is down.** A client keeps the broker's last answer for an hour, encrypted with the token. Within that hour OMP starts without the broker, and works until an access token needs refreshing. After that hour, interactive OMP refuses to start until the broker answers; `omp -p` and other non-interactive commands retry for 30 seconds first.
+
+Why it runs upstream's OMP, where the token comes from, and what the service clears: [OMP's design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/omp/README.md#auth-broker).
+
 ## How it works
 
 - **Profile.** Harness-independent data: a `plugin.json`, read at launch, or one built with `agent-distro.lib.mkProfile`.
@@ -926,7 +930,7 @@ python3 .github/scripts/test-update-flake.py
 The TypeScript's own checks need no VM or KVM, and `nix flake check` at the root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,profile-resolve,mk-profile,nixpkgs-reference,omp-adapter,pi-adapter,opencode-adapter,update-schedule,auth-broker,list-json,picker-layout,picker-auth}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,profile-resolve,mk-profile,nixpkgs-reference,omp-adapter,pi-adapter,opencode-adapter,update-schedule,omp-auth-broker,list-json,picker-layout,picker-auth}
 ```
 
 | Check | Covers |
@@ -939,7 +943,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 | `opencode-standalone` | an interactive OpenCode launch reaches the harness with `--standalone`, so one launch's config is not served to the next |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
-| `auth-broker` | the OMP auth broker options: the service and variables each side gets, the assertions, and the service refusing to start without a token or a Tailscale address |
+| `omp-auth-broker` | [OMP's auth broker](#omp-auth-broker) options: the service and variables each side gets, the assertions, and the start program refusing to start without a token or a Tailscale address |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
 | `models` | `--models`: `unlisted` for the harnesses without a list command, each list command's output read, a failed one failing the command, and the answer's type; `--launch`: every harness's adapter word, answered where a launch could not start |
 | `picker-layout` | the chooser's cell widths, truncation and box at common terminal sizes |
@@ -1001,6 +1005,7 @@ Create `harnesses/<name>/` with four files:
 - **Logic beyond shell.** Keep it in `src/harness/<name>.ts` and call it with `(import ../../lib/runtime.nix pkgs).script "harness/<name>.ts"`.[^beyond-shell]
 - **Models.** `src/harness/<name>.ts` also exports `models`: how a launch takes a model, and the arguments that make the harness list its models with a reader of what it prints — or `list: null` when it has none (`ModelSource`, [src/models.ts](https://github.com/juspay/agent-distro/blob/main/src/models.ts)).
 - **Unit checks.** Those that need no VM go in `tests/check-adapter.ts`, which receives the runtime's `src` and the harness directory.
+- **Home Manager modules.** A feature of the harness's own, such as [OMP's auth broker](#omp-auth-broker), goes in `home-manager/<feature>.nix`: `{ packages }: <module>`, `packages.<system>` being the harness's upstream package. The flake exports it as `homeManagerModules.<name>-<feature>`, with a `key` so it can be imported beside `default`, which composes them all; its VM-free check, `tests/<feature>.nix`, runs as `<name>-<feature>`. Anything it builds that is not Home Manager glue, such as a service's program, is a plain function of `pkgs` beside it, so a NixOS module can reuse it.
 - **Checks.** Checks declare `{ name; script; requires ? []; packages ? []; env ? {}; diskSize ? null; }`.[^check-packages] `script` is VM-driver Python.[^guest-script]
 - **Gateway checks.** They receive the shared fake service and launchers configured against it.
 - **Fixtures.** `mkLaunchers` also accepts a `sources = name: pkgs: …` hook for package fixtures.

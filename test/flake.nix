@@ -94,6 +94,15 @@
               '';
             })
           (import "${agent-distro}/lib/discover-harnesses.nix").ordered)
+        # A harness's Home Manager module, checked under the name the flake
+        # exports it by, from `tests/<feature>.nix` beside the module.
+        // lib.concatMapAttrs
+          (exported: found:
+            let check = "${agent-distro}/harnesses/${found.harness}/tests/${found.feature}.nix";
+            in lib.optionalAttrs (builtins.pathExists check) {
+              ${exported} = import check { inherit pkgs nixpkgs agent-distro home-manager; };
+            })
+          (import "${agent-distro}/lib/harness-modules.nix")
         // {
           # The reader alone, without a VM: invalid manifests, skipped
           # components, and a failed build that names the field.
@@ -279,9 +288,6 @@
             inherit pkgs nixpkgs agent-distro home-manager;
           };
           lib-exports = import ./test-lib-exports.nix {
-            inherit pkgs nixpkgs agent-distro home-manager;
-          };
-          auth-broker = import ./test-auth-broker.nix {
             inherit pkgs nixpkgs agent-distro home-manager;
           };
           auto-update = pkgs.testers.runNixOSTest (import ./test-auto-update.nix {
