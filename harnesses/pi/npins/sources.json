@@ -9,9 +9,9 @@
       },
       "branch": "main",
       "submodules": false,
-      "revision": "8561adfb52d3c31909740251725e2944c44c7a0b",
-      "url": "https://github.com/sadjow/pi-nix/archive/8561adfb52d3c31909740251725e2944c44c7a0b.tar.gz",
-      "hash": "sha256-YtjVzJ4BKChPajRd/KOuvuez/pSjVTGu8tvnoG+V+hw="
+      "revision": "6cb45bbf596c7d9cc0831e4927681f8bed8987a0",
+      "url": "https://github.com/sadjow/pi-nix/archive/6cb45bbf596c7d9cc0831e4927681f8bed8987a0.tar.gz",
+      "hash": "sha256-W7uS3/4/p7c45uSWn6Q/mbir1XjsVVZyhq3KHPVhhlA="
     }
   },
   "version": 8
