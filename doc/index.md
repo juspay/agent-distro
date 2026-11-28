@@ -115,6 +115,7 @@ agent-distro --launch omp                # how a launch of omp takes a model, as
 | --- | --- |
 | Claude Code | `oauthAccount.emailAddress` in `$CLAUDE_CONFIG_DIR/.claude.json`,[^claude-default] or the name of `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` |
 | Codex | the `email` claim of the OpenID token in `$CODEX_HOME/auth.json`,[^codex-claim] or `OPENAI_API_KEY` |
+| Antigravity CLI | the name of `GEMINI_API_KEY` when `~/.gemini/antigravity-cli/settings.json` sets `"modelProvider": "gemini"`, or `AGY_ADC_AUTH=true`; otherwise neither a mark nor `Not signed in`[^agy-keyring] |
 | OMP, OpenCode, Pi | the profile's `secret` variables, then the provider ids it also has credentials for[^both] |
 | Own-provider harnesses | the ids in the harness's store,[^stores] plus the provider API-key variables it reads from the environment |
 
@@ -126,6 +127,7 @@ A `secret` variable the profile declares and the environment does not set is a l
 [^codex-claim]: Read from `tokens.id_token` without checking its signature; `ChatGPT` when the claim is absent.
 [^both]: The profile's secrets and the harness's own providers are usable at once.
 [^stores]: OMP's `~/.omp/agent/agent.db`, Pi's `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent/auth.json`), OpenCode's `${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json`.
+[^agy-keyring]: Its Google sign-in lives in the system keyring, which the picker does not read, so it cannot say that the CLI is signed out.
 
 ### Keys
 
@@ -218,11 +220,12 @@ Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list`
 | Oh My Pi | `omp models --json` | `--model <id>` |
 | OpenCode | `opencode models` | `OPENCODE_CONFIG_CONTENT='{"model":"<id>"}'`[^opencode-model] |
 | Pi | `pi --list-models` | `--model <id>` |
+| Antigravity CLI | `agy models` | `--model <slug>` |
 | Claude Code, Codex | nothing: `unlisted` | `--model <id>` |
 
 [^opencode-model]: OpenCode's terminal interface has no model flag; this config layer is read over the launch's own.
 
-- **Ids.** Each is exactly what the launch takes, `provider/id`, so a model two providers serve is two ids.
+- **Ids.** Each is exactly what the launch takes, `provider/id` (the Antigravity CLI's own model slug), so a model two providers serve is two ids.
 - **Three answers.** `listed` (possibly empty, when the harness has no model to offer), `unlisted` (the harness has no list command: a model is whatever the user names), or a failure.
 - **Failure.** A list command that fails, or prints what agent-distro cannot read, exits 1 with nothing on stdout and, on stderr, the command and everything it printed there — never an empty list. Its stdin is not a terminal, so a `secret` the profile still needs is a failure, not a prompt.
 - **Arguments.** Exactly one harness the package carries; anything else exits 2.
@@ -836,6 +839,7 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 | Claude Code | `claude` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/claude/README.md) |
 | OpenCode | `opencode` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/opencode/README.md) |
 | Pi | `pi` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/pi/README.md) |
+| Antigravity CLI | `agy` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/agy/README.md) |
 
 ## How it works
 
@@ -957,7 +961,7 @@ Create `harnesses/<name>/` with four files:
 | `source.nix` | `{ pkgs }` to package |
 | `README.md` | design notes |
 
-[^auth-values]: `auth = "anthropic" | "openai"`, for a harness with a login of its own; without one the picker reads the profile's `secret` variables and the harness's own store.
+[^auth-values]: `auth = "anthropic" | "openai" | "google"`, for a harness with a login of its own; without one the picker reads the profile's `secret` variables and the harness's own store.
 [^launch-json]: The adapter hands `launchPlugins` what it needs for a launch; its shell sets `launched`, `profile_env_*` and `profile_settings` for the profile in effect, read when the harness starts.
 
 - **Alongside.** Pins in `npins/`, scripts in `tests/`, and an optional custom updater in `update.py`.

@@ -23,6 +23,7 @@ import { log } from '../log.ts';
 import { LaunchError, type Adapter, type Report } from '../plugin/launch.ts';
 import type { ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
+import { copySkills, launchable, writeLauncher, type Inputs } from '../plugin/resources.ts';
 import { isSystemError, lexists, writeTemporary } from '../util.ts';
 
 /** Antigravity's own manifest schema: the folder is an Antigravity plugin, not an Agent Plugins one. */

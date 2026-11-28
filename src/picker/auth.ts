@@ -6,14 +6,15 @@
  * "unknown" (undefined), and a probe never throws.
  *
  * Each harness's scheme comes from its meta.nix through lib/picker.nix: the
- * ones with a login of their own (Claude Code, Codex) name it, and the rest
- * are `secrets` — the `secret` variables of the profile's `env`, then the
- * harness's own store, which `spec` fills in from the profile in effect.
- * `AGENT_DISTRO_SETTINGS` is read here, at launch, so a harness whose
- * profile's environment is off falls back to its own provider.
+ * ones with a login of their own (Claude Code, Codex, the Antigravity CLI)
+ * name it, and the rest are `secrets` — the `secret` variables of the
+ * profile's `env`, then the harness's own store, which `spec` fills in from
+ * the profile in effect. `AGENT_DISTRO_SETTINGS` is read here, at launch, so a
+ * harness whose profile's environment is off falls back to its own provider.
  *
  * Checked against the pinned sources: Claude Code 2.1.292, Codex 0.160.1,
- * oh-my-pi 18.7.0, Pi 1.0.4 and OpenCode 2.0.29.
+ * oh-my-pi 18.7.0, Pi 1.0.4 and OpenCode 2.0.29; the Antigravity CLI, a closed
+ * binary, against Google's install documentation for 1.5.19.
  */
 
 import { log } from '../log.ts';
@@ -22,7 +23,7 @@ import type { ProfileEnv } from '../profile/resolve.ts';
 export type Env = NodeJS.ProcessEnv;
 
 /** A harness's auth scheme, as its meta.nix declares it. */
-export type Scheme = 'anthropic' | 'openai' | 'secrets';
+export type Scheme = 'anthropic' | 'openai' | 'google' | 'secrets';
 
 /** One harness's probe spec, for the profile in effect. */
 export type Spec = {
@@ -241,6 +242,23 @@ function idTokenEmail(token: unknown): string | undefined {
   }
 }
 
+/**
+ * The Antigravity CLI: its Google sign-in lives in the system keyring, which a
+ * probe does not read, so without one of its two documented alternatives the
+ * row is unknown — never "not signed in" for a login it cannot see. Those
+ * are a Gemini API key, which counts only with `"modelProvider": "gemini"` in
+ * `~/.gemini/antigravity-cli/settings.json` (the variable alone "has no
+ * effect"), and `AGY_ADC_AUTH=true`, Application Default Credentials.
+ */
+function google(env: Env, io: Io): Status | undefined {
+  if (env.GEMINI_API_KEY) {
+    const file = json(`${home(env)}/.gemini/antigravity-cli/settings.json`, io);
+    if ('value' in file && record(file.value)?.modelProvider === 'gemini') return signedIn(['GEMINI_API_KEY']);
+  }
+  if (env.AGY_ADC_AUTH === 'true') return signedIn(['AGY_ADC_AUTH']);
+  return undefined;
+}
+
 /** The provider ids a harness has credentials for, and the store they came from. */
 function providerIds(harness: string, env: Env, io: Io): { ids: string[]; source: Source<string[]> } {
   const source = STORES[harness]?.(env, io) ?? { missing: true };
@@ -283,6 +301,9 @@ export function probe(spec: Spec, env: Env, io: Io): Status | undefined {
         break;
       case 'openai':
         status = openai(env, io);
+        break;
+      case 'google':
+        status = google(env, io);
         break;
       case 'secrets':
         status = secrets(spec, env, io);
