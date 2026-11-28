@@ -142,22 +142,21 @@ const none = listModels('pi', launcher('pi-none', 'No models available. Use /log
 assert.deepEqual(none.models, { kind: 'listed', ids: [] });
 
 // The Antigravity CLI: what `agy models` prints to a pipe, as the launcher runs
-// it — one model a line, its slug, one tab, its name — with "Fetching
-// available models..." on stderr. Made-up slugs and names, in that shape.
+// it — one model a line, its slug, one tab, its name — with a progress line on
+// stderr. Made-up slugs, names and words, in that shape.
 const agyList = 'model-alpha-high\tModel Alpha (High)\nmodel-alpha-low\tModel Alpha (Low)\nmodel-beta-2.5\tModel Beta 2.5\n';
-const agy = listModels('agy', launcher('agy', agyList, { stderr: 'Fetching available models...\n' }), sources.agy);
+const agy = listModels('agy', launcher('agy', agyList, { stderr: 'working on it\n' }), sources.agy);
 assert.deepEqual(argsOf('agy'), ['models']);
 assert.deepEqual(agy, {
   launch: { kind: 'flag', flag: '--model' },
   models: { kind: 'listed', ids: ['model-alpha-high', 'model-alpha-low', 'model-beta-2.5'] },
 });
-// Signed out, `agy models` exits 1 with its own words, which the failure carries.
+// Signed out, `agy models` exits 1 with an error asking to sign in; the
+// failure carries agy's words, whatever they are.
 assert.throws(
-  () => listModels('agy', launcher('agy-signed-out', '', {
-    stderr: 'Fetching available models...\nError: Please sign in to view available models. Launch the CLI without arguments to sign in.\n',
-    status: 1,
-  }), sources.agy),
-  /agy models exited 1:\nFetching available models\.\.\.\nError: Please sign in to view available models\./,
+  () => listModels('agy', launcher('agy-signed-out', '', { stderr: 'working on it\nError: sign in first, please\n', status: 1 }),
+    sources.agy),
+  /agy models exited 1:\nworking on it\nError: sign in first, please/,
 );
 
 // A list command that fails is a failure carrying its words, not a list.
