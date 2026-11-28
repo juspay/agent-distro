@@ -265,7 +265,7 @@ A plugin named by a flake reference rather than a directory goes on `AI_PROFILE`
 - **Read like a profile's plugins.** Each directory goes through the same reader: an invalid manifest fails the launch with a message naming the field. Lesser problems are reported while the launch goes on.[^launch-warnings]
 - **Matched by name, never by version.** A plugin whose `plugin.json` `name` matches one of the profile's replaces it; on the variable, the last of a name wins.[^no-version]
 - **Translated once.** Each harness's translation of a plugin is cached under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`.[^cache-dir] An edited skill, manifest or MCP config is translated again on its next launch; the rest of the tree is never read.[^cache-key]
-- **Kept while in use.** Each launch marks the translations it uses; a launch that translates something new removes what no launch has used for 14 days.[^no-pile-up] With no harness running, removing `~/.cache/agent-distro/plugins` is always safe.
+- **Kept while in use.** Each launch marks the translations it uses; a launch that translates something new removes what no launch has used for 14 days, except a translation a running Antigravity CLI session holds.[^no-pile-up] With no harness running, removing `~/.cache/agent-distro/plugins` is always safe.
 - **For that launch only.** Unset the variable and the harness is back to the profile's plugins.[^undo] Each harness's README says how.
 
 [^colon-path]: So a path containing `:` cannot be given.

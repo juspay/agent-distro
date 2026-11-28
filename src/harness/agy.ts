@@ -42,11 +42,11 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../log.ts';
-import type { Adapter, Report } from '../plugin/launch.ts';
+import { hold, release, type Adapter, type Holder, type Report } from '../plugin/launch.ts';
 import type { ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher, type Inputs } from '../plugin/resources.ts';
-import { isSystemError, lexists, writeTemporary } from '../util.ts';
+import { isSystemError, lexists, processIdentity, writeTemporary } from '../util.ts';
 
 /** Antigravity's own manifest schema: the folder is an Antigravity plugin, not an Agent Plugins one. */
 const SCHEMA = 'https://antigravity.google/schemas/v1/plugin.json';
@@ -66,9 +66,6 @@ type Links = Record<string, string>;
  * directory (`locations`), however either is spelled.
  */
 type Claim = { pid: number; identity: string; links: Links };
-
-/** A process: its pid, and what tells it apart from a later one given the same pid. */
-type Session = { pid: number; identity: string };
 
 /** How long a launch waits for another to finish linking before it skips its own links. */
 const LOCK_SECONDS = 30;
@@ -130,8 +127,9 @@ const TRANSLATION = /^\/.*\/agent-distro\/plugins\/[^/]+\/agy\/[^/]+\/out$/;
  * How a translation is put where `agy` reads plugins, and how an entry of ours
  * is known again: the one place that decides between a link and a copy. A
  * link to a translation in agent-distro's cache is ours by its target alone.
+ * Exported so a check can make one placement fail.
  */
-const ENTRIES = {
+export const ENTRIES = {
   /** The translation the entry at `path` was placed from, or null when it is not ours or not there. */
   source(path: string): string | null {
     let target: string;
@@ -158,26 +156,6 @@ const ENTRIES = {
     rmSync(path);
   },
 };
-
-/**
- * What tells process `pid` apart from a later one given the same pid — its
- * start time — or null when no such process runs.
- */
-export function processIdentity(pid: number): string | null {
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EPERM') return null;
-  }
-  try {
-    // Linux: the 22nd field of /proc/<pid>/stat, counted after the command's `)`.
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
-  } catch {
-    const ps = spawnSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' });
-    return ps.status === 0 ? ps.stdout.trim() : null;
-  }
-}
 
 /** A plugin name as a path component: one, and inside the directory. */
 const isName = (name: string) => name !== '' && name !== '.' && name !== '..' && !name.includes('/');
@@ -230,6 +208,7 @@ function liveClaims(claims: string, self: number): Links {
     }
     if (claim.pid === self) continue;
     if (processIdentity(claim.pid) !== claim.identity) {
+      for (const target of Object.values(claim.links)) release(target, claim.pid);
       rmSync(path, { force: true });
       continue;
     }
@@ -266,7 +245,7 @@ function writeClaim(claims: string, claim: Claim) {
  * it placed. A claimed entry that is then not placed harms nothing. Throws
  * `Skipped`, saying what failed.
  */
-export function settle(directory: string, claims: string, session: Session, wanted: Links, report: Report): Links {
+export function settle(directory: string, claims: string, session: Holder, wanted: Links, report: Report): Links {
   const unchanged = 'nothing placed or taken back';
   const held = step(`cannot read the claims in ${claims}; ${unchanged}`, () => {
     mkdirSync(claims, { recursive: true });
@@ -291,6 +270,11 @@ export function settle(directory: string, claims: string, session: Session, want
   });
   step(`cannot write this launch's claim in ${claims}; ${unchanged}`,
     () => writeClaim(claims, { ...session, links: using }));
+  // A session can outlive any launch that uses its translations: held, they
+  // are not pruned from the cache while it runs (src/plugin/launch.ts `prune`).
+  step(`cannot hold this launch's translations in the cache; ${unchanged}`, () => {
+    for (const translation of Object.values(using)) hold(translation, session);
+  });
   step(`cannot change ${directory}; what this launch placed before that is claimed`, () => {
     for (const name of entries) {
       const path = join(directory, name);

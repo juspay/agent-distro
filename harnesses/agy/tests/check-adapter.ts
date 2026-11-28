@@ -8,14 +8,16 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { once } from 'node:events';
 import { after, test } from 'node:test';
 
 // The module's path is the SRC argument, so it cannot be a static import.
-const { adapter, settle, processIdentity, locations, Skipped } = await import(join(process.argv[2], 'harness/agy.ts'));
+const { adapter, settle, locations, Skipped, ENTRIES } = await import(join(process.argv[2], 'harness/agy.ts'));
+const { processIdentity } = await import(join(process.argv[2], 'util.ts'));
+const { prune, STALE_DAYS } = await import(join(process.argv[2], 'plugin/launch.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'agy-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -102,7 +104,7 @@ function world() {
     const path = join(plugins, name);
     return [name, lstatSync(path).isSymbolicLink() ? readlinkSync(path) : 'dir'];
   })) : {};
-  return { plugins, claims, translation, launch, listed, reports };
+  return { root, plugins, claims, translation, launch, listed, reports };
 }
 
 type Session = { pid: number; identity: string };
@@ -292,13 +294,20 @@ test('a launch that cannot write its claim places nothing and takes nothing back
 
 test('a launch that stops while placing has claimed what it placed', async () => {
   const { claims, translation, launch, listed } = world();
-  const a = translation();
+  const [a, b] = [translation(), translation()];
   const live = session();
-  // A translation whose path is longer than a link may hold: placing `b`
-  // fails after `a` is placed.
-  const b = '/' + 'd/'.repeat(2100) + 'agent-distro/plugins/key/agy/translator.0/out';
-  assert.throws(() => launch(live, { a, b }),
-    (error: Error) => error instanceof Skipped && /cannot change .*; what this launch placed before that is claimed/.test(error.message));
+  // Placing `b` fails, as a full disk would make it, after `a` is placed.
+  const place = ENTRIES.place;
+  ENTRIES.place = (target: string, path: string) => {
+    if (path.endsWith('/b')) throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC', syscall: 'symlink' });
+    return place(target, path);
+  };
+  try {
+    assert.throws(() => launch(live, { a, b }),
+      (error: Error) => error instanceof Skipped && /cannot change .*; what this launch placed before that is claimed/.test(error.message));
+  } finally {
+    ENTRIES.place = place;
+  }
   assert.deepEqual(listed(), { a });
   assert.equal(readJson(join(claims, `${live.pid}.json`)).links.a, a);
   // So a later launch leaves it while the session runs.
@@ -323,4 +332,23 @@ test('a home reached through a symlink shares its claims with the home itself', 
   await live.end();
   settle(linked.plugins, linked.claims, ended(), {}, () => {});
   assert.ok(!existsSync(join(real.plugins, 'x')));
+});
+
+test('a running session keeps its translations through a prune, however long since a launch used them', async () => {
+  const { root, translation, launch } = world();
+  const cache = join(root, 'cache/agent-distro');
+  const x = translation();
+  // The cache's link to the translation, last used longer ago than any prune keeps.
+  const link = join(dirname(dirname(x)), 'translator');
+  symlinkSync('translator.0', link);
+  const old = new Date(Date.now() - (STALE_DAYS + 1) * 24 * 60 * 60 * 1000);
+  lutimesSync(link, old, old);
+  const live = session();
+  launch(live, { x });
+  prune(cache);
+  assert.ok(existsSync(join(x, '..', 'holds', `${live.pid}.json`)), 'the launch held its translation');
+  assert.ok(existsSync(x), 'a prune removed the translation of a running session');
+  await live.end();
+  prune(cache);
+  assert.ok(!existsSync(x), 'once the session has ended, the stale translation goes');
 });

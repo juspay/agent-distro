@@ -42,10 +42,14 @@ directory: one that cannot write it places nothing and takes nothing back, and
 one that stops partway has claimed what it placed. A launch takes
 back an entry of agent-distro's only when no running launch claims it, so a
 plugin stays while any `agy` session that wanted it runs, and until the next
-launch after that. Launches never do this at the same time: each places its
-entries under an exclusive lock, `lock` beside the claims, which the operating
-system releases if a launch dies. A launch that waits 30 seconds for it skips
-its plugins, with a warning, and still starts. Of two running launches that
+launch after that. The launch also holds each translation it uses, in a
+`holds/<pid>.json` beside it in the cache, so a session running longer than
+the cache's 14 days keeps its translations: the cache's prune skips any
+translation a running process holds. Launches never do this at the same time:
+each places its entries under an exclusive lock, `lock` beside the claims,
+which the operating system releases if a launch dies. A launch that waits 30
+seconds for it skips its plugins, with a warning, and still starts. Of two
+running launches that
 want different translations under one name, the later one keeps the entry
 already there, uses it, and says so. A run that only lists models
 (`agy models`, and so `agent-distro --models agy`) changes nothing in

@@ -1,5 +1,6 @@
-/** Filesystem and quoting helpers every runtime module shares. */
-import { closeSync, lstatSync, openSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs';
+/** Filesystem, process and quoting helpers every runtime module shares. */
+import { spawnSync } from 'node:child_process';
+import { closeSync, lstatSync, openSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -93,3 +94,24 @@ export function writeTemporary(directory: string, prefix: string, data: string):
   }
   return path;
 }
+
+/**
+ * What tells process `pid` apart from a later one given the same pid — its
+ * start time — or null when no such process runs.
+ */
+export function processIdentity(pid: number): string | null {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EPERM') return null;
+  }
+  try {
+    // Linux: the 22nd field of /proc/<pid>/stat, counted after the command's `)`.
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+  } catch {
+    const ps = spawnSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' });
+    return ps.status === 0 ? ps.stdout.trim() : null;
+  }
+}
+
