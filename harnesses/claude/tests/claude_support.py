@@ -36,6 +36,14 @@ def run(*args, launcher='claude', plugins=None):
                           capture_output=True, timeout=60, check=True).stdout
 
 
+def listed(*args, launcher='claude', plugins=None):
+    """`claude … plugin list --json`, without the plugins Claude Code ships
+    itself: it lists those too, as `<name>@builtin`, beside the ones a launch
+    hands it."""
+    listing = json.loads(run(*args, 'plugin', 'list', '--json', launcher=launcher, plugins=plugins))
+    return [p for p in listing if not p['id'].endswith('@builtin')]
+
+
 def inventory(plugin, launcher='claude', plugins=None):
     # Claude's own inventory, rather than inspecting the translated files.
     details = run('plugin', 'details', plugin, launcher=launcher, plugins=plugins)
