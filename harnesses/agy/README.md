@@ -49,10 +49,9 @@ translation a running process holds. Launches never do this at the same time:
 each places its entries under an exclusive lock, `lock` beside the claims,
 which the operating system releases if a launch dies. A launch that waits 30
 seconds for it skips its plugins, with a warning, and still starts. Of two
-running launches that
-want different translations under one name, the later one keeps the entry
-already there, uses it, and says so. A run that only lists models
-(`agy models`, and so `agent-distro --models agy`) changes nothing in
+running launches that want different translations under one name, the later
+one keeps the entry already there, uses it, and says so. A run that only lists
+models (`agy models`, and so `agent-distro --models agy`) changes nothing in
 `~/.gemini/config/`. Without `HOME`, or with a home that cannot be written,
 the plugins are skipped with a warning naming what failed, and `agy` still
 starts. A second user sharing the home cannot read the first's claims (they
