@@ -141,22 +141,24 @@ const none = listModels('pi', launcher('pi-none', 'No models available. Use /log
   sources.pi);
 assert.deepEqual(none.models, { kind: 'listed', ids: [] });
 
-// The Antigravity CLI: each line's slug. What `agy models` prints signed in is
-// unproven; these are the first rows of Google's documented sample
-// (antigravity.google/docs/cli/headless), as it prints them.
-const agyList = [
-  'gemini-4-neon-xhigh            Gemini 4 Neon (XHigh)',
-  'gemini-4-neon-high             Gemini 4 Neon (High)',
-  'gemini-4-neon-medium           Gemini 4 Neon (Medium)',
-  'gemini-4-neon-low              Gemini 4 Neon (Low)',
-  '',
-].join('\n');
-const agy = listModels('agy', launcher('agy', agyList), sources.agy);
+// The Antigravity CLI: what `agy models` prints to a pipe, as the launcher runs
+// it — one model a line, its slug, one tab, its name — with "Fetching
+// available models..." on stderr. Made-up slugs and names, in that shape.
+const agyList = 'model-alpha-high\tModel Alpha (High)\nmodel-alpha-low\tModel Alpha (Low)\nmodel-beta-2.5\tModel Beta 2.5\n';
+const agy = listModels('agy', launcher('agy', agyList, { stderr: 'Fetching available models...\n' }), sources.agy);
 assert.deepEqual(argsOf('agy'), ['models']);
 assert.deepEqual(agy, {
   launch: { kind: 'flag', flag: '--model' },
-  models: { kind: 'listed', ids: ['gemini-4-neon-xhigh', 'gemini-4-neon-high', 'gemini-4-neon-medium', 'gemini-4-neon-low'] },
+  models: { kind: 'listed', ids: ['model-alpha-high', 'model-alpha-low', 'model-beta-2.5'] },
 });
+// Signed out, `agy models` exits 1 with its own words, which the failure carries.
+assert.throws(
+  () => listModels('agy', launcher('agy-signed-out', '', {
+    stderr: 'Fetching available models...\nError: Please sign in to view available models. Launch the CLI without arguments to sign in.\n',
+    status: 1,
+  }), sources.agy),
+  /agy models exited 1:\nFetching available models\.\.\.\nError: Please sign in to view available models\./,
+);
 
 // A list command that fails is a failure carrying its words, not a list.
 assert.throws(
@@ -173,8 +175,10 @@ for (const [harness, stdout, message] of [
   ['opencode', 'beam-free\n', /not provider\/id/],
   ['pi', 'Warning: something\n', /not its table header/],
   // A header, a bare word, or nothing at all: refused, never guessed at.
-  ['agy', 'MODEL            NAME\ngemini-4-flash   Gemini 4 Flash\n', /"MODEL            NAME", not a model's slug and name/],
-  ['agy', 'gemini-4-flash\n', /not a model's slug and name/],
+  ['agy', 'MODEL\tNAME\nmodel-alpha-high\tModel Alpha (High)\n', /"MODEL\\tNAME", not a model's slug and name/],
+  ['agy', 'model-alpha-high\n', /not a model's slug and name/],
+  // Columns padded with spaces are not what agy prints to a pipe: refused.
+  ['agy', 'model-alpha-high    Model Alpha (High)\n', /not a model's slug and name/],
   ['agy', '\n', /no models, and no word why/],
 ] as const) {
   assert.throws(() => listModels(harness, launcher(`${harness}-odd`, stdout), sources[harness]), message, `${harness}: ${stdout}`);

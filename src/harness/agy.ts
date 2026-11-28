@@ -298,11 +298,14 @@ export function settle(directory: string, claims: string, session: Holder, wante
 }
 
 /**
- * `agy models`: one model a line, its slug and then its name, as Google
- * documents it (`gemini-4-neon-xhigh            Gemini 4 Neon (XHigh)`). The
- * slug is what `--model` takes. Any other line is refused, not guessed at.
+ * `agy models`: one model a line, its slug, a tab, and its name. That is what
+ * `agy` prints when its output is not a terminal, which is how the launcher
+ * always runs it. Google's documentation shows the lines with spaces between
+ * slug and name, which `agy` was not seen to print; the reader refuses them
+ * rather than guess. The slug is what `--model` takes. Any other line is
+ * refused, not guessed at.
  */
-const MODEL_LINE = /^([a-z0-9][a-z0-9._-]*)\s{2,}\S/;
+const MODEL_LINE = /^([a-z0-9][a-z0-9._-]*)\t\S/;
 
 export const models: ModelSource = {
   launch: { kind: 'flag', flag: '--model' },
