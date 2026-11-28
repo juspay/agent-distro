@@ -34,6 +34,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job pushes to git: keep the token out of .git/config.
+          persist-credentials: false
 
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
@@ -158,6 +161,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # publish-closure's "Push the index" step runs `git push origin` in
+          # this checkout, with the credential checkout leaves in .git/config.
+          persist-credentials: true
 
       - name: Read the package this publishes
         id: package
