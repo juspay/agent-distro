@@ -5,14 +5,20 @@ from agy_support import *
 first = inventory()
 assert inventory() == first
 
-# A record that is not agent-distro's stops the launch before any change.
-if first:
-    saved = record.read_bytes()
-    record.write_text('[]')
-    result = run('--version', success=False)
-    assert "not agent-distro's launch record" in result.stderr, result.stderr
-    assert linked() == first
-    record.write_bytes(saved)
+# A plugin a running launch still uses stays, whatever later launches want:
+# here a process stands in for that launch's agy, claiming the fixture's entry.
+fixture = os.environ['AGENT_DISTRO_TEST_PLUGIN']
+placed = inventory(value=fixture, wanted=set(expected) | {'launch-fixture'}, skills={**expected, 'launch-fixture': ['launched']})
+stand_in = subprocess.Popen(['sleep', '600'])
+stat = Path(f'/proc/{stand_in.pid}/stat').read_text()
+(claims / f'{stand_in.pid}.json').write_text(json.dumps({
+    'pid': stand_in.pid, 'identity': stat[stat.rindex(')') + 2:].split(' ')[19],
+    'directory': str(plugins), 'links': {'launch-fixture': placed['launch-fixture']}}))
+run('--version')
+assert linked().get('launch-fixture') == placed['launch-fixture'], linked()
+stand_in.kill()
+stand_in.wait()
+assert inventory() == first
 
 # A home agy's directory cannot be made in: the links are skipped, not the
 # launch. The cache is not what this is about, so it gets a real one.

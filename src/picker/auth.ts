@@ -243,12 +243,13 @@ function idTokenEmail(token: unknown): string | undefined {
 }
 
 /**
- * The Antigravity CLI: its Google sign-in lives in the system keyring, which a
- * probe does not read, so without one of its two documented alternatives the
- * row is unknown — never "not signed in" for a login it cannot see. Those
- * are a Gemini API key, which counts only with `"modelProvider": "gemini"` in
- * `~/.gemini/antigravity-cli/settings.json` (the variable alone "has no
- * effect"), and `AGY_ADC_AUTH=true`, Application Default Credentials.
+ * The Antigravity CLI: Google documents its sign-in as kept in the system
+ * keyring, which a probe does not read, so without one of its two documented
+ * alternatives the row is unknown — never "not signed in" for a login it
+ * cannot see. Those are a Gemini API key, which counts only with
+ * `"modelProvider": "gemini"` in `~/.gemini/antigravity-cli/settings.json`
+ * (the variable alone "has no effect"), and `AGY_ADC_AUTH=true`, Application
+ * Default Credentials.
  */
 function google(env: Env, io: Io): Status | undefined {
   if (env.GEMINI_API_KEY) {

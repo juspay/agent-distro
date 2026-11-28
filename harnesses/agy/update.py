@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a new pin only once every supported platform has been fetched."""
+"""Publish a new pin only once every supported platform's manifest has been read, and all agree."""
 import base64
 import json
 import os

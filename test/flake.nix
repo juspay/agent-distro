@@ -191,6 +191,52 @@
               same keep env AGENT_DISTRO_PROFILE="$configured" OMP_SKIP_SETUP=keep "$omp"
               touch "$out"
             '';
+          # The Antigravity CLI launcher's placement, without a VM or agy, in
+          # a throwaway home: a launch places its plugins where agy reads them,
+          # the next takes them back, a run that only lists models changes
+          # nothing there, and a launch waits for another's lock rather than
+          # placing alongside it. Built against a package that only prints
+          # its arguments.
+          agy-launch =
+            let
+              argv = pkgs.writeShellScriptBin "agy" ''printf '%s\n' "$*"'' // { version = "0"; };
+              launcher = (agent-distro.lib.mkLaunchers {
+                inherit pkgs;
+                sources = _: _: argv;
+              }).agy;
+            in
+            pkgs.runCommand "agy-launch-check" { nativeBuildInputs = [ pkgs.bash pkgs.flock ]; } ''
+              export HOME="$TMPDIR/home" XDG_CACHE_HOME="$TMPDIR/cache" XDG_STATE_HOME="$TMPDIR/state"
+              mkdir -p "$HOME" "$TMPDIR/project"
+              cd "$TMPDIR/project"
+              agy=${lib.getExe launcher}
+              plugins="$HOME/.gemini/config/plugins"
+              fixture=${./fixtures/launch-plugin}
+              fail() { echo "agy-launch: $*" >&2; exit 1; }
+
+              # Listing models leaves ~/.gemini/config as it is, plugins or not.
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" models >/dev/null
+              [ ! -e "$HOME/.gemini" ] || fail "a models run wrote $(find "$HOME/.gemini")"
+
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" --version >/dev/null
+              [ -f "$plugins/launch-fixture/skills/launched/SKILL.md" ] || fail "the fixture was not placed"
+              [ -L "$plugins/launch-fixture" ] || fail "the fixture is not a link"
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" models >/dev/null
+              [ -L "$plugins/launch-fixture" ] || fail "a models run took the fixture back"
+              "$agy" --version >/dev/null
+              [ ! -e "$plugins/launch-fixture" ] || fail "the next launch did not take the fixture back"
+
+              # A launch waits while another holds the lock, then places its own.
+              lock="$XDG_STATE_HOME/agent-distro/agy-launches/lock"
+              flock "$lock" sleep 3 &
+              sleep 1
+              start=$SECONDS
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" --version >/dev/null
+              wait
+              [ $((SECONDS - start)) -ge 1 ] || fail "the launch did not wait for the lock"
+              [ -L "$plugins/launch-fixture" ] || fail "the fixture was not placed after the wait"
+              touch "$out"
+            '';
           # `--list --json` alone, without a VM: its type, the picker's menu
           # with the profile in effect, `--list`, and versions stripped of `+`
           # suffixes.

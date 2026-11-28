@@ -1,26 +1,43 @@
 /**
- * The Antigravity CLI's side of a launch's plugins, run by src/plugin/launch.ts.
+ * The Antigravity CLI's side of a launch's plugins.
  *
- * `agy` has no flag that loads a plugin for one launch: it reads every plugin
- * folder in `~/.gemini/config/plugins/`, the directory the Antigravity desktop
- * app and IDE read too. So `translate` writes each plugin as an Antigravity
- * plugin folder — `plugin.json`, `skills/`, and `mcp_config.json`, whose stdio
- * servers run through generated launchers (src/plugin/resources.ts) — and
- * `launch` links each into that directory under its name, recording what it
- * linked in RECORD beside it. The next launch takes back whatever is still as
- * recorded before linking its own, so a plugin stays until the next `agy`
- * launch, however much later that is. An entry the launcher did not link is
- * never altered or removed: a plugin whose name one already holds is skipped,
- * with a word. A home that is unset or cannot be written skips the links,
- * with a word, and `agy` still starts.
+ * Usage: node agy.ts link FLOCK SESSION_PID WANTED_JSON
  *
- * The record is written before any link is made, and again once they are, so
- * an interrupted launch leaves nothing the next one would take for the user's.
+ * Google documents no flag that loads a plugin for one launch: it documents
+ * `~/.gemini/config/plugins/` as where `agy` reads plugin folders, a directory
+ * the Antigravity desktop app and IDE read too. So `adapter.translate` writes
+ * each plugin as an Antigravity plugin folder — `plugin.json`, `skills/`, and
+ * `mcp_config.json`, whose stdio servers run through generated launchers
+ * (src/plugin/resources.ts) — and `adapter.launch` prints which plugin names
+ * this launch wants, and from which translation. The launcher then runs
+ * `link`, which puts each into that directory (`ENTRIES`) before it `exec`s
+ * `agy` as SESSION_PID.
+ *
+ * What is agent-distro's there is known by the entry itself — it was placed
+ * from a translation in agent-distro's cache (src/plugin/launch.ts) — never by
+ * a record that could disagree with it, so a launch killed at any point leaves
+ * nothing the next one takes for the user's. An entry that is not ours is never
+ * altered or removed; a plugin whose name one already holds is skipped, with a
+ * word.
+ *
+ * Which launches still use an entry is kept out of Google's directory, in
+ * `${XDG_STATE_HOME:-~/.local/state}/agent-distro/agy-launches`: one claim per
+ * launch, `<pid>.json`, naming the entries its session uses, which counts for
+ * as long as that process — the launcher, then `agy` in its place — runs. A
+ * launch removes an entry of ours only when no running launch claims it, and
+ * two launches never do this at once: `link` runs under an exclusive lock on
+ * `lock` beside the claims, which the operating system releases when a launch
+ * dies. Of two running launches that want different translations under one
+ * name, the later keeps the one already there, and says so.
+ *
+ * A home that is unset or cannot be written skips all of this, with a word,
+ * and `agy` still starts.
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { log } from '../log.ts';
-import { LaunchError, type Adapter, type Report } from '../plugin/launch.ts';
+import type { Adapter, Report } from '../plugin/launch.ts';
 import type { ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher, type Inputs } from '../plugin/resources.ts';
@@ -29,11 +46,20 @@ import { isSystemError, lexists, writeTemporary } from '../util.ts';
 /** Antigravity's own manifest schema: the folder is an Antigravity plugin, not an Agent Plugins one. */
 const SCHEMA = 'https://antigravity.google/schemas/v1/plugin.json';
 
-/** Beside the plugins directory, not in it, so no loader takes it for a plugin. */
-export const RECORD = '.agent-distro-launch.json';
+/** The `name` pattern of Antigravity's manifest schema, narrower than Agent Plugins'. */
+const ANTIGRAVITY_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** Plugin name → the translation linked under it. */
+/** Plugin name → the translation its entry is placed from. */
 type Links = Record<string, string>;
+
+/** One launch's claim: the entries its session uses while process `pid` runs. */
+type Claim = { pid: number; identity: string; directory: string; links: Links };
+
+/** A process: its pid, and what tells it apart from a later one given the same pid. */
+type Session = { pid: number; identity: string };
+
+/** How long a launch waits for another to finish linking before it skips its own links. */
+const LOCK_SECONDS = 30;
 
 const logger = log.harness('agy');
 
@@ -41,60 +67,153 @@ const logger = log.harness('agy');
 export const pluginsDirectory = (env: NodeJS.ProcessEnv = process.env) =>
   env.HOME ? join(env.HOME, '.gemini', 'config', 'plugins') : null;
 
+/** Where the claims and their lock live, or null without a home. */
+export const claimsDirectory = (env: NodeJS.ProcessEnv = process.env) =>
+  env.XDG_STATE_HOME || env.HOME
+    ? join(env.XDG_STATE_HOME || join(env.HOME!, '.local', 'state'), 'agent-distro', 'agy-launches')
+    : null;
+
 /**
- * One plugin as an Antigravity plugin folder at `out`. Its manifest fields are
- * all Antigravity's too; an SSE server is skipped, since Antigravity's remote
- * servers are Streamable HTTP only.
+ * One plugin as an Antigravity plugin folder at `out`. Its manifest's fields
+ * are all in Antigravity's manifest schema, but that schema's `name` pattern
+ * is narrower, and an SSE server is skipped: Antigravity's remote servers are
+ * Streamable HTTP only.
  */
 export function writeAntigravityPlugin(description: Description, out: string, { bash, env }: Inputs, report: Report) {
   mkdirSync(out, { recursive: true });
+  const { name } = description.manifest;
+  if (!ANTIGRAVITY_NAME.test(name)) {
+    report(`plugin.json: name ${JSON.stringify(name)} is not one Antigravity's manifest schema allows; whether agy loads it is unproven`);
+  }
   writeFileSync(join(out, 'plugin.json'), JSON.stringify({ ...description.manifest, $schema: SCHEMA }, null, 2) + '\n');
   copySkills(description, join(out, 'skills'));
   const servers: Record<string, unknown> = {};
-  Object.entries(description.mcpServers).forEach(([name, server], index) => {
+  Object.entries(description.mcpServers).forEach(([server, entry], index) => {
     let reason: string | null = null;
-    if (server.type === 'sse') {
+    if (entry.type === 'sse') {
       reason = 'Antigravity does not support SSE';
-    } else if (server.type === 'stdio') {
-      if (!launchable(description, server)) {
+    } else if (entry.type === 'stdio') {
+      if (!launchable(description, entry)) {
         reason = 'the adapter cannot launch a command containing "="';
       } else {
-        servers[name] = { command: writeLauncher(description, name, server, out, index, bash, env), args: [] };
+        servers[server] = { command: writeLauncher(description, server, entry, out, index, bash, env), args: [] };
       }
     } else {
-      servers[name] = { serverUrl: server.url, headers: server.headers };
+      servers[server] = { serverUrl: entry.url, headers: entry.headers };
     }
-    if (reason) report(`mcp.json: server ${JSON.stringify(name)} skipped, ${reason}`);
+    if (reason) report(`mcp.json: server ${JSON.stringify(server)} skipped, ${reason}`);
   });
   if (Object.keys(servers).length) {
     writeFileSync(join(out, 'mcp_config.json'), JSON.stringify({ mcpServers: servers }, null, 2) + '\n');
   }
 }
 
-/** The record at `path`: what the last launch linked. */
-function readRecord(path: string): Links {
-  if (!existsSync(path)) return {};
-  let value: unknown;
+/** A translation for this adapter, as src/plugin/launch.ts lays out its cache. */
+const TRANSLATION = /^\/.*\/agent-distro\/plugins\/[^/]+\/agy\/[^/]+\/out$/;
+
+/**
+ * How a translation is put where `agy` reads plugins, and how an entry of ours
+ * is known again: the one place that decides between a link and a copy. A
+ * link to a translation in agent-distro's cache is ours by its target alone.
+ */
+const ENTRIES = {
+  /** The translation the entry at `path` was placed from, or null when it is not ours or not there. */
+  source(path: string): string | null {
+    let target: string;
+    try {
+      if (!lstatSync(path).isSymbolicLink()) return null;
+      target = readlinkSync(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+    return TRANSLATION.test(target) ? target : null;
+  },
+  /** Place `translation` at `path`, atomically; false when something is there already. */
+  place(translation: string, path: string): boolean {
+    try {
+      symlinkSync(translation, path);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw error;
+    }
+  },
+  remove(path: string) {
+    rmSync(path);
+  },
+};
+
+/**
+ * What tells process `pid` apart from a later one given the same pid — its
+ * start time — or null when no such process runs.
+ */
+export function processIdentity(pid: number): string | null {
   try {
-    value = JSON.parse(readFileSync(path, 'utf8'));
+    process.kill(pid, 0);
   } catch (error) {
-    if (isSystemError(error)) throw error;
-    value = undefined;
+    if ((error as NodeJS.ErrnoException).code !== 'EPERM') return null;
   }
-  const links = (value as { links?: unknown } | undefined)?.links;
-  if (typeof links !== 'object' || links === null || Array.isArray(links)
-    || Object.values(links).some((target) => typeof target !== 'string')) {
-    throw new LaunchError(`${path} is not agent-distro's launch record; remove it to launch again`);
+  try {
+    // Linux: the 22nd field of /proc/<pid>/stat, counted after the command's `)`.
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+  } catch {
+    const ps = spawnSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' });
+    return ps.status === 0 ? ps.stdout.trim() : null;
   }
-  return links as Links;
 }
 
-function writeRecord(path: string, links: Links) {
-  if (!Object.keys(links).length) {
+/** A plugin name as a path component: one, and inside the directory. */
+const isName = (name: string) => name !== '' && name !== '.' && name !== '..' && !name.includes('/');
+
+function isClaim(value: unknown): value is Claim {
+  const claim = value as Claim | null;
+  return typeof claim === 'object' && claim !== null && Number.isInteger(claim.pid)
+    && typeof claim.identity === 'string' && typeof claim.directory === 'string'
+    && typeof claim.links === 'object' && claim.links !== null && !Array.isArray(claim.links)
+    && Object.entries(claim.links).every(([name, target]) => isName(name) && typeof target === 'string' && TRANSLATION.test(target));
+}
+
+/**
+ * What the running launches other than `self` claim in `directory`. A claim
+ * whose process has ended is removed; one that cannot be read is removed too,
+ * with a word.
+ */
+function liveClaims(claims: string, directory: string, self: number): Links {
+  const held: Links = {};
+  for (const file of readdirSync(claims)) {
+    if (!file.endsWith('.json')) continue;
+    const path = join(claims, file);
+    let claim: unknown;
+    try {
+      claim = JSON.parse(readFileSync(path, 'utf8'));
+    } catch (error) {
+      if (isSystemError(error) && error.code === 'ENOENT') continue;
+      if (isSystemError(error)) throw error;
+    }
+    if (!isClaim(claim)) {
+      logger.warn(`${path} is not a launch's claim; removing it`);
+      rmSync(path, { force: true });
+      continue;
+    }
+    if (claim.pid === self) continue;
+    if (processIdentity(claim.pid) !== claim.identity) {
+      rmSync(path, { force: true });
+      continue;
+    }
+    if (claim.directory === directory) Object.assign(held, claim.links);
+  }
+  return held;
+}
+
+function writeClaim(claims: string, claim: Claim) {
+  const path = join(claims, `${claim.pid}.json`);
+  if (!Object.keys(claim.links).length) {
     rmSync(path, { force: true });
     return;
   }
-  const temporary = writeTemporary(dirname(path), '.agy-', JSON.stringify({ links }, null, 2) + '\n');
+  const temporary = writeTemporary(claims, '.claim-', JSON.stringify(claim, null, 2) + '\n');
   try {
     renameSync(temporary, path);
   } finally {
@@ -102,60 +221,40 @@ function writeRecord(path: string, links: Links) {
   }
 }
 
-/** Where `path` links to, or null when it is not a link (or not there). */
-function linkTarget(path: string): string | null {
-  try {
-    return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : null;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
 /**
- * Link `wanted` into `directory`, taking back what the record at `recordPath`
- * says the last launch linked and is still as it left it. Returns what is
- * linked now. Throws a system error when the directory cannot be written.
+ * Put `wanted` in `directory` for `session`, and take back every entry of ours
+ * no running launch claims. Run under the lock (`link`). Returns what this
+ * session now uses. Throws a system error when either directory cannot be
+ * written.
  */
-export function link(directory: string, recordPath: string, wanted: Links, report: Report): Links {
-  const previous = readRecord(recordPath);
-  // Only what is still exactly as the last launch left it is ours to touch.
-  const ours: Links = {};
-  for (const [name, target] of Object.entries(previous)) {
-    if (linkTarget(join(directory, name)) === target) ours[name] = target;
+export function settle(directory: string, claims: string, session: Session, wanted: Links, report: Report): Links {
+  mkdirSync(claims, { recursive: true });
+  const held = liveClaims(claims, directory, session.pid);
+  const entries = lexists(directory) ? readdirSync(directory) : [];
+  for (const name of entries) {
+    const source = ENTRIES.source(join(directory, name));
+    if (source !== null && !Object.hasOwn(wanted, name) && held[name] !== source) ENTRIES.remove(join(directory, name));
   }
-  const claimed: Links = {};
-  for (const [name, target] of Object.entries(wanted)) {
-    if (Object.hasOwn(ours, name) || !lexists(join(directory, name))) claimed[name] = target;
-    else report(`plugin ${JSON.stringify(name)} skipped: ${join(directory, name)} is not agent-distro's`);
-  }
-  if (!Object.keys(ours).length && !Object.keys(claimed).length) {
-    if (Object.keys(previous).length) writeRecord(recordPath, {});
-    return {};
-  }
-  mkdirSync(directory, { recursive: true });
-  // Everything this launch may leave behind, before any of it is there.
-  writeRecord(recordPath, { ...ours, ...claimed });
-  for (const [name, target] of Object.entries(ours)) {
-    if (claimed[name] !== target) rmSync(join(directory, name));
-  }
-  const linked: Links = {};
-  for (const [name, target] of Object.entries(claimed)) {
+  const using: Links = {};
+  for (const [name, translation] of Object.entries(wanted)) {
     const path = join(directory, name);
-    if (ours[name] !== target) {
-      try {
-        symlinkSync(target, path);
-      } catch (error) {
-        // Something of the user's appeared there since it was looked at.
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        report(`plugin ${JSON.stringify(name)} skipped: ${path} is not agent-distro's`);
-        continue;
-      }
+    const source = ENTRIES.source(path);
+    if (source === translation) {
+      using[name] = translation;
+      continue;
     }
-    linked[name] = target;
+    if (source !== null && held[name] === source) {
+      report(`plugin ${JSON.stringify(name)}: another running agy launch placed another translation of it; this launch uses that one`);
+      using[name] = source;
+      continue;
+    }
+    if (source !== null) ENTRIES.remove(path);
+    mkdirSync(directory, { recursive: true });
+    if (ENTRIES.place(translation, path)) using[name] = translation;
+    else report(`plugin ${JSON.stringify(name)} skipped: ${path} is not agent-distro's`);
   }
-  writeRecord(recordPath, linked);
-  return linked;
+  writeClaim(claims, { ...session, directory, links: using });
+  return using;
 }
 
 /**
@@ -181,23 +280,55 @@ export const models: ModelSource = {
   },
 };
 
-/** At launch: every plugin linked for `agy` to read; nothing on its command line. */
+/** At launch: the plugins this launch wants placed, by name, for `link`; nothing on agy's command line. */
 export const adapter: Adapter<Inputs, Inputs> = {
   translationInputs: ({ bash, env }) => ({ bash, env }),
   translate: (description, out, inputs, report) => writeAntigravityPlugin(description, out, inputs, report),
-  launch: ({ plugins, report }) => {
-    const directory = pluginsDirectory();
-    if (!directory) {
-      if (plugins.length) logger.warn('HOME is unset; skipping plugin links');
-      return '';
+  launch: ({ plugins }) => JSON.stringify(Object.fromEntries(plugins.map((plugin) => [plugin.name, plugin.translation]))),
+};
+
+/**
+ * `link`: `settle` for the session, under the lock; `settle-locked` is what it
+ * runs there. Every failure is a warning: the harness still starts.
+ */
+function run(argv: string[]): number {
+  const [command, ...rest] = argv;
+  const directory = pluginsDirectory();
+  const claims = claimsDirectory();
+  if (command === 'link') {
+    const [flock, pid, wanted] = rest;
+    const any = Object.keys(JSON.parse(wanted)).length > 0;
+    if (!directory || !claims) {
+      if (any) logger.warn('HOME is unset; skipping plugin links');
+      return 0;
     }
-    const wanted: Links = Object.fromEntries(plugins.map((plugin) => [plugin.name, plugin.translation]));
     try {
-      link(directory, join(dirname(directory), RECORD), wanted, report);
+      mkdirSync(claims, { recursive: true });
     } catch (error) {
       if (!isSystemError(error)) throw error;
-      logger.warn(`${directory} cannot be written; skipping plugin links: ${error.message}`);
+      // Nothing wanted: nothing to place, and nothing is taken back without the claims.
+      if (any) logger.warn(`${claims} cannot be written; skipping plugin links: ${error.message}`);
+      return 0;
     }
-    return '';
-  },
-};
+    const lock = join(claims, 'lock');
+    const locked = spawnSync(flock, ['-w', String(LOCK_SECONDS), lock,
+      process.execPath, import.meta.filename, 'settle-locked', pid, wanted], { stdio: 'inherit' });
+    if (locked.status !== 0) {
+      logger.warn(`plugin links skipped: another agy launch held ${lock} for ${LOCK_SECONDS}s, or linking failed above`);
+    }
+    return 0;
+  }
+  if (command !== 'settle-locked') throw new Error(`unknown command: ${command}`);
+  const pid = Number(rest[0]);
+  const identity = processIdentity(pid);
+  if (identity === null) throw new Error(`session ${rest[0]} is not running`);
+  try {
+    settle(directory!, claims!, { pid, identity }, JSON.parse(rest[1]), (message) => logger.warn(message));
+  } catch (error) {
+    if (!isSystemError(error)) throw error;
+    logger.warn(`${directory} cannot be written; skipping plugin links: ${error.message}`);
+  }
+  return 0;
+}
+
+if (import.meta.main) process.exitCode = run(process.argv.slice(2));

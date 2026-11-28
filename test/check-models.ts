@@ -141,18 +141,21 @@ const none = listModels('pi', launcher('pi-none', 'No models available. Use /log
   sources.pi);
 assert.deepEqual(none.models, { kind: 'listed', ids: [] });
 
-// The Antigravity CLI: each line's slug, as Google's headless docs print it.
-// What `agy models` prints signed in is unproven; this is the documented sample.
+// The Antigravity CLI: each line's slug. What `agy models` prints signed in is
+// unproven; these are the first rows of Google's documented sample
+// (antigravity.google/docs/cli/headless), as it prints them.
 const agyList = [
   'gemini-4-neon-xhigh            Gemini 4 Neon (XHigh)',
-  'gemini-4-flash                 Gemini 4 Flash',
+  'gemini-4-neon-high             Gemini 4 Neon (High)',
+  'gemini-4-neon-medium           Gemini 4 Neon (Medium)',
+  'gemini-4-neon-low              Gemini 4 Neon (Low)',
   '',
 ].join('\n');
 const agy = listModels('agy', launcher('agy', agyList), sources.agy);
 assert.deepEqual(argsOf('agy'), ['models']);
 assert.deepEqual(agy, {
   launch: { kind: 'flag', flag: '--model' },
-  models: { kind: 'listed', ids: ['gemini-4-neon-xhigh', 'gemini-4-flash'] },
+  models: { kind: 'listed', ids: ['gemini-4-neon-xhigh', 'gemini-4-neon-high', 'gemini-4-neon-medium', 'gemini-4-neon-low'] },
 });
 
 // A list command that fails is a failure carrying its words, not a list.

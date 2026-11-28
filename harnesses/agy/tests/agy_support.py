@@ -15,7 +15,8 @@ SCHEMA = 'https://antigravity.google/schemas/v1/plugin.json'
 expected = json.loads(sys.argv[1])
 config = Path.home() / '.gemini/config'
 plugins = config / 'plugins'
-record = config / '.agent-distro-launch.json'
+# One claim per launch whose session may still run; a launch removes the ended ones' claims.
+claims = Path.home() / '.local/state/agent-distro/agy-launches'
 env = dict(os.environ)
 
 # A plugin of the user's own, which no launch may touch.
@@ -57,10 +58,10 @@ def inventory(launcher='agy', value=None, wanted=None, skills=None):
     links = linked()
     names = set(expected) if wanted is None else wanted
     assert set(links) == names, (links, names)
-    if links:
-        assert json.loads(record.read_text()) == {'links': links}
-    else:
-        assert not record.exists()
+    # The launch's own claim, and none of an earlier one: `agy --version` has
+    # ended, so the next launch removes it.
+    recorded = [json.loads(path.read_text())['links'] for path in claims.glob('*.json')] if claims.exists() else []
+    assert recorded == ([links] if links else []), recorded
     for name in links:
         manifest = json.loads((plugins / name / 'plugin.json').read_text())
         assert manifest['$schema'] == SCHEMA and manifest['name'] == name, manifest

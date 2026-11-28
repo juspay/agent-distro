@@ -128,7 +128,7 @@ A `secret` variable the profile declares and the environment does not set is a l
 [^codex-claim]: Read from `tokens.id_token` without checking its signature; `ChatGPT` when the claim is absent.
 [^both]: The profile's secrets and the harness's own providers are usable at once.
 [^stores]: OMP's `~/.omp/agent/agent.db`, Pi's `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent/auth.json`), OpenCode's `${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json`.
-[^agy-keyring]: Its Google sign-in lives in the system keyring, which the picker does not read, so it cannot say that the CLI is signed out.
+[^agy-keyring]: Google documents that its sign-in is kept in the system keyring, which the picker does not read, so it cannot say that the CLI is signed out.
 
 ### Keys
 
@@ -226,7 +226,7 @@ Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list`
 
 [^opencode-model]: OpenCode's terminal interface has no model flag; this config layer is read over the launch's own.
 
-- **Ids.** Each is exactly what the launch takes, `provider/id` (the Antigravity CLI's own model slug), so a model two providers serve is two ids.
+- **Ids.** Each is exactly what the launch takes: `provider/id`, so a model two providers serve is two ids — except the Antigravity CLI's, which are its own bare model slugs (`gemini-4-neon-high`), with no provider.
 - **Three answers.** `listed` (possibly empty, when the harness has no model to offer), `unlisted` (the harness has no list command: a model is whatever the user names), or a failure.
 - **Failure.** A list command that fails, or prints what agent-distro cannot read, exits 1 with nothing on stdout and, on stderr, the command and everything it printed there — never an empty list. Its stdin is not a terminal, so a `secret` the profile still needs is a failure, not a prompt.
 - **Arguments.** Exactly one harness the package carries; anything else exits 2.

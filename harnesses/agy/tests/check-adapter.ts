@@ -1,51 +1,25 @@
 /**
- * The Antigravity CLI's translation and its links into a home, without the
- * harness: what is written, what the next launch takes back, a user's own
- * plugin left alone, and a home that cannot be written.
+ * The Antigravity CLI's translation and how its plugins are placed in a home,
+ * without the harness: what is written, what the next launch takes back, a
+ * user's own entries left alone, a launch killed partway, and launches whose
+ * sessions overlap.
  *
  * Usage: node check-adapter.ts SRC HARNESS_DIR
  */
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { once } from 'node:events';
+import { after, test } from 'node:test';
 
 // The module's path is the SRC argument, so it cannot be a static import.
-const { adapter, link, RECORD } = await import(join(process.argv[2], 'harness/agy.ts'));
-const { LaunchError } = await import(join(process.argv[2], 'plugin/launch.ts'));
+const { adapter, settle, processIdentity } = await import(join(process.argv[2], 'harness/agy.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'agy-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 const inputs = { bash: '/bin/sh', env: '/usr/bin/env' };
-
-/** What a launch hands the adapter for each plugin: its name and translation. */
-const plugin = (name: string, translation: string) => ({ name, translation, from: 'profile' });
-
-/** Run `body` with stderr captured; what it wrote, and what it returned. */
-function quietly<T>(body: () => T): [T, string] {
-  const written: string[] = [];
-  const write = process.stderr.write;
-  process.stderr.write = ((chunk: string) => (written.push(String(chunk)), true)) as typeof process.stderr.write;
-  try {
-    return [body(), written.join('')];
-  } finally {
-    process.stderr.write = write;
-  }
-}
-
-/** Run `body` with HOME set to `home` (or unset), restoring it after. */
-function withHome<T>(home: string | undefined, body: () => T): T {
-  const saved = process.env.HOME;
-  if (home === undefined) delete process.env.HOME;
-  else process.env.HOME = home;
-  try {
-    return body();
-  } finally {
-    if (saved === undefined) delete process.env.HOME;
-    else process.env.HOME = saved;
-  }
-}
 
 test('a plugin becomes an Antigravity plugin folder', () => {
   const root = temporary();
@@ -70,7 +44,7 @@ test('a plugin becomes an Antigravity plugin folder', () => {
   const reports: string[] = [];
   adapter.translate(description, out, inputs, (message: string) => reports.push(message));
 
-  // Antigravity's own schema, over the manifest's fields, which are all its too.
+  // Antigravity's own schema, over the manifest's fields.
   assert.deepEqual(readJson(join(out, 'plugin.json')), {
     $schema: 'https://antigravity.google/schemas/v1/plugin.json', name: 'example',
     version: '1.2.0', description: 'An example', author: { name: 'Someone' }, keywords: ['x'],
@@ -88,90 +62,177 @@ test('a plugin becomes an Antigravity plugin folder', () => {
   // What cannot be carried is said.
   assert.ok(reports.some((line) => line.includes('"sse" skipped, Antigravity does not support SSE')), reports.join('\n'));
   assert.ok(reports.some((line) => line.includes('"equals" skipped') && line.includes('"="')), reports.join('\n'));
+  assert.ok(!reports.some((line) => line.includes('name')), reports.join('\n'));
 
-  // A plugin with no servers has no mcp_config.json.
+  // No servers, no mcp_config.json; a name Antigravity's schema does not
+  // allow is carried as it is, and said.
   const bare = join(temporary(), 'out');
-  adapter.translate({ ...description, mcpServers: {} }, bare, inputs, () => {});
+  const said: string[] = [];
+  adapter.translate({ ...description, manifest: { ...description.manifest, name: 'acme.tools' }, mcpServers: {} },
+    bare, inputs, (message: string) => said.push(message));
   assert.ok(!existsSync(join(bare, 'mcp_config.json')));
+  assert.equal(readJson(join(bare, 'plugin.json')).name, 'acme.tools');
+  assert.ok(said.some((line) => line.includes('"acme.tools" is not one Antigravity\'s manifest schema allows')), said.join('\n'));
 });
 
-test('links last one launch, and a user\'s own folders are never touched', () => {
-  const home = temporary();
-  const plugins = join(home, '.gemini/config/plugins');
-  const record = join(home, '.gemini/config', RECORD);
-  const [a, b, c] = ['a', 'b', 'c'].map(() => temporary());
-  mkdirSync(join(plugins, 'mine'), { recursive: true });
-  writeFileSync(join(plugins, 'mine/plugin.json'), '{"name":"mine"}');
+test('the launch prints the plugins it wants, by name', () => {
+  assert.equal(adapter.launch({ args: inputs, plugins: [], cache: null, report: () => {} }), '{}');
+  assert.deepEqual(JSON.parse(adapter.launch({
+    args: inputs, cache: '/c', report: () => {},
+    plugins: [{ name: 'a', translation: '/c/plugins/k/agy/t/out' }, { name: 'b', translation: '/c/plugins/j/agy/t/out' }],
+  })), { a: '/c/plugins/k/agy/t/out', b: '/c/plugins/j/agy/t/out' });
+});
+
+/** A home, the claims beside it, and translations in a cache laid out as src/plugin/launch.ts lays it out. */
+function world() {
+  const root = temporary();
+  const plugins = join(root, 'home/.gemini/config/plugins');
+  const claims = join(root, 'state/agent-distro/agy-launches');
+  let count = 0;
+  const translation = () => {
+    const path = join(root, 'cache/agent-distro/plugins', `key${count++}`, 'agy', 'translator.0', 'out');
+    mkdirSync(path, { recursive: true });
+    return path;
+  };
   const reports: string[] = [];
-  const launch = (...list: [string, string][]) => withHome(home, () =>
-    adapter.launch({ args: inputs, plugins: list.map(([name, at]) => plugin(name, at)), cache: null, report: (m: string) => reports.push(m) }));
-  const listed = () => Object.fromEntries(readdirSync(plugins).sort().map((name) => {
+  const launch = (session: Session, wanted: Record<string, string>) =>
+    settle(plugins, claims, session, wanted, (message: string) => reports.push(message));
+  /** What the plugins directory holds: a link's target, or `dir`. */
+  const listed = () => existsSync(plugins) ? Object.fromEntries(readdirSync(plugins).sort().map((name) => {
     const path = join(plugins, name);
     return [name, lstatSync(path).isSymbolicLink() ? readlinkSync(path) : 'dir'];
-  }));
+  })) : {};
+  return { plugins, claims, translation, launch, listed, reports };
+}
 
-  assert.equal(launch(['alpha', a], ['beta', b]), '');
-  assert.deepEqual(listed(), { alpha: a, beta: b, mine: 'dir' });
-  assert.deepEqual(readJson(record), { links: { alpha: a, beta: b } });
+type Session = { pid: number; identity: string };
+const running: ChildProcess[] = [];
+after(() => running.forEach((child) => child.kill()));
 
-  // The next launch takes back what it no longer wants and keeps what it does.
-  launch(['beta', b], ['gamma', c]);
-  assert.deepEqual(listed(), { beta: b, gamma: c, mine: 'dir' });
-  assert.deepEqual(readJson(record), { links: { beta: b, gamma: c } });
+/** A session that runs until `end` is called, as a launched agy does. */
+function session(): Session & { end: () => Promise<void> } {
+  const child = spawn('sleep', ['600'], { stdio: 'ignore' });
+  running.push(child);
+  const pid = child.pid!;
+  return {
+    pid, identity: processIdentity(pid)!,
+    // Awaited until Node has reaped it, so the pid no longer answers.
+    end: async () => {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+    },
+  };
+}
+/** A session that has already ended. */
+function ended(): Session {
+  const child = spawnSync('true');
+  return { pid: child.pid!, identity: 'gone' };
+}
 
-  // A new translation of the same plugin replaces its link.
-  launch(['beta', a]);
-  assert.deepEqual(listed(), { beta: a, mine: 'dir' });
+test('a process is told apart from a later one with its pid', async () => {
+  const live = session();
+  assert.ok(live.identity);
+  assert.equal(processIdentity(live.pid), live.identity);
+  await live.end();
+  assert.equal(processIdentity(live.pid), null);
+});
 
-  // A plugin whose name a user's folder holds is skipped, with a word.
-  launch(['mine', a]);
-  assert.deepEqual(listed(), { mine: 'dir' });
+test('plugins stay until no running launch uses them, and a user\'s own entries are never touched', () => {
+  const { plugins, translation, launch, listed, reports } = world();
+  const [a, b, c] = [translation(), translation(), translation()];
+  mkdirSync(join(plugins, 'mine'), { recursive: true });
+  writeFileSync(join(plugins, 'mine/plugin.json'), '{"name":"mine"}');
+  symlinkSync('/somewhere/else', join(plugins, 'linked'));
+
+  assert.deepEqual(launch(ended(), { alpha: a, beta: b }), { alpha: a, beta: b });
+  assert.deepEqual(listed(), { alpha: a, beta: b, linked: '/somewhere/else', mine: 'dir' });
+  // Its session has ended, so the next launch takes back what it does not want.
+  launch(ended(), { beta: b, gamma: c });
+  assert.deepEqual(listed(), { beta: b, gamma: c, linked: '/somewhere/else', mine: 'dir' });
+  // A new translation of the same plugin replaces its entry.
+  launch(ended(), { beta: a });
+  assert.deepEqual(listed(), { beta: a, linked: '/somewhere/else', mine: 'dir' });
+  // A name one of the user's entries holds is skipped, with a word.
+  assert.deepEqual(launch(ended(), { mine: a, linked: b }), {});
+  assert.deepEqual(listed(), { linked: '/somewhere/else', mine: 'dir' });
   assert.equal(readFileSync(join(plugins, 'mine/plugin.json'), 'utf8'), '{"name":"mine"}');
   assert.ok(reports.some((line) => line.includes('plugin "mine" skipped')), reports.join('\n'));
-  assert.ok(!existsSync(record), 'nothing linked, nothing recorded');
-
-  // A link the user changed after the launch made it is theirs now: it stays,
-  // and the record forgets it.
-  launch(['alpha', a]);
-  rmSync(join(plugins, 'alpha'));
-  symlinkSync(b, join(plugins, 'alpha'));
-  launch();
-  assert.deepEqual(listed(), { alpha: b, mine: 'dir' });
-  assert.ok(!existsSync(record));
-
-  // A launch with nothing to take back writes nothing at all.
-  const fresh = temporary();
-  withHome(fresh, () => adapter.launch({ args: inputs, plugins: [], cache: null, report: () => {} }));
-  assert.deepEqual(readdirSync(fresh), []);
+  assert.ok(reports.some((line) => line.includes('plugin "linked" skipped')), reports.join('\n'));
 });
 
-test('a record that is not ours stops the launch before any change', () => {
-  const home = temporary();
-  const config = join(home, '.gemini/config');
-  mkdirSync(join(config, 'plugins'), { recursive: true });
-  writeFileSync(join(config, RECORD), '[]');
-  assert.throws(() => link(join(config, 'plugins'), join(config, RECORD), { alpha: temporary() }, () => {}),
-    (error: Error) => error instanceof LaunchError && /not agent-distro's launch record/.test(error.message));
-  assert.deepEqual(readdirSync(join(config, 'plugins')), []);
+test('a launch killed partway leaves nothing the next takes for the user\'s', () => {
+  const { claims, plugins, translation, launch, listed, reports } = world();
+  const [old, renewed] = [translation(), translation()];
+  // Killed while the plugin's translation changed: the entry is still the old
+  // one, and its claim (if any) is a dead process's, saying the new one.
+  mkdirSync(plugins, { recursive: true });
+  mkdirSync(claims, { recursive: true });
+  symlinkSync(old, join(plugins, 'x'));
+  const dead = ended();
+  writeFileSync(join(claims, `${dead.pid}.json`), JSON.stringify({ ...dead, directory: plugins, links: { x: renewed } }));
+  assert.deepEqual(launch(ended(), { x: renewed }), { x: renewed });
+  assert.deepEqual(listed(), { x: renewed });
+  assert.deepEqual(reports, []);
+  assert.ok(!existsSync(join(claims, `${dead.pid}.json`)), 'a dead launch\'s claim is cleared');
+  // Killed after placing an entry and before claiming it: still ours, taken back.
+  symlinkSync(old, join(plugins, 'y'));
+  launch(ended(), {});
+  assert.deepEqual(listed(), {});
 });
 
-test('a home that is unset or cannot be written skips the links and still launches', () => {
-  const translation = temporary();
-  const launch = () => adapter.launch({ args: inputs, plugins: [plugin('alpha', translation)], cache: null, report: () => {} });
+test('overlapping launches take back only what no running launch uses', async () => {
+  const { claims, plugins, translation, launch, listed, reports } = world();
+  const [x, y, x2] = [translation(), translation(), translation()];
+  const first = session();
+  const second = session();
+  launch(first, { x });
+  launch(second, { y });
+  assert.deepEqual(listed(), { x, y });
+  // A launch that wants neither, while both run, leaves both.
+  launch(ended(), {});
+  assert.deepEqual(listed(), { x, y });
+  // Once the first has ended, its entry goes; the second's stays.
+  await first.end();
+  launch(ended(), {});
+  assert.deepEqual(listed(), { y });
+  await second.end();
+  launch(ended(), {});
+  assert.deepEqual(listed(), {});
+  // Nothing was orphaned: the name is free for a new translation.
+  assert.deepEqual(launch(ended(), { x: x2 }), { x: x2 });
+  assert.deepEqual(reports, []);
+  // The ended launches' claims are gone; only the last launch's own remains.
+  assert.equal(readdirSync(claims).filter((name) => name.endsWith('.json')).length, 1);
+});
 
-  const [unset, said] = quietly(() => withHome(undefined, launch));
-  assert.equal(unset, '');
-  assert.match(said, /HOME is unset; skipping plugin links/);
+test('of two running launches wanting one name, the later uses the entry already there', async () => {
+  const { claims, translation, launch, listed, reports } = world();
+  const [t1, t2] = [translation(), translation()];
+  const first = session();
+  const second = session();
+  launch(first, { x: t1 });
+  assert.deepEqual(launch(second, { x: t2 }), { x: t1 });
+  assert.deepEqual(listed(), { x: t1 });
+  assert.ok(reports.some((line) => line.includes('plugin "x": another running agy launch placed another translation of it')), reports.join('\n'));
+  // The second claims what it uses, so it outlasts the first.
+  await first.end();
+  launch(ended(), {});
+  assert.deepEqual(listed(), { x: t1 });
+  assert.deepEqual(readJson(join(claims, `${second.pid}.json`)).links, { x: t1 });
+  await second.end();
+});
 
-  const home = temporary();
-  mkdirSync(join(home, '.gemini/config'), { recursive: true });
-  chmodSync(join(home, '.gemini/config'), 0o500);
-  try {
-    const [readOnly, warned] = quietly(() => withHome(home, launch));
-    assert.equal(readOnly, '');
-    assert.match(warned, /cannot be written; skipping plugin links/);
-    assert.deepEqual(readdirSync(join(home, '.gemini/config')), []);
-  } finally {
-    chmodSync(join(home, '.gemini/config'), 0o700);
-  }
+test('a claim that is not a launch\'s, or names a path outside the directory, is removed and ignored', async () => {
+  const { claims, plugins, translation, launch, listed } = world();
+  const x = translation();
+  const live = session();
+  mkdirSync(claims, { recursive: true });
+  launch(ended(), { x });
+  writeFileSync(join(claims, '1.json'), '[]');
+  writeFileSync(join(claims, `${live.pid}.json`), JSON.stringify({ ...live, directory: plugins, links: { '../x': x } }));
+  launch(ended(), {});
+  assert.deepEqual(listed(), {});
+  assert.deepEqual(readdirSync(claims).filter((name) => name.endsWith('.json')), []);
+  await live.end();
 });
