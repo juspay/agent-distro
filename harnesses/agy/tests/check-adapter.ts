@@ -15,7 +15,7 @@ import { once } from 'node:events';
 import { after, test } from 'node:test';
 
 // The module's path is the SRC argument, so it cannot be a static import.
-const { adapter, settle, processIdentity } = await import(join(process.argv[2], 'harness/agy.ts'));
+const { adapter, settle, processIdentity, locations } = await import(join(process.argv[2], 'harness/agy.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'agy-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -235,4 +235,38 @@ test('a claim that is not a launch\'s, or names a path outside the directory, is
   assert.deepEqual(listed(), {});
   assert.deepEqual(readdirSync(claims).filter((name) => name.endsWith('.json')), []);
   await live.end();
+});
+
+test('a claim whose pid now runs another process is an ended launch\'s', async () => {
+  const { claims, plugins, translation, launch, listed } = world();
+  const x = translation();
+  launch(ended(), { x });
+  // The pid is alive, but not as the process that claimed it.
+  const reused = session();
+  writeFileSync(join(claims, `${reused.pid}.json`),
+    JSON.stringify({ pid: reused.pid, identity: `not ${reused.identity}`, directory: plugins, links: { x } }));
+  launch(ended(), {});
+  assert.deepEqual(listed(), {});
+  assert.ok(!existsSync(join(claims, `${reused.pid}.json`)));
+  await reused.end();
+});
+
+test('launches that share a home share its claims, whatever their XDG_STATE_HOME', async () => {
+  const root = temporary();
+  const home = join(root, 'home');
+  const one = locations({ HOME: home, XDG_STATE_HOME: join(root, 'state-one') });
+  const two = locations({ HOME: home, XDG_STATE_HOME: join(root, 'state-two') });
+  assert.equal(one.plugins, two.plugins);
+  const x = join(root, 'cache/agent-distro/plugins/key/agy/translator.0/out');
+  mkdirSync(x, { recursive: true });
+  const live = session();
+  settle(one.plugins, one.claims, live, { x }, () => {});
+  // A launch from a shell that moved its XDG directories still sees the
+  // running session's claim, and leaves its entry.
+  settle(two.plugins, two.claims, ended(), {}, () => {});
+  assert.equal(readlinkSync(join(one.plugins, 'x')), x);
+  await live.end();
+  settle(two.plugins, two.claims, ended(), {}, () => {});
+  assert.ok(!existsSync(join(one.plugins, 'x')));
+  assert.equal(locations({ XDG_STATE_HOME: join(root, 'state-one') }), null);
 });

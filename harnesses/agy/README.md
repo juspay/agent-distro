@@ -31,8 +31,10 @@ never changed or removed: a plugin whose name one already holds is skipped,
 with a warning.
 
 Each launch claims the entries its session uses, in
-`${XDG_STATE_HOME:-~/.local/state}/agent-distro/agy-launches/<pid>.json`,
-outside Google's directory. The claim counts for as long as that process runs:
+`~/.local/state/agent-distro/agy-launches/<pid>.json`, outside Google's
+directory. That path comes from `HOME` alone, as the plugins directory does,
+even when `XDG_STATE_HOME` is set: launches that share a plugins directory
+share its claims and lock. The claim counts for as long as that process runs:
 the launcher, then `agy`, which it `exec`s under the same pid. A launch takes
 back an entry of agent-distro's only when no running launch claims it, so a
 plugin stays while any `agy` session that wanted it runs, and until the next

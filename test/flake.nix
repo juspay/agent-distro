@@ -226,14 +226,16 @@
               "$agy" --version >/dev/null
               [ ! -e "$plugins/launch-fixture" ] || fail "the next launch did not take the fixture back"
 
-              # A launch waits while another holds the lock, then places its own.
-              lock="$XDG_STATE_HOME/agent-distro/agy-launches/lock"
-              flock "$lock" sleep 3 &
-              sleep 1
-              start=$SECONDS
+              # A launch waits while another holds the lock, then places its
+              # own. The lock is the home's, whatever XDG_STATE_HOME says. The
+              # holder marks when it lets go, so a launch that did not wait
+              # returns before the mark exists.
+              lock="$HOME/.local/state/agent-distro/agy-launches/lock"
+              flock "$lock" bash -c 'touch "$TMPDIR/held"; sleep 2; touch "$TMPDIR/released"' &
+              until [ -e "$TMPDIR/held" ]; do sleep 0.1; done
               AGENT_DISTRO_PLUGINS=$fixture "$agy" --version >/dev/null
+              [ -e "$TMPDIR/released" ] || fail "the launch did not wait for the lock"
               wait
-              [ $((SECONDS - start)) -ge 1 ] || fail "the launch did not wait for the lock"
               [ -L "$plugins/launch-fixture" ] || fail "the fixture was not placed after the wait"
               touch "$out"
             '';

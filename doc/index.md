@@ -896,7 +896,7 @@ python3 .github/scripts/test-update-flake.py
 The TypeScript's own checks need no VM or KVM, and `nix flake check` at the root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,profile-resolve,mk-profile,nixpkgs-reference,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,agy-launch,profile-resolve,mk-profile,nixpkgs-reference,omp-adapter,pi-adapter,opencode-adapter,agy-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 | Check | Covers |
@@ -907,6 +907,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 | `mk-profile` | `agent-distro.lib.mkProfile`'s output: its metadata, its plugins' descriptions and roots, and `bin/` |
 | `nixpkgs-reference` | the package names nixpkgs by reference and does not hold its source |
 | `opencode-standalone` | an interactive OpenCode launch reaches the harness with `--standalone`, so one launch's config is not served to the next |
+| `agy-launch` | the Antigravity CLI launcher, against a stand-in `agy` in a throwaway home: a launch places its plugins, the next takes them back, a `models` run changes nothing, and a launch waits for another's lock |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |

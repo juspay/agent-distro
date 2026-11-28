@@ -21,9 +21,12 @@
  * word.
  *
  * Which launches still use an entry is kept out of Google's directory, in
- * `${XDG_STATE_HOME:-~/.local/state}/agent-distro/agy-launches`: one claim per
- * launch, `<pid>.json`, naming the entries its session uses, which counts for
- * as long as that process — the launcher, then `agy` in its place — runs. A
+ * `~/.local/state/agent-distro/agy-launches`: one claim per launch,
+ * `<pid>.json`, naming the entries its session uses, which counts for as long
+ * as that process — the launcher, then `agy` in its place — runs. That
+ * directory comes from HOME alone, as the plugins directory does, never from
+ * XDG_STATE_HOME: every launch that can write one home's plugins finds the
+ * same claims and lock. A
  * launch removes an entry of ours only when no running launch claims it, and
  * two launches never do this at once: `link` runs under an exclusive lock on
  * `lock` beside the claims, which the operating system releases when a launch
@@ -46,8 +49,11 @@ import { isSystemError, lexists, writeTemporary } from '../util.ts';
 /** Antigravity's own manifest schema: the folder is an Antigravity plugin, not an Agent Plugins one. */
 const SCHEMA = 'https://antigravity.google/schemas/v1/plugin.json';
 
-/** The `name` pattern of Antigravity's manifest schema, narrower than Agent Plugins'. */
-const ANTIGRAVITY_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/**
+ * The `name` pattern of the schema `SCHEMA` names (letters, digits, `-`, `_`);
+ * Agent Plugins also allows `.`, which it refuses.
+ */
+const ANTIGRAVITY_NAME = /^[a-zA-Z0-9_-]+$/;
 
 /** Plugin name → the translation its entry is placed from. */
 type Links = Record<string, string>;
@@ -63,21 +69,24 @@ const LOCK_SECONDS = 30;
 
 const logger = log.harness('agy');
 
-/** `~/.gemini/config/plugins`, or null without a home. */
-export const pluginsDirectory = (env: NodeJS.ProcessEnv = process.env) =>
-  env.HOME ? join(env.HOME, '.gemini', 'config', 'plugins') : null;
-
-/** Where the claims and their lock live, or null without a home. */
-export const claimsDirectory = (env: NodeJS.ProcessEnv = process.env) =>
-  env.XDG_STATE_HOME || env.HOME
-    ? join(env.XDG_STATE_HOME || join(env.HOME!, '.local', 'state'), 'agent-distro', 'agy-launches')
-    : null;
+/**
+ * One home's plugins directory, `~/.gemini/config/plugins`, and the claims and
+ * lock that guard it, or null without a home. Both come from HOME alone, so
+ * two launches share the claims exactly when they share the directory.
+ */
+export function locations(env: NodeJS.ProcessEnv = process.env): { plugins: string; claims: string } | null {
+  if (!env.HOME) return null;
+  return {
+    plugins: join(env.HOME, '.gemini', 'config', 'plugins'),
+    claims: join(env.HOME, '.local', 'state', 'agent-distro', 'agy-launches'),
+  };
+}
 
 /**
  * One plugin as an Antigravity plugin folder at `out`. Its manifest's fields
  * are all in Antigravity's manifest schema, but that schema's `name` pattern
- * is narrower, and an SSE server is skipped: Antigravity's remote servers are
- * Streamable HTTP only.
+ * allows no `.`, and an SSE server is skipped: Antigravity's remote servers
+ * are Streamable HTTP only.
  */
 export function writeAntigravityPlugin(description: Description, out: string, { bash, env }: Inputs, report: Report) {
   mkdirSync(out, { recursive: true });
@@ -293,15 +302,15 @@ export const adapter: Adapter<Inputs, Inputs> = {
  */
 function run(argv: string[]): number {
   const [command, ...rest] = argv;
-  const directory = pluginsDirectory();
-  const claims = claimsDirectory();
+  const where = locations();
   if (command === 'link') {
     const [flock, pid, wanted] = rest;
     const any = Object.keys(JSON.parse(wanted)).length > 0;
-    if (!directory || !claims) {
+    if (!where) {
       if (any) logger.warn('HOME is unset; skipping plugin links');
       return 0;
     }
+    const { claims } = where;
     try {
       mkdirSync(claims, { recursive: true });
     } catch (error) {
@@ -323,10 +332,10 @@ function run(argv: string[]): number {
   const identity = processIdentity(pid);
   if (identity === null) throw new Error(`session ${rest[0]} is not running`);
   try {
-    settle(directory!, claims!, { pid, identity }, JSON.parse(rest[1]), (message) => logger.warn(message));
+    settle(where!.plugins, where!.claims, { pid, identity }, JSON.parse(rest[1]), (message) => logger.warn(message));
   } catch (error) {
     if (!isSystemError(error)) throw error;
-    logger.warn(`${directory} cannot be written; skipping plugin links: ${error.message}`);
+    logger.warn(`${where!.plugins} cannot be written; skipping plugin links: ${error.message}`);
   }
   return 0;
 }
