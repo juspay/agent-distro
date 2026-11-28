@@ -8,14 +8,14 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { after, test } from 'node:test';
 
 // The module's path is the SRC argument, so it cannot be a static import.
-const { adapter, settle, processIdentity, locations } = await import(join(process.argv[2], 'harness/agy.ts'));
+const { adapter, settle, processIdentity, locations, Skipped } = await import(join(process.argv[2], 'harness/agy.ts'));
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'agy-adapter-'));
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
@@ -269,4 +269,58 @@ test('launches that share a home share its claims, whatever their XDG_STATE_HOME
   settle(two.plugins, two.claims, ended(), {}, () => {});
   assert.ok(!existsSync(join(one.plugins, 'x')));
   assert.equal(locations({ XDG_STATE_HOME: join(root, 'state-one') }), null);
+});
+
+test('a launch that cannot write its claim places nothing and takes nothing back', async () => {
+  const { claims, plugins, translation, launch, listed } = world();
+  const [x, y] = [translation(), translation()];
+  // An entry of ours nobody claims, which a launch that could claim would take back.
+  mkdirSync(plugins, { recursive: true });
+  symlinkSync(y, join(plugins, 'y'));
+  mkdirSync(claims, { recursive: true });
+  chmodSync(claims, 0o500);
+  const live = session();
+  try {
+    assert.throws(() => launch(live, { x }),
+      (error: Error) => error instanceof Skipped && /cannot write this launch's claim in .*; nothing placed or taken back/.test(error.message));
+  } finally {
+    chmodSync(claims, 0o700);
+  }
+  assert.deepEqual(listed(), { y });
+  await live.end();
+});
+
+test('a launch that stops while placing has claimed what it placed', async () => {
+  const { claims, translation, launch, listed } = world();
+  const a = translation();
+  const live = session();
+  // A translation whose path is longer than a link may hold: placing `b`
+  // fails after `a` is placed.
+  const b = '/' + 'd/'.repeat(2100) + 'agent-distro/plugins/key/agy/translator.0/out';
+  assert.throws(() => launch(live, { a, b }),
+    (error: Error) => error instanceof Skipped && /cannot change .*; what this launch placed before that is claimed/.test(error.message));
+  assert.deepEqual(listed(), { a });
+  assert.equal(readJson(join(claims, `${live.pid}.json`)).links.a, a);
+  // So a later launch leaves it while the session runs.
+  launch(ended(), {});
+  assert.deepEqual(listed(), { a });
+  await live.end();
+});
+
+test('a home reached through a symlink shares its claims with the home itself', async () => {
+  const root = temporary();
+  const home = join(root, 'home');
+  mkdirSync(home);
+  symlinkSync(home, join(root, 'link'));
+  const real = locations({ HOME: home });
+  const linked = locations({ HOME: join(root, 'link') });
+  const x = join(root, 'cache/agent-distro/plugins/key/agy/translator.0/out');
+  mkdirSync(x, { recursive: true });
+  const live = session();
+  settle(real.plugins, real.claims, live, { x }, () => {});
+  settle(linked.plugins, linked.claims, ended(), {}, () => {});
+  assert.equal(readlinkSync(join(real.plugins, 'x')), x);
+  await live.end();
+  settle(linked.plugins, linked.claims, ended(), {}, () => {});
+  assert.ok(!existsSync(join(real.plugins, 'x')));
 });

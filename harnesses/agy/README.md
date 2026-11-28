@@ -34,8 +34,12 @@ Each launch claims the entries its session uses, in
 `~/.local/state/agent-distro/agy-launches/<pid>.json`, outside Google's
 directory. That path comes from `HOME` alone, as the plugins directory does,
 even when `XDG_STATE_HOME` is set: launches that share a plugins directory
-share its claims and lock. The claim counts for as long as that process runs:
-the launcher, then `agy`, which it `exec`s under the same pid. A launch takes
+share its claims and lock, and a claim names no directory, so a home reached
+through a symlink and by its real path is one home. The claim counts for as
+long as that process runs: the launcher, then `agy`, which it `exec`s under
+the same pid. A launch writes its claim before it changes the plugins
+directory: one that cannot write it places nothing and takes nothing back, and
+one that stops partway has claimed what it placed. A launch takes
 back an entry of agent-distro's only when no running launch claims it, so a
 plugin stays while any `agy` session that wanted it runs, and until the next
 launch after that. Launches never do this at the same time: each places its
@@ -46,7 +50,10 @@ want different translations under one name, the later one keeps the entry
 already there, uses it, and says so. A run that only lists models
 (`agy models`, and so `agent-distro --models agy`) changes nothing in
 `~/.gemini/config/`. Without `HOME`, or with a home that cannot be written,
-the plugins are skipped with a warning and `agy` still starts.
+the plugins are skipped with a warning naming what failed, and `agy` still
+starts. A second user sharing the home cannot read the first's claims (they
+are written `0600`), so their launches place nothing, take nothing back, and
+say so.
 
 `~/.gemini/config/` is shared: Google documents the same plugins directory
 for the Antigravity desktop app and IDE. A plugin placed for an `agy` session

@@ -13,7 +13,7 @@ stand_in = subprocess.Popen(['sleep', '600'])
 stat = Path(f'/proc/{stand_in.pid}/stat').read_text()
 (claims / f'{stand_in.pid}.json').write_text(json.dumps({
     'pid': stand_in.pid, 'identity': stat[stat.rindex(')') + 2:].split(' ')[19],
-    'directory': str(plugins), 'links': {'launch-fixture': placed['launch-fixture']}}))
+    'links': {'launch-fixture': placed['launch-fixture']}}))
 run('--version')
 assert linked().get('launch-fixture') == placed['launch-fixture'], linked()
 stand_in.kill()
@@ -24,7 +24,7 @@ assert inventory() == first
 # launch. The cache is not what this is about, so it gets a real one.
 result = run('--version', overrides={'HOME': '/homeless-shelter', 'XDG_CACHE_HOME': str(Path.home() / '.cache')})
 if expected:
-    assert 'cannot be written; skipping plugin links' in result.stderr, result.stderr
+    assert 'nothing placed or taken back' in result.stderr, result.stderr
 assert linked() == first
 
 # No home at all still launches.

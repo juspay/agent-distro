@@ -26,15 +26,17 @@
  * as that process — the launcher, then `agy` in its place — runs. That
  * directory comes from HOME alone, as the plugins directory does, never from
  * XDG_STATE_HOME: every launch that can write one home's plugins finds the
- * same claims and lock. A
- * launch removes an entry of ours only when no running launch claims it, and
- * two launches never do this at once: `link` runs under an exclusive lock on
- * `lock` beside the claims, which the operating system releases when a launch
- * dies. Of two running launches that want different translations under one
+ * same claims and lock, and a claim names no directory, so two spellings of
+ * one home (a symlink and its target) are one. A launch removes an entry of
+ * ours only when no running launch claims it, and two launches never do this
+ * at once: `link` runs under an exclusive lock on `lock` beside the claims,
+ * which the operating system releases when a launch dies. A launch writes its
+ * claim before it changes the directory, so one that cannot claim changes
+ * nothing. Of two running launches that want different translations under one
  * name, the later keeps the one already there, and says so.
  *
- * A home that is unset or cannot be written skips all of this, with a word,
- * and `agy` still starts.
+ * A home that is unset or cannot be written skips all of this, saying what
+ * failed, and `agy` still starts.
  */
 import { spawnSync } from 'node:child_process';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -58,8 +60,12 @@ const ANTIGRAVITY_NAME = /^[a-zA-Z0-9_-]+$/;
 /** Plugin name → the translation its entry is placed from. */
 type Links = Record<string, string>;
 
-/** One launch's claim: the entries its session uses while process `pid` runs. */
-type Claim = { pid: number; identity: string; directory: string; links: Links };
+/**
+ * One launch's claim: the entries its session uses while process `pid` runs.
+ * It names no directory: a claims directory serves exactly one plugins
+ * directory (`locations`), however either is spelled.
+ */
+type Claim = { pid: number; identity: string; links: Links };
 
 /** A process: its pid, and what tells it apart from a later one given the same pid. */
 type Session = { pid: number; identity: string };
@@ -179,17 +185,33 @@ const isName = (name: string) => name !== '' && name !== '.' && name !== '..' &&
 function isClaim(value: unknown): value is Claim {
   const claim = value as Claim | null;
   return typeof claim === 'object' && claim !== null && Number.isInteger(claim.pid)
-    && typeof claim.identity === 'string' && typeof claim.directory === 'string'
+    && typeof claim.identity === 'string'
     && typeof claim.links === 'object' && claim.links !== null && !Array.isArray(claim.links)
     && Object.entries(claim.links).every(([name, target]) => isName(name) && typeof target === 'string' && TRANSLATION.test(target));
 }
 
 /**
- * What the running launches other than `self` claim in `directory`. A claim
- * whose process has ended is removed; one that cannot be read is removed too,
- * with a word.
+ * A launch that leaves the plugins directory as it found it, or stops partway
+ * with what it placed already claimed; the message says which, and what
+ * failed.
  */
-function liveClaims(claims: string, directory: string, self: number): Links {
+export class Skipped extends Error {}
+
+/** Run `body`, turning an operating-system error into `Skipped`, with `what` first. */
+function step<T>(what: string, body: () => T): T {
+  try {
+    return body();
+  } catch (error) {
+    if (isSystemError(error)) throw new Skipped(`${what}: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * What the running launches other than `self` claim. A claim whose process
+ * has ended is removed; one that is not a claim is removed too, with a word.
+ */
+function liveClaims(claims: string, self: number): Links {
   const held: Links = {};
   for (const file of readdirSync(claims)) {
     if (!file.endsWith('.json')) continue;
@@ -211,12 +233,15 @@ function liveClaims(claims: string, directory: string, self: number): Links {
       rmSync(path, { force: true });
       continue;
     }
-    if (claim.directory === directory) Object.assign(held, claim.links);
+    Object.assign(held, claim.links);
   }
   return held;
 }
 
 function writeClaim(claims: string, claim: Claim) {
+  // Only a launch holding the lock writes here, so a temporary file is one an
+  // interrupted launch left.
+  for (const file of readdirSync(claims)) if (file.startsWith('.claim-')) rmSync(join(claims, file), { force: true });
   const path = join(claims, `${claim.pid}.json`);
   if (!Object.keys(claim.links).length) {
     rmSync(path, { force: true });
@@ -233,36 +258,52 @@ function writeClaim(claims: string, claim: Claim) {
 /**
  * Put `wanted` in `directory` for `session`, and take back every entry of ours
  * no running launch claims. Run under the lock (`link`). Returns what this
- * session now uses. Throws a system error when either directory cannot be
- * written.
+ * session claims.
+ *
+ * The claim is written before the directory changes, naming everything this
+ * launch will use: a launch that cannot claim places nothing and takes nothing
+ * back, and one that stops while changing the directory has claimed whatever
+ * it placed. A claimed entry that is then not placed harms nothing. Throws
+ * `Skipped`, saying what failed.
  */
 export function settle(directory: string, claims: string, session: Session, wanted: Links, report: Report): Links {
-  mkdirSync(claims, { recursive: true });
-  const held = liveClaims(claims, directory, session.pid);
-  const entries = lexists(directory) ? readdirSync(directory) : [];
-  for (const name of entries) {
-    const source = ENTRIES.source(join(directory, name));
-    if (source !== null && !Object.hasOwn(wanted, name) && held[name] !== source) ENTRIES.remove(join(directory, name));
-  }
+  const unchanged = 'nothing placed or taken back';
+  const held = step(`cannot read the claims in ${claims}; ${unchanged}`, () => {
+    mkdirSync(claims, { recursive: true });
+    return liveClaims(claims, session.pid);
+  });
+  // What this launch will use, decided before anything changes.
   const using: Links = {};
-  for (const [name, translation] of Object.entries(wanted)) {
-    const path = join(directory, name);
-    const source = ENTRIES.source(path);
-    if (source === translation) {
-      using[name] = translation;
-      continue;
+  const entries = step(`cannot read ${directory}; ${unchanged}`, () => {
+    for (const [name, translation] of Object.entries(wanted)) {
+      const path = join(directory, name);
+      const source = ENTRIES.source(path);
+      if (source !== null && source !== translation && held[name] === source) {
+        report(`plugin ${JSON.stringify(name)}: another running agy launch placed another translation of it; this launch uses that one`);
+        using[name] = source;
+      } else if (source === null && lexists(path)) {
+        report(`plugin ${JSON.stringify(name)} skipped: ${path} is not agent-distro's`);
+      } else {
+        using[name] = translation;
+      }
     }
-    if (source !== null && held[name] === source) {
-      report(`plugin ${JSON.stringify(name)}: another running agy launch placed another translation of it; this launch uses that one`);
-      using[name] = source;
-      continue;
+    return lexists(directory) ? readdirSync(directory) : [];
+  });
+  step(`cannot write this launch's claim in ${claims}; ${unchanged}`,
+    () => writeClaim(claims, { ...session, links: using }));
+  step(`cannot change ${directory}; what this launch placed before that is claimed`, () => {
+    for (const name of entries) {
+      const path = join(directory, name);
+      const source = ENTRIES.source(path);
+      if (source !== null && using[name] !== source && held[name] !== source) ENTRIES.remove(path);
     }
-    if (source !== null) ENTRIES.remove(path);
-    mkdirSync(directory, { recursive: true });
-    if (ENTRIES.place(translation, path)) using[name] = translation;
-    else report(`plugin ${JSON.stringify(name)} skipped: ${path} is not agent-distro's`);
-  }
-  writeClaim(claims, { ...session, directory, links: using });
+    for (const [name, translation] of Object.entries(using)) {
+      const path = join(directory, name);
+      if (ENTRIES.source(path) === translation) continue;
+      mkdirSync(directory, { recursive: true });
+      if (!ENTRIES.place(translation, path)) report(`plugin ${JSON.stringify(name)} skipped: ${path} is not agent-distro's`);
+    }
+  });
   return using;
 }
 
@@ -316,7 +357,7 @@ function run(argv: string[]): number {
     } catch (error) {
       if (!isSystemError(error)) throw error;
       // Nothing wanted: nothing to place, and nothing is taken back without the claims.
-      if (any) logger.warn(`${claims} cannot be written; skipping plugin links: ${error.message}`);
+      if (any) logger.warn(`cannot create ${claims}: ${error.message}; nothing placed or taken back`);
       return 0;
     }
     const lock = join(claims, 'lock');
@@ -330,12 +371,15 @@ function run(argv: string[]): number {
   if (command !== 'settle-locked') throw new Error(`unknown command: ${command}`);
   const pid = Number(rest[0]);
   const identity = processIdentity(pid);
-  if (identity === null) throw new Error(`session ${rest[0]} is not running`);
+  if (identity === null) {
+    logger.warn(`session ${rest[0]} has already ended; nothing placed or taken back`);
+    return 0;
+  }
   try {
     settle(where!.plugins, where!.claims, { pid, identity }, JSON.parse(rest[1]), (message) => logger.warn(message));
   } catch (error) {
-    if (!isSystemError(error)) throw error;
-    logger.warn(`${where!.plugins} cannot be written; skipping plugin links: ${error.message}`);
+    if (!(error instanceof Skipped)) throw error;
+    logger.warn(error.message);
   }
   return 0;
 }
