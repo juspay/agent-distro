@@ -194,12 +194,16 @@
           # The Antigravity CLI launcher's placement, without a VM or agy, in
           # a throwaway home: a launch places its plugins where agy reads them,
           # the next takes them back, a run that only lists models changes
-          # nothing there, and a launch waits for another's lock rather than
-          # placing alongside it. Built against a package that only prints
-          # its arguments.
+          # nothing there, a short run leaves what a running session uses, and
+          # a launch waits for another's lock rather than placing alongside
+          # it. Built against a package that only prints its arguments, or,
+          # given `session`, stays running as an interactive agy would.
           agy-launch =
             let
-              argv = pkgs.writeShellScriptBin "agy" ''printf '%s\n' "$*"'' // { version = "0"; };
+              argv = pkgs.writeShellScriptBin "agy" ''
+                if [ "''${1:-}" = session ]; then exec sleep 60; fi
+                printf '%s\n' "$*"
+              '' // { version = "0"; };
               launcher = (agent-distro.lib.mkLaunchers {
                 inherit pkgs;
                 sources = _: _: argv;
@@ -225,6 +229,19 @@
               [ -L "$plugins/launch-fixture" ] || fail "a models run took the fixture back"
               "$agy" --version >/dev/null
               [ ! -e "$plugins/launch-fixture" ] || fail "the next launch did not take the fixture back"
+
+              # A short run (`agy --version`, `agy plugin list`) places and takes
+              # back as any launch does, but never what a running session uses.
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" session &
+              session=$!
+              until [ -L "$plugins/launch-fixture" ]; do sleep 0.1; done
+              "$agy" --version >/dev/null
+              "$agy" plugin list --json >/dev/null
+              [ -L "$plugins/launch-fixture" ] || fail "a short run took back what a running session uses"
+              kill "$session"
+              wait "$session" || true
+              "$agy" --version >/dev/null
+              [ ! -e "$plugins/launch-fixture" ] || fail "the session's entry outlived it"
 
               # A launch waits while another holds the lock, then places its
               # own. The lock is the home's, whatever XDG_STATE_HOME says. The
