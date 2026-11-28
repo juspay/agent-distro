@@ -54,16 +54,17 @@ Here the terminal is in a repository whose profile is Juspay's `plugin.json`, an
 [^chooser-rows]: The panel shows the highlighted harness's tagline and its auth status. Versions reflect the packages pinned at build time, shown without revision suffixes.
 
 ```
-╭─ agent-distro · juspay-skills ─────────────────────────────── 5 harnesses ─╮
+╭─ agent-distro · juspay-skills ─────────────────────────────── 6 harnesses ─╮
 │ juspay-skills · Juspay skills + Kolu, via Juspay's LiteLLM gateway · from  │
 │ /home/me/src/skills/plugin.json                                            │
-├──────────────────────────────┬─────────────────────────────────────────────┤
-│     ✓ Oh My Pi       18.7.0  │ Pi 1.0.4                                    │
-│     ✓ Codex         0.160.1  │ OMP's upstream · plugins per home           │
-│     ✓ Claude Code   2.1.292  │                                             │
-│     ✓ OpenCode       2.0.29  │ Signed in                                   │
-│ ❯ • ✓ Pi              1.0.4  │   LITELLM_API_KEY                           │
-├──────────────────────────────┴─────────────────────────────────────────────┤
+├──────────────────────────────────┬─────────────────────────────────────────┤
+│     ✓ Oh My Pi           18.7.0  │ Pi 1.0.4                                │
+│     ✓ Codex             0.160.1  │ OMP's upstream · plugins per home       │
+│     ✓ Claude Code       2.1.292  │                                         │
+│     ✓ OpenCode           2.0.29  │ Signed in                               │
+│ ❯ • ✓ Pi                  1.0.4  │   LITELLM_API_KEY                       │
+│       Antigravity CLI    1.5.19  │                                         │
+├──────────────────────────────────┴─────────────────────────────────────────┤
 │ / filter…                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────╯
 ↑↓ jk move   Enter launch   / filter   q quit
@@ -115,6 +116,7 @@ agent-distro --launch omp                # how a launch of omp takes a model, as
 | --- | --- |
 | Claude Code | `oauthAccount.emailAddress` in `$CLAUDE_CONFIG_DIR/.claude.json`,[^claude-default] or the name of `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` |
 | Codex | the `email` claim of the OpenID token in `$CODEX_HOME/auth.json`,[^codex-claim] or `OPENAI_API_KEY` |
+| Antigravity CLI | the name of `GEMINI_API_KEY` when `~/.gemini/antigravity-cli/settings.json` sets `"modelProvider": "gemini"`, or `AGY_ADC_AUTH=true`; otherwise neither a mark nor `Not signed in`[^agy-keyring] |
 | OMP, OpenCode, Pi | the profile's `secret` variables, then the provider ids it also has credentials for[^both] |
 | Own-provider harnesses | the ids in the harness's store,[^stores] plus the provider API-key variables it reads from the environment |
 
@@ -126,6 +128,7 @@ A `secret` variable the profile declares and the environment does not set is a l
 [^codex-claim]: Read from `tokens.id_token` without checking its signature; `ChatGPT` when the claim is absent.
 [^both]: The profile's secrets and the harness's own providers are usable at once.
 [^stores]: OMP's `~/.omp/agent/agent.db`, Pi's `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent/auth.json`), OpenCode's `${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json`.
+[^agy-keyring]: Google documents that its sign-in is kept in the system keyring, which the picker does not read, so it cannot say that the CLI is signed out.
 
 ### Keys
 
@@ -218,11 +221,12 @@ Keys within `harnesses` are sorted; `profile`'s are in the order above. `--list`
 | Oh My Pi | `omp models --json` | `--model <id>` |
 | OpenCode | `opencode models` | `OPENCODE_CONFIG_CONTENT='{"model":"<id>"}'`[^opencode-model] |
 | Pi | `pi --list-models` | `--model <id>` |
+| Antigravity CLI | `agy models` | `--model <slug>` |
 | Claude Code, Codex | nothing: `unlisted` | `--model <id>` |
 
 [^opencode-model]: OpenCode's terminal interface has no model flag; this config layer is read over the launch's own.
 
-- **Ids.** Each is exactly what the launch takes, `provider/id`, so a model two providers serve is two ids.
+- **Ids.** Each is exactly what the launch takes: `provider/id`, so a model two providers serve is two ids — except the Antigravity CLI's, which are its own bare model slugs (`gemini-4-neon-high`), with no provider.
 - **Three answers.** `listed` (possibly empty, when the harness has no model to offer), `unlisted` (the harness has no list command: a model is whatever the user names), or a failure.
 - **Failure.** A list command that fails, or prints what agent-distro cannot read, exits 1 with nothing on stdout and, on stderr, the command and everything it printed there — never an empty list. Its stdin is not a terminal, so a `secret` the profile still needs is a failure, not a prompt.
 - **Arguments.** Exactly one harness the package carries; anything else exits 2.
@@ -261,7 +265,7 @@ A plugin named by a flake reference rather than a directory goes on `AI_PROFILE`
 - **Read like a profile's plugins.** Each directory goes through the same reader: an invalid manifest fails the launch with a message naming the field. Lesser problems are reported while the launch goes on.[^launch-warnings]
 - **Matched by name, never by version.** A plugin whose `plugin.json` `name` matches one of the profile's replaces it; on the variable, the last of a name wins.[^no-version]
 - **Translated once.** Each harness's translation of a plugin is cached under `${XDG_CACHE_HOME:-~/.cache}/agent-distro/plugins/<key>/<harness>/`.[^cache-dir] An edited skill, manifest or MCP config is translated again on its next launch; the rest of the tree is never read.[^cache-key]
-- **Kept while in use.** Each launch marks the translations it uses; a launch that translates something new removes what no launch has used for 14 days.[^no-pile-up] With no harness running, removing `~/.cache/agent-distro/plugins` is always safe.
+- **Kept while in use.** Each launch marks the translations it uses; a launch that translates something new removes what no launch has used for 14 days, except a translation a running Antigravity CLI session holds.[^no-pile-up] With no harness running, removing `~/.cache/agent-distro/plugins` is always safe.
 - **For that launch only.** Unset the variable and the harness is back to the profile's plugins.[^undo] Each harness's README says how.
 
 [^colon-path]: So a path containing `:` cannot be given.
@@ -836,6 +840,7 @@ Each harness is a directory under [harnesses/](https://github.com/juspay/agent-d
 | Claude Code | `claude` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/claude/README.md) |
 | OpenCode | `opencode` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/opencode/README.md) |
 | Pi | `pi` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/pi/README.md) |
+| Antigravity CLI | `agy` | [design notes](https://github.com/juspay/agent-distro/blob/main/harnesses/agy/README.md) |
 
 ## How it works
 
@@ -891,7 +896,7 @@ python3 .github/scripts/test-update-flake.py
 The TypeScript's own checks need no VM or KVM, and `nix flake check` at the root does not run them. Build them from the test flake:
 
 ```sh
-cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,profile-resolve,mk-profile,nixpkgs-reference,omp-adapter,pi-adapter,opencode-adapter,update-schedule,list-json,picker-layout,picker-auth}
+cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,opencode-standalone,agy-launch,profile-resolve,mk-profile,nixpkgs-reference,omp-adapter,pi-adapter,opencode-adapter,agy-adapter,update-schedule,list-json,picker-layout,picker-auth}
 ```
 
 | Check | Covers |
@@ -902,6 +907,7 @@ cd test && nix build --no-link .#checks.x86_64-linux.{reader,launch-plugins,open
 | `mk-profile` | `agent-distro.lib.mkProfile`'s output: its metadata, its plugins' descriptions and roots, and `bin/` |
 | `nixpkgs-reference` | the package names nixpkgs by reference and does not hold its source |
 | `opencode-standalone` | an interactive OpenCode launch reaches the harness with `--standalone`, so one launch's config is not served to the next |
+| `agy-launch` | the Antigravity CLI launcher, against a stand-in `agy` in a throwaway home: a launch places its plugins, the next takes them back, a `models` run changes nothing, and a launch waits for another's lock |
 | `<harness>-adapter` | a harness's `tests/check-adapter.ts` |
 | `update-schedule` | the updater's schedule, cache policy and index (its URL, and which systems take one) |
 | `list-json` | `--list --json` against its type and the profile in effect, the chooser's menu and `--list` |
@@ -957,7 +963,7 @@ Create `harnesses/<name>/` with four files:
 | `source.nix` | `{ pkgs }` to package |
 | `README.md` | design notes |
 
-[^auth-values]: `auth = "anthropic" | "openai"`, for a harness with a login of its own; without one the picker reads the profile's `secret` variables and the harness's own store.
+[^auth-values]: `auth = "anthropic" | "openai" | "google"`, for a harness with a login of its own; without one the picker reads the profile's `secret` variables and the harness's own store.
 [^launch-json]: The adapter hands `launchPlugins` what it needs for a launch; its shell sets `launched`, `profile_env_*` and `profile_settings` for the profile in effect, read when the harness starts.
 
 - **Alongside.** Pins in `npins/`, scripts in `tests/`, and an optional custom updater in `update.py`.

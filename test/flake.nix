@@ -191,6 +191,73 @@
               same keep env AGENT_DISTRO_PROFILE="$configured" OMP_SKIP_SETUP=keep "$omp"
               touch "$out"
             '';
+          # The Antigravity CLI launcher's placement, without a VM or agy, in
+          # a throwaway home: a launch places its plugins where agy reads them,
+          # the next takes them back, a run that only lists models changes
+          # nothing there, a short run leaves what a running session uses, and
+          # a launch waits for another's lock rather than placing alongside
+          # it. Built against a package that only prints its arguments, or,
+          # given `session`, stays running as an interactive agy would.
+          agy-launch =
+            let
+              argv = pkgs.writeShellScriptBin "agy" ''
+                if [ "''${1:-}" = session ]; then exec sleep 60; fi
+                printf '%s\n' "$*"
+              '' // { version = "0"; };
+              launcher = (agent-distro.lib.mkLaunchers {
+                inherit pkgs;
+                sources = _: _: argv;
+              }).agy;
+            in
+            pkgs.runCommand "agy-launch-check" { nativeBuildInputs = [ pkgs.bash pkgs.flock ]; } ''
+              export HOME="$TMPDIR/home" XDG_CACHE_HOME="$TMPDIR/cache" XDG_STATE_HOME="$TMPDIR/state"
+              mkdir -p "$HOME" "$TMPDIR/project"
+              cd "$TMPDIR/project"
+              agy=${lib.getExe launcher}
+              plugins="$HOME/.gemini/config/plugins"
+              fixture=${./fixtures/launch-plugin}
+              # Wait up to 30 seconds for a path to appear, or fail naming it.
+              await() { for _ in $(seq 300); do [ -e "$1" ] || [ -L "$1" ] && return 0; sleep 0.1; done; fail "$2"; }
+              fail() { echo "agy-launch: $*" >&2; exit 1; }
+
+              # Listing models leaves ~/.gemini/config as it is, plugins or not.
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" models >/dev/null
+              [ ! -e "$HOME/.gemini" ] || fail "a models run wrote $(find "$HOME/.gemini")"
+
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" --version >/dev/null
+              [ -f "$plugins/launch-fixture/skills/launched/SKILL.md" ] || fail "the fixture was not placed"
+              [ -L "$plugins/launch-fixture" ] || fail "the fixture is not a link"
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" models >/dev/null
+              [ -L "$plugins/launch-fixture" ] || fail "a models run took the fixture back"
+              "$agy" --version >/dev/null
+              [ ! -e "$plugins/launch-fixture" ] || fail "the next launch did not take the fixture back"
+
+              # A short run (`agy --version`, `agy plugin list`) places and takes
+              # back as any launch does, but never what a running session uses.
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" session &
+              session=$!
+              await "$plugins/launch-fixture" "the running session never placed its entry"
+              "$agy" --version >/dev/null
+              "$agy" plugin list --json >/dev/null
+              [ -L "$plugins/launch-fixture" ] || fail "a short run took back what a running session uses"
+              kill "$session"
+              wait "$session" || true
+              "$agy" --version >/dev/null
+              [ ! -e "$plugins/launch-fixture" ] || fail "the session's entry outlived it"
+
+              # A launch waits while another holds the lock, then places its
+              # own. The lock is the home's, whatever XDG_STATE_HOME says. The
+              # holder marks when it lets go, so a launch that did not wait
+              # returns before the mark exists.
+              lock="$HOME/.local/state/agent-distro/agy-launches/lock"
+              flock "$lock" bash -c 'touch "$TMPDIR/held"; sleep 2; touch "$TMPDIR/released"' &
+              await "$TMPDIR/held" "the lock holder never started"
+              AGENT_DISTRO_PLUGINS=$fixture "$agy" --version >/dev/null
+              [ -e "$TMPDIR/released" ] || fail "the launch did not wait for the lock"
+              wait
+              [ -L "$plugins/launch-fixture" ] || fail "the fixture was not placed after the wait"
+              touch "$out"
+            '';
           # `--list --json` alone, without a VM: its type, the picker's menu
           # with the profile in effect, `--list`, and versions stripped of `+`
           # suffixes.

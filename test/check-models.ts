@@ -24,7 +24,8 @@ const [src, agentDistro] = process.argv.slice(2);
 const { parseModels, parseLaunchAnswer, launchWords } = await import(join(src, 'models.ts'));
 const { listModels } = await import(join(src, 'models-cli.ts'));
 // Each listing harness's own word on its models, from its adapter.
-const sources: Record<'omp' | 'opencode' | 'pi', ModelSource> = {
+const sources: Record<'agy' | 'omp' | 'opencode' | 'pi', ModelSource> = {
+  agy: (await import(join(src, 'harness', 'agy.ts'))).models,
   omp: (await import(join(src, 'harness', 'omp.ts'))).models,
   opencode: (await import(join(src, 'harness', 'opencode.ts'))).models,
   pi: (await import(join(src, 'harness', 'pi.ts'))).models,
@@ -140,6 +141,24 @@ const none = listModels('pi', launcher('pi-none', 'No models available. Use /log
   sources.pi);
 assert.deepEqual(none.models, { kind: 'listed', ids: [] });
 
+// The Antigravity CLI: what `agy models` prints to a pipe, as the launcher runs
+// it — one model a line, its slug, one tab, its name — with a progress line on
+// stderr. Made-up slugs, names and words, in that shape.
+const agyList = 'model-alpha-high\tModel Alpha (High)\nmodel-alpha-low\tModel Alpha (Low)\nmodel-beta-2.5\tModel Beta 2.5\n';
+const agy = listModels('agy', launcher('agy', agyList, { stderr: 'working on it\n' }), sources.agy);
+assert.deepEqual(argsOf('agy'), ['models']);
+assert.deepEqual(agy, {
+  launch: { kind: 'flag', flag: '--model' },
+  models: { kind: 'listed', ids: ['model-alpha-high', 'model-alpha-low', 'model-beta-2.5'] },
+});
+// Signed out, `agy models` exits 1 with an error asking to sign in; the
+// failure carries agy's words, whatever they are.
+assert.throws(
+  () => listModels('agy', launcher('agy-signed-out', '', { stderr: 'working on it\nError: sign in first, please\n', status: 1 }),
+    sources.agy),
+  /agy models exited 1:\nworking on it\nError: sign in first, please/,
+);
+
 // A list command that fails is a failure carrying its words, not a list.
 assert.throws(
   () => listModels('omp', launcher('omp-fails', '', { stderr: 'agent-distro: error: cannot prompt for LITELLM_API_KEY (stdin is not a terminal).\n', status: 1 }),
@@ -154,6 +173,12 @@ for (const [harness, stdout, message] of [
   ['omp', '{"models":[{"selector":"a b"}]}', /models\.models\.ids\[0\] is empty or contains whitespace/],
   ['opencode', 'beam-free\n', /not provider\/id/],
   ['pi', 'Warning: something\n', /not its table header/],
+  // A header, a bare word, or nothing at all: refused, never guessed at.
+  ['agy', 'MODEL\tNAME\nmodel-alpha-high\tModel Alpha (High)\n', /"MODEL\\tNAME", not a model's slug and name/],
+  ['agy', 'model-alpha-high\n', /not a model's slug and name/],
+  // Columns padded with spaces are not what agy prints to a pipe: refused.
+  ['agy', 'model-alpha-high    Model Alpha (High)\n', /not a model's slug and name/],
+  ['agy', '\n', /no models, and no word why/],
 ] as const) {
   assert.throws(() => listModels(harness, launcher(`${harness}-odd`, stdout), sources[harness]), message, `${harness}: ${stdout}`);
 }
@@ -182,4 +207,4 @@ assert.deepEqual(launchWords({ kind: 'config', variable: 'OPENCODE_CONFIG_CONTEN
   { env: { OPENCODE_CONFIG_CONTENT: '{"model":"litellm/open-large"}' }, args: [] });
 assert.throws(() => launchWords({ kind: 'flag', flag: '--model' }, 'two words'), /contains whitespace/);
 
-console.log(`--models: unlisted for claude and codex; omp ${omp.models.kind}, opencode, pi read; failures fail. --launch: ${carried.join(', ')}, without a launch`);
+console.log(`--models: unlisted for claude and codex; omp ${omp.models.kind}, opencode, pi, agy read; failures fail. --launch: ${carried.join(', ')}, without a launch`);
