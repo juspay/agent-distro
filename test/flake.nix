@@ -216,6 +216,8 @@
               agy=${lib.getExe launcher}
               plugins="$HOME/.gemini/config/plugins"
               fixture=${./fixtures/launch-plugin}
+              # Wait up to 30 seconds for a path to appear, or fail naming it.
+              await() { for _ in $(seq 300); do [ -e "$1" ] || [ -L "$1" ] && return 0; sleep 0.1; done; fail "$2"; }
               fail() { echo "agy-launch: $*" >&2; exit 1; }
 
               # Listing models leaves ~/.gemini/config as it is, plugins or not.
@@ -234,7 +236,7 @@
               # back as any launch does, but never what a running session uses.
               AGENT_DISTRO_PLUGINS=$fixture "$agy" session &
               session=$!
-              until [ -L "$plugins/launch-fixture" ]; do sleep 0.1; done
+              await "$plugins/launch-fixture" "the running session never placed its entry"
               "$agy" --version >/dev/null
               "$agy" plugin list --json >/dev/null
               [ -L "$plugins/launch-fixture" ] || fail "a short run took back what a running session uses"
@@ -249,7 +251,7 @@
               # returns before the mark exists.
               lock="$HOME/.local/state/agent-distro/agy-launches/lock"
               flock "$lock" bash -c 'touch "$TMPDIR/held"; sleep 2; touch "$TMPDIR/released"' &
-              until [ -e "$TMPDIR/held" ]; do sleep 0.1; done
+              await "$TMPDIR/held" "the lock holder never started"
               AGENT_DISTRO_PLUGINS=$fixture "$agy" --version >/dev/null
               [ -e "$TMPDIR/released" ] || fail "the launch did not wait for the lock"
               wait

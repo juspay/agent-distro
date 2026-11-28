@@ -19,13 +19,14 @@ server runs through a generated launcher that provides `PLUGIN_ROOT`,
 `serverUrl` and headers. An SSE server is skipped with a warning: Google
 documents that Antigravity does not support SSE. The manifest's fields are all
 in Antigravity's manifest schema, whose name pattern allows no `.`. Such a
-name is carried as it is: `agy` lists and loads the plugin, and warns only, in
-`agy plugin validate`, that it cannot be published to its marketplace.
+name is carried as it is: `agy` lists the plugin as enabled and it passes
+`agy plugin validate`, which warns only that it cannot be published to the
+marketplace.
 
-`agy` loads these folders as they are placed, links into the cache: with the
-owner signed in, `agy plugin list --json` listed each one enabled, `agy plugin
-validate` passed through the link, and a session started each linked plugin's
-MCP servers.
+`agy` takes these folders as they are placed, links into the cache: seen
+signed in, on 1.5.19, `agy plugin list --json` listed each one enabled,
+`agy plugin validate` passed through the link and counted its skills, and a
+session fetched the tools of each linked plugin's MCP servers.
 
 The launcher places each folder at `~/.gemini/config/plugins/<name>`, today
 as a link to its translation; `ENTRIES` in src/harness/agy.ts is the one
@@ -60,12 +61,14 @@ each places its entries under an exclusive lock, `lock` beside the claims,
 which the operating system releases if a launch dies. A launch that waits 30
 seconds for it skips its plugins, with a warning, and still starts. Of two
 running launches that want different translations under one name, the later
-one keeps the entry already there and uses it. When that entry is another
-version of the plugin, it says so, naming the session that holds it: ending
-that session and launching again gives this launch's version. When it is the
-same plugin translated by another agent-distro build, it says nothing, since
-there is nothing to do. A run that only lists models (`agy models`, and so
-`agent-distro --models agy`) changes nothing in `~/.gemini/config/`. Every
+one keeps the entry already there and uses it. When that entry is another copy
+or version of the plugin (other content, or the same plugin from somewhere
+else), it says so, naming the running sessions that hold it: ending them and
+launching again gives this launch's own. When it is the same plugin content
+translated by another agent-distro build, it says so only at debug: the launch
+runs the other build's translation until those sessions end, and that is
+rarely worth a line on every launch. A run that only lists models
+(`agy models`, and so `agent-distro --models agy`) changes nothing in `~/.gemini/config/`. Every
 other run, short ones such as `agy --version` or `agy plugin list` included,
 places and takes back as a session does: `agy plugin list` then shows what a
 session would load, and a short run never takes back what a running session
@@ -80,12 +83,11 @@ would show up in them too, until a later launch takes it back.
 
 A model is given as `--model <slug>`. `agent-distro --models agy` runs
 `agy models`, which, its output not being a terminal, prints one model a line:
-its slug, a tab, and its name, with "Fetching available models..." on stderr.
-The reader takes each slug and refuses any other line rather than guess,
-spaces between slug and name included: Google's documentation shows them, but
-`agy` was not seen to print them. Signed out, `agy models` exits 1 with
-"Please sign in to view available models", and `agent-distro --models agy`
-fails with those words.
+its slug, a tab, and its name, with a progress line on stderr. The reader takes
+each slug and refuses any other line rather than guess, spaces between slug and
+name included: Google's documentation shows them, but `agy` was not seen to
+print them. Signed out, `agy models` exits 1 with an error asking to sign in,
+and `agent-distro --models agy` fails with agy's words.
 
 The picker does not read the system keyring, where Google documents that
 `agy` keeps its sign-in. It marks the row signed in only for the two
@@ -98,11 +100,13 @@ Like Claude Code and Codex, `agy` has a login of its own, so the launcher never
 prompts for the profile's `secret` variables. It exports the profile's other
 `env` entries and puts its packages on `PATH`, as every launcher does.
 
-Seen with the owner signed in, on 1.5.19: symlinked folders load, a dotted
-name loads, the shape of `agy models` signed in and out, `agy plugin list
---json` and `agy plugin validate` working signed out, and a different `HOME`
-moving `~/.gemini` with it. Unproven still:
+Seen signed in, on 1.5.19: symlinked folders are listed as enabled and their
+MCP servers start, a dotted name is listed as enabled and passes validation,
+the shape of `agy models` signed in and out, `agy plugin list --json` and
+`agy plugin validate` working signed out, and a different `HOME` moving
+`~/.gemini` with it. Unproven still:
 
+- that a session offers a linked plugin's skills;
 - when a running `agy` reads a plugin folder: only at start, or again later;
 - what `agy` does with a manifest field outside Antigravity's rules;
 - that the desktop app and IDE show what is placed there.
