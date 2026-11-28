@@ -3,11 +3,9 @@
 # agent-distro
 
 **An Agent Plugin in your repository is all the setup your coding agents need.**
-agent-distro runs Oh My Pi, Claude Code, Codex, OpenCode and Pi, and each picks
-up the repository's `plugin.json` — skills, MCP servers, packages, environment,
-harness settings — the moment you launch it there. It runs the Antigravity CLI
-with the same profile too, placing its plugins where Google documents that
-`agy` reads them; that `agy` loads them from there is not yet confirmed.
+agent-distro runs Oh My Pi, Claude Code, Codex, OpenCode, Pi and the Antigravity
+CLI, and each picks up the repository's `plugin.json` — skills, MCP servers,
+packages, environment, harness settings — the moment you launch it there.
 
 ```json
 {
