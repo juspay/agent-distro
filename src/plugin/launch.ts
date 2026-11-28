@@ -60,7 +60,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { Fatal, isDescription, readPlugin, type Description } from './read.ts';
 import { log, SITE, VARIABLE as LOG_VARIABLE } from '../log.ts';
 import { nameText, sourceText } from '../listing.ts';
-import { isSystemError, realpath, writeTemporary } from '../util.ts';
+import { isSystemError, processIdentity, realpath, writeTemporary } from '../util.ts';
 import {
   resolveProfile, select, workingDirectory, isResolved,
   type Described, type Info, type ProfileEnv, type Resolved, type SettingsSection,
@@ -265,6 +265,58 @@ function stamp(link: string) {
   lutimesSync(link, now, now);
 }
 
+/**
+ * A process whose session uses a translation after its launch has returned —
+ * an Antigravity CLI session (src/harness/agy.ts) — and what tells it apart
+ * from a later process given its pid (`processIdentity`).
+ */
+export type Holder = { pid: number; identity: string };
+
+export const isHolder = (value: unknown): value is Holder => typeof value === 'object' && value !== null
+  && Number.isInteger((value as Holder).pid) && typeof (value as Holder).identity === 'string';
+
+/** Whether `holder`'s process still runs: its pid answers, with the same identity. */
+export const isRunning = (holder: Holder) => processIdentity(holder.pid) === holder.identity;
+
+/** Beside a translation's `out`: one file per process that holds it. */
+const holdsOf = (translation: string) => join(dirname(translation), 'holds');
+
+/**
+ * Keep the translation whose `out` is `translation` from being pruned while
+ * `holder` runs, however long since a launch last used it.
+ */
+export function hold(translation: string, holder: Holder) {
+  writeAtomic(join(holdsOf(translation), `${holder.pid}.json`), JSON.stringify(holder) + '\n');
+}
+
+/** Drop `pid`'s hold on `translation`, if it has one. */
+export function release(translation: string, pid: number) {
+  rmSync(join(holdsOf(translation), `${pid}.json`), { force: true });
+}
+
+/**
+ * Whether a running process holds the translation directory `directory`. A
+ * hold whose process has ended, or that cannot be read as one, is removed.
+ */
+function isHeld(directory: string): boolean {
+  const holds = join(directory, 'holds');
+  let held = false;
+  for (const name of listing(holds)) {
+    // A `.launch-` file is a hold being written.
+    if (!name.endsWith('.json')) continue;
+    const path = join(holds, name);
+    let holder: unknown;
+    try {
+      holder = JSON.parse(readFileSync(path, 'utf8'));
+    } catch (error) {
+      if (!(error instanceof SyntaxError) && !isSystemError(error)) throw error;
+    }
+    if (isHolder(holder) && isRunning(holder)) held = true;
+    else rmSync(path, { force: true });
+  }
+  return held;
+}
+
 /** The names in `directory`, or none when another launch removed it first. */
 function listing(directory: string): string[] {
   try {
@@ -285,10 +337,10 @@ export const stale = (path: string, now: number) => {
 };
 
 /**
- * Remove the translations no launch has used for STALE_DAYS, directories no
- * link names (a launch interrupted before publishing) once as old, and the
- * key directories left empty. Run when a launch adds a translation, so the
- * cache is bounded by what is in use.
+ * Remove the translations no launch has used for STALE_DAYS and no running
+ * process holds (`hold`), directories no link names (a launch interrupted
+ * before publishing) once as old, and the key directories left empty. Run
+ * when a launch adds a translation, so the cache is bounded by what is in use.
  */
 export function prune(cache: string, now = Date.now()) {
   const plugins = join(cache, 'plugins');
@@ -301,7 +353,7 @@ export function prune(cache: string, now = Date.now()) {
         const path = join(directory, name);
         if (!lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) continue;
         const target = readlinkSync(path);
-        if (stale(path, now)) {
+        if (stale(path, now) && !isHeld(join(directory, target))) {
           rmSync(path, { force: true });
           rmSync(join(directory, target), { recursive: true, force: true });
         } else {
@@ -326,6 +378,17 @@ function removeIfEmpty(directory: string) {
   } catch (error) {
     if (!['ENOTEMPTY', 'EEXIST', 'ENOENT'].includes((error as NodeJS.ErrnoException).code!)) throw error;
   }
+}
+
+/**
+ * The key `path` is cached under when it is a translation for `harness` as
+ * `translate` lays them out — `<cache>/plugins/<key>/<harness>/<dir>/out` —
+ * or null. The key names the plugin and its content (`storeKey`,
+ * `contentKey`); `<dir>` names the runtime that translated it.
+ */
+export function translationKey(path: string, harness: string): string | null {
+  const match = /^\/.*\/agent-distro\/plugins\/([^/]+)\/([^/]+)\/[^/]+\/out$/.exec(path);
+  return match && match[2] === harness ? match[1] : null;
 }
 
 /**

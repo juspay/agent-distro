@@ -110,6 +110,32 @@ reset();
 files.set('/home/u/.codex/auth.json', 'nonsense');
 assert.equal(read({ scheme: 'openai' }), undefined);
 
+// The Antigravity CLI: its keyring sign-in is never read, so only its two
+// documented alternatives are signed in, and anything else is unknown — never
+// "not signed in".
+const google: Spec = { scheme: 'google' };
+const agySettings = '/home/u/.gemini/antigravity-cli/settings.json';
+reset();
+files.set(agySettings, JSON.stringify({ modelProvider: 'gemini' }));
+assert.deepEqual(read(google, home({ GEMINI_API_KEY: 'k' })), signed('GEMINI_API_KEY'));
+// The key alone has no effect, nor does the setting alone, nor another provider.
+assert.equal(read(google), undefined);
+reset();
+assert.equal(read(google, home({ GEMINI_API_KEY: 'k' })), undefined);
+files.set(agySettings, JSON.stringify({ modelProvider: 'vertex' }));
+assert.equal(read(google, home({ GEMINI_API_KEY: 'k' })), undefined);
+// Settings that cannot be read or parsed are unknown, and leave the ADC route.
+files.set(agySettings, '{ not json');
+assert.equal(read(google, home({ GEMINI_API_KEY: 'k' })), undefined);
+reset();
+unreadable.add(agySettings);
+assert.equal(read(google, home({ GEMINI_API_KEY: 'k' })), undefined);
+assert.deepEqual(read(google, home({ GEMINI_API_KEY: 'k', AGY_ADC_AUTH: 'true' })), signed('AGY_ADC_AUTH'));
+// Application Default Credentials count only as `true`.
+reset();
+assert.deepEqual(read(google, home({ AGY_ADC_AUTH: 'true' })), signed('AGY_ADC_AUTH'));
+assert.equal(read(google, home({ AGY_ADC_AUTH: '1' })), undefined);
+
 // A harness without a login of its own: the profile's secret variables are
 // its login, and its own providers are usable beside them.
 reset();
@@ -236,5 +262,6 @@ assert.deepEqual(spec('secrets', 'omp', { LITELLM_BASE_URL: 'u', LITELLM_API_KEY
 assert.deepEqual(spec('secrets', 'pi', {}), { scheme: 'secrets', secrets: [], provider: 'pi' });
 assert.deepEqual(spec('anthropic', 'claude', { LITELLM_API_KEY: { secret: true } }), { scheme: 'anthropic' });
 assert.deepEqual(spec('openai', 'codex', {}), { scheme: 'openai' });
+assert.deepEqual(spec('google', 'agy', { GEMINI_API_KEY: { secret: true } }), { scheme: 'google' });
 
 console.log('picker auth: all checks passed');

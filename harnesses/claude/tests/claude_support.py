@@ -37,8 +37,9 @@ def run(*args, launcher='claude', plugins=None):
 
 
 def listed(*args, launcher='claude', plugins=None):
-    # `plugin list --json` without the plugins Claude Code bundles itself
-    # (`<name>@builtin`, user scope): those are the harness's, not the launch's.
+    """`claude … plugin list --json`, without the plugins Claude Code ships
+    itself: it lists those too, as `<name>@builtin`, beside the ones a launch
+    hands it."""
     listing = json.loads(run(*args, 'plugin', 'list', '--json', launcher=launcher, plugins=plugins))
     return [p for p in listing if not p['id'].endswith('@builtin')]
 
