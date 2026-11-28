@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { once } from 'node:events';
@@ -351,4 +351,28 @@ test('a running session keeps its translations through a prune, however long sin
   await live.end();
   prune(cache);
   assert.ok(!existsSync(x), 'once the session has ended, the stale translation goes');
+});
+
+test('two running launches claiming different translations under one name each keep the entry', async () => {
+  const { plugins, translation, launch, listed } = world();
+  const [ta, tb] = [translation(), translation()];
+  const first = session();
+  const second = session();
+  launch(first, { x: ta });
+  // The user removes the first launch's entry by hand; the second places its own.
+  rmSync(join(plugins, 'x'));
+  launch(second, { x: tb });
+  assert.deepEqual(listed(), { x: tb });
+  // Whichever claim is read last, a launch wanting nothing leaves an entry
+  // either running launch claims: the second's as it is, the first's too.
+  launch(ended(), {});
+  assert.deepEqual(listed(), { x: tb });
+  rmSync(join(plugins, 'x'));
+  symlinkSync(ta, join(plugins, 'x'));
+  launch(ended(), {});
+  assert.deepEqual(listed(), { x: ta });
+  await first.end();
+  await second.end();
+  launch(ended(), {});
+  assert.deepEqual(listed(), {});
 });

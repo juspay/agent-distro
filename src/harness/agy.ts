@@ -186,11 +186,14 @@ function step<T>(what: string, body: () => T): T {
 }
 
 /**
- * What the running launches other than `self` claim. A claim whose process
- * has ended is removed; one that is not a claim is removed too, with a word.
+ * Every translation a running launch other than `self` claims, by plugin
+ * name: two running launches can claim different translations under one name
+ * (one placed after the user removed the other's entry), and each counts. A
+ * claim whose process has ended is removed; one that is not a claim is
+ * removed too, with a word.
  */
-function liveClaims(claims: string, self: number): Links {
-  const held: Links = {};
+function liveClaims(claims: string, self: number): Map<string, Set<string>> {
+  const held = new Map<string, Set<string>>();
   for (const file of readdirSync(claims)) {
     if (!file.endsWith('.json')) continue;
     const path = join(claims, file);
@@ -212,7 +215,10 @@ function liveClaims(claims: string, self: number): Links {
       rmSync(path, { force: true });
       continue;
     }
-    Object.assign(held, claim.links);
+    for (const [name, target] of Object.entries(claim.links)) {
+      if (!held.has(name)) held.set(name, new Set());
+      held.get(name)!.add(target);
+    }
   }
   return held;
 }
@@ -257,7 +263,7 @@ export function settle(directory: string, claims: string, session: Holder, wante
     for (const [name, translation] of Object.entries(wanted)) {
       const path = join(directory, name);
       const source = ENTRIES.source(path);
-      if (source !== null && source !== translation && held[name] === source) {
+      if (source !== null && source !== translation && held.get(name)?.has(source)) {
         report(`plugin ${JSON.stringify(name)}: another running agy launch placed another translation of it; this launch uses that one`);
         using[name] = source;
       } else if (source === null && lexists(path)) {
@@ -279,7 +285,7 @@ export function settle(directory: string, claims: string, session: Holder, wante
     for (const name of entries) {
       const path = join(directory, name);
       const source = ENTRIES.source(path);
-      if (source !== null && using[name] !== source && held[name] !== source) ENTRIES.remove(path);
+      if (source !== null && using[name] !== source && !held.get(name)?.has(source)) ENTRIES.remove(path);
     }
     for (const [name, translation] of Object.entries(using)) {
       const path = join(directory, name);

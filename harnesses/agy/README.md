@@ -28,7 +28,11 @@ agent-distro's by itself — a link into agent-distro's plugin cache — so no
 record has to agree with it, and a launch killed at any point leaves nothing
 the next one takes for the user's. An entry that is not agent-distro's is
 never changed or removed: a plugin whose name one already holds is skipped,
-with a warning.
+with a warning. The one exception is a race of two system calls: a user who
+deletes agent-distro's link and puts a link of their own under the same name
+in the instant a launch is removing it can lose that link (never what it
+points at). A removal checks ownership and then unlinks, and there is no
+"unlink only if still mine" to close the gap with.
 
 Each launch claims the entries its session uses, in
 `~/.local/state/agent-distro/agy-launches/<pid>.json`, outside Google's
