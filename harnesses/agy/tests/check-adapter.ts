@@ -212,16 +212,23 @@ test('overlapping launches take back only what no running launch uses', async ()
 
 test('of two running launches wanting one name, the later uses the entry already there', async () => {
   const { claims, translation, launch, listed, reports } = world();
-  const [t1, t2] = [translation(), translation()];
+  const [t1, t2, t3] = [translation(), translation(), translation()];
   const first = session();
   const second = session();
   launch(first, { x: t1 });
   assert.deepEqual(launch(second, { x: t2 }), { x: t1 });
   assert.deepEqual(listed(), { x: t1 });
-  // Another version of the plugin: said, with the session that holds it and
-  // what to do to use this launch's.
-  assert.deepEqual(reports, [`plugin "x": the running agy session ${first.pid} uses another version of this plugin, `
-    + 'so this launch uses that version too; end that session and launch again to use this one']);
+  // Another copy or version of the plugin: said, with the session that holds
+  // it and what to do to use this launch's.
+  assert.deepEqual(reports.splice(0), [`plugin "x": the running agy session (pid ${first.pid}) uses another copy or `
+    + 'version of this plugin, so this launch uses it too; end that session and launch again to use this one']);
+  // Now both hold it: ending one is not enough, and the words name both.
+  const third = session();
+  launch(third, { x: t3 });
+  const pids = [first.pid, second.pid].sort((a, b) => a - b).join(', ');
+  assert.deepEqual(reports.splice(0), [`plugin "x": the running agy sessions (pids ${pids}) use another copy or `
+    + 'version of this plugin, so this launch uses it too; end those sessions and launch again to use this one']);
+  await third.end();
   // The second claims what it uses, so it outlasts the first.
   await first.end();
   launch(ended(), {});
@@ -230,7 +237,7 @@ test('of two running launches wanting one name, the later uses the entry already
   await second.end();
 });
 
-test('the same plugin translated by another agent-distro is used without a word', async () => {
+test('the same plugin translated by another agent-distro is used without a warning', async () => {
   const { translation, launch, listed, reports } = world();
   // One plugin's content (one key), translated by two agent-distro builds.
   const [older, newer] = [translation('same', 'translator.old'), translation('same', 'translator.new')];

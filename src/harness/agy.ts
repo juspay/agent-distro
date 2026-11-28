@@ -82,9 +82,9 @@ export function locations(env: NodeJS.ProcessEnv = process.env): { plugins: stri
 /**
  * One plugin as an Antigravity plugin folder at `out`. Its manifest's fields
  * are all in Antigravity's manifest schema. A name with a `.`, which that
- * schema's pattern refuses, is carried as it is: `agy` loads it, and warns
- * only, in `agy plugin validate`, that such a plugin cannot be published to
- * its marketplace. An SSE server is skipped: Antigravity's remote servers are
+ * schema's pattern refuses, is carried as it is: `agy` lists such a plugin as
+ * enabled, and `agy plugin validate` warns only that it cannot be published to
+ * the marketplace. An SSE server is skipped: Antigravity's remote servers are
  * Streamable HTTP only.
  */
 export function writeAntigravityPlugin(description: Description, out: string, { bash, env }: Inputs, report: Report) {
@@ -183,13 +183,13 @@ function step<T>(what: string, body: () => T): T {
 
 /**
  * Every translation a running launch other than `self` claims, by plugin
- * name, with the pid of a launch that claims it: two running launches can
+ * name, with the pids of the launches that claim it: two running launches can
  * claim different translations under one name (one placed after the user
  * removed the other's entry), and each counts. A claim whose process has
  * ended is removed; one that is not a claim is removed too, with a word.
  */
-function liveClaims(claims: string, self: number): Map<string, Map<string, number>> {
-  const held = new Map<string, Map<string, number>>();
+function liveClaims(claims: string, self: number): Map<string, Map<string, number[]>> {
+  const held = new Map<string, Map<string, number[]>>();
   for (const file of readdirSync(claims)) {
     if (!file.endsWith('.json')) continue;
     const path = join(claims, file);
@@ -213,7 +213,8 @@ function liveClaims(claims: string, self: number): Map<string, Map<string, numbe
     }
     for (const [name, target] of Object.entries(claim.links)) {
       if (!held.has(name)) held.set(name, new Map());
-      held.get(name)!.set(target, claim.pid);
+      const targets = held.get(name)!;
+      targets.set(target, [...targets.get(target) ?? [], claim.pid]);
     }
   }
   return held;
@@ -260,11 +261,18 @@ export function settle(directory: string, claims: string, session: Holder, wante
       const path = join(directory, name);
       const source = ENTRIES.source(path);
       if (source !== null && source !== translation && held.get(name)?.has(source)) {
-        // Only another version of the plugin is worth a word: the same content
-        // translated by another agent-distro build is what this launch wanted.
-        if (TRANSLATION.exec(source)?.[1] !== TRANSLATION.exec(translation)?.[1]) {
-          report(`plugin ${JSON.stringify(name)}: the running agy session ${held.get(name)!.get(source)} uses another `
-            + 'version of this plugin, so this launch uses that version too; end that session and launch again to use this one');
+        const pids = [...held.get(name)!.get(source)!].sort((a, b) => a - b);
+        const sessions = pids.length === 1 ? `session (pid ${pids[0]})` : `sessions (pids ${pids.join(', ')})`;
+        // The same content translated by another agent-distro build: this
+        // launch runs that build's translation until those sessions end.
+        // Worth a trace, not a line on every launch.
+        if (TRANSLATION.exec(source)?.[1] === TRANSLATION.exec(translation)?.[1]) {
+          logger.debug(`plugin ${JSON.stringify(name)}: the running agy ${sessions} use${pids.length === 1 ? 's' : ''} it as `
+            + 'another agent-distro build translated it; this launch uses that translation until no running session holds it');
+        } else {
+          report(`plugin ${JSON.stringify(name)}: the running agy ${sessions} use${pids.length === 1 ? 's' : ''} another `
+            + `copy or version of this plugin, so this launch uses it too; end ${pids.length === 1 ? 'that session' : 'those sessions'} `
+            + 'and launch again to use this one');
         }
         using[name] = source;
       } else if (source === null && lexists(path)) {
