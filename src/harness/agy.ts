@@ -51,12 +51,6 @@ import { isSystemError, lexists, processIdentity, writeTemporary } from '../util
 /** Antigravity's own manifest schema: the folder is an Antigravity plugin, not an Agent Plugins one. */
 const SCHEMA = 'https://antigravity.google/schemas/v1/plugin.json';
 
-/**
- * The `name` pattern of the schema `SCHEMA` names (letters, digits, `-`, `_`);
- * Agent Plugins also allows `.`, which it refuses.
- */
-const ANTIGRAVITY_NAME = /^[a-zA-Z0-9_-]+$/;
-
 /** Plugin name → the translation its entry is placed from. */
 type Links = Record<string, string>;
 
@@ -87,16 +81,14 @@ export function locations(env: NodeJS.ProcessEnv = process.env): { plugins: stri
 
 /**
  * One plugin as an Antigravity plugin folder at `out`. Its manifest's fields
- * are all in Antigravity's manifest schema, but that schema's `name` pattern
- * allows no `.`, and an SSE server is skipped: Antigravity's remote servers
- * are Streamable HTTP only.
+ * are all in Antigravity's manifest schema. A name with a `.`, which that
+ * schema's pattern refuses, is carried as it is: `agy` loads it, and warns
+ * only, in `agy plugin validate`, that such a plugin cannot be published to
+ * its marketplace. An SSE server is skipped: Antigravity's remote servers are
+ * Streamable HTTP only.
  */
 export function writeAntigravityPlugin(description: Description, out: string, { bash, env }: Inputs, report: Report) {
   mkdirSync(out, { recursive: true });
-  const { name } = description.manifest;
-  if (!ANTIGRAVITY_NAME.test(name)) {
-    report(`plugin.json: name ${JSON.stringify(name)} is not one Antigravity's manifest schema allows; whether agy loads it is unproven`);
-  }
   writeFileSync(join(out, 'plugin.json'), JSON.stringify({ ...description.manifest, $schema: SCHEMA }, null, 2) + '\n');
   copySkills(description, join(out, 'skills'));
   const servers: Record<string, unknown> = {};

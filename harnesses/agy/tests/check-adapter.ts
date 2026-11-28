@@ -66,15 +66,16 @@ test('a plugin becomes an Antigravity plugin folder', () => {
   assert.ok(reports.some((line) => line.includes('"equals" skipped') && line.includes('"="')), reports.join('\n'));
   assert.ok(!reports.some((line) => line.includes('name')), reports.join('\n'));
 
-  // No servers, no mcp_config.json; a name Antigravity's schema does not
-  // allow is carried as it is, and said.
+  // No servers, no mcp_config.json; a name with a `.`, which agy loads (it
+  // warns only, in `agy plugin validate`, that such a plugin cannot be
+  // published to its marketplace), is carried as it is, without a word.
   const bare = join(temporary(), 'out');
   const said: string[] = [];
   adapter.translate({ ...description, manifest: { ...description.manifest, name: 'acme.tools' }, mcpServers: {} },
     bare, inputs, (message: string) => said.push(message));
   assert.ok(!existsSync(join(bare, 'mcp_config.json')));
   assert.equal(readJson(join(bare, 'plugin.json')).name, 'acme.tools');
-  assert.ok(said.some((line) => line.includes('"acme.tools" is not one Antigravity\'s manifest schema allows')), said.join('\n'));
+  assert.deepEqual(said, []);
 });
 
 test('the launch prints the plugins it wants, by name', () => {
