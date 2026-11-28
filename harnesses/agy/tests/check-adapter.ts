@@ -92,8 +92,9 @@ function world() {
   const plugins = join(root, 'home/.gemini/config/plugins');
   const claims = join(root, 'state/agent-distro/agy-launches');
   let count = 0;
-  const translation = () => {
-    const path = join(root, 'cache/agent-distro/plugins', `key${count++}`, 'agy', 'translator.0', 'out');
+  /** A translation of plugin content `key`, by agent-distro's translator `translator`. */
+  const translation = (key = `key${count++}`, translator = 'translator.0') => {
+    const path = join(root, 'cache/agent-distro/plugins', key, 'agy', translator, 'out');
     mkdirSync(path, { recursive: true });
     return path;
   };
@@ -217,13 +218,30 @@ test('of two running launches wanting one name, the later uses the entry already
   launch(first, { x: t1 });
   assert.deepEqual(launch(second, { x: t2 }), { x: t1 });
   assert.deepEqual(listed(), { x: t1 });
-  assert.ok(reports.some((line) => line.includes('plugin "x": another running agy launch placed another translation of it')), reports.join('\n'));
+  // Another version of the plugin: said, with the session that holds it and
+  // what to do to use this launch's.
+  assert.deepEqual(reports, [`plugin "x": the running agy session ${first.pid} uses another version of this plugin, `
+    + 'so this launch uses that version too; end that session and launch again to use this one']);
   // The second claims what it uses, so it outlasts the first.
   await first.end();
   launch(ended(), {});
   assert.deepEqual(listed(), { x: t1 });
   assert.deepEqual(readJson(join(claims, `${second.pid}.json`)).links, { x: t1 });
   await second.end();
+});
+
+test('the same plugin translated by another agent-distro is used without a word', async () => {
+  const { translation, launch, listed, reports } = world();
+  // One plugin's content (one key), translated by two agent-distro builds.
+  const [older, newer] = [translation('same', 'translator.old'), translation('same', 'translator.new')];
+  const first = session();
+  launch(first, { x: older });
+  assert.deepEqual(launch(ended(), { x: newer }), { x: older });
+  assert.deepEqual(listed(), { x: older });
+  assert.deepEqual(reports, []);
+  await first.end();
+  // Once nothing holds the older one, a launch places its own.
+  assert.deepEqual(launch(ended(), { x: newer }), { x: newer });
 });
 
 test('a claim that is not a launch\'s, or names a path outside the directory, is removed and ignored', async () => {

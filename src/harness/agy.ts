@@ -112,8 +112,12 @@ export function writeAntigravityPlugin(description: Description, out: string, { 
   }
 }
 
-/** A translation for this adapter, as src/plugin/launch.ts lays out its cache. */
-const TRANSLATION = /^\/.*\/agent-distro\/plugins\/[^/]+\/agy\/[^/]+\/out$/;
+/**
+ * A translation for this adapter, as src/plugin/launch.ts lays out its cache:
+ * `<key>` names the plugin's content, `<translator>` the agent-distro that
+ * translated it.
+ */
+const TRANSLATION = /^\/.*\/agent-distro\/plugins\/([^/]+)\/agy\/[^/]+\/out$/;
 
 /**
  * How a translation is put where `agy` reads plugins, and how an entry of ours
@@ -179,13 +183,13 @@ function step<T>(what: string, body: () => T): T {
 
 /**
  * Every translation a running launch other than `self` claims, by plugin
- * name: two running launches can claim different translations under one name
- * (one placed after the user removed the other's entry), and each counts. A
- * claim whose process has ended is removed; one that is not a claim is
- * removed too, with a word.
+ * name, with the pid of a launch that claims it: two running launches can
+ * claim different translations under one name (one placed after the user
+ * removed the other's entry), and each counts. A claim whose process has
+ * ended is removed; one that is not a claim is removed too, with a word.
  */
-function liveClaims(claims: string, self: number): Map<string, Set<string>> {
-  const held = new Map<string, Set<string>>();
+function liveClaims(claims: string, self: number): Map<string, Map<string, number>> {
+  const held = new Map<string, Map<string, number>>();
   for (const file of readdirSync(claims)) {
     if (!file.endsWith('.json')) continue;
     const path = join(claims, file);
@@ -208,8 +212,8 @@ function liveClaims(claims: string, self: number): Map<string, Set<string>> {
       continue;
     }
     for (const [name, target] of Object.entries(claim.links)) {
-      if (!held.has(name)) held.set(name, new Set());
-      held.get(name)!.add(target);
+      if (!held.has(name)) held.set(name, new Map());
+      held.get(name)!.set(target, claim.pid);
     }
   }
   return held;
@@ -256,7 +260,12 @@ export function settle(directory: string, claims: string, session: Holder, wante
       const path = join(directory, name);
       const source = ENTRIES.source(path);
       if (source !== null && source !== translation && held.get(name)?.has(source)) {
-        report(`plugin ${JSON.stringify(name)}: another running agy launch placed another translation of it; this launch uses that one`);
+        // Only another version of the plugin is worth a word: the same content
+        // translated by another agent-distro build is what this launch wanted.
+        if (TRANSLATION.exec(source)?.[1] !== TRANSLATION.exec(translation)?.[1]) {
+          report(`plugin ${JSON.stringify(name)}: the running agy session ${held.get(name)!.get(source)} uses another `
+            + 'version of this plugin, so this launch uses that version too; end that session and launch again to use this one');
+        }
         using[name] = source;
       } else if (source === null && lexists(path)) {
         report(`plugin ${JSON.stringify(name)} skipped: ${path} is not agent-distro's`);
