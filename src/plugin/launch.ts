@@ -272,6 +272,12 @@ function stamp(link: string) {
  */
 export type Holder = { pid: number; identity: string };
 
+export const isHolder = (value: unknown): value is Holder => typeof value === 'object' && value !== null
+  && Number.isInteger((value as Holder).pid) && typeof (value as Holder).identity === 'string';
+
+/** Whether `holder`'s process still runs: its pid answers, with the same identity. */
+export const isRunning = (holder: Holder) => processIdentity(holder.pid) === holder.identity;
+
 /** Beside a translation's `out`: one file per process that holds it. */
 const holdsOf = (translation: string) => join(dirname(translation), 'holds');
 
@@ -299,13 +305,13 @@ function isHeld(directory: string): boolean {
     // A `.launch-` file is a hold being written.
     if (!name.endsWith('.json')) continue;
     const path = join(holds, name);
-    let holder: Partial<Holder> | undefined;
+    let holder: unknown;
     try {
       holder = JSON.parse(readFileSync(path, 'utf8'));
     } catch (error) {
       if (!(error instanceof SyntaxError) && !isSystemError(error)) throw error;
     }
-    if (Number.isInteger(holder?.pid) && processIdentity(holder!.pid!) === holder!.identity) held = true;
+    if (isHolder(holder) && isRunning(holder)) held = true;
     else rmSync(path, { force: true });
   }
   return held;
@@ -372,6 +378,17 @@ function removeIfEmpty(directory: string) {
   } catch (error) {
     if (!['ENOTEMPTY', 'EEXIST', 'ENOENT'].includes((error as NodeJS.ErrnoException).code!)) throw error;
   }
+}
+
+/**
+ * The key `path` is cached under when it is a translation for `harness` as
+ * `translate` lays them out — `<cache>/plugins/<key>/<harness>/<dir>/out` —
+ * or null. The key names the plugin and its content (`storeKey`,
+ * `contentKey`); `<dir>` names the runtime that translated it.
+ */
+export function translationKey(path: string, harness: string): string | null {
+  const match = /^\/.*\/agent-distro\/plugins\/([^/]+)\/([^/]+)\/[^/]+\/out$/.exec(path);
+  return match && match[2] === harness ? match[1] : null;
 }
 
 /**

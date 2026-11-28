@@ -17,12 +17,10 @@ writeShellApplication {
     # line. Like Claude Code and Codex, agy has a login of its own, so no
     # `secret` of the profile is prompted for.
     ${launchPlugins { }}
-    # This shell's pid is the session's: `exec` hands it to agy. A run that
-    # only lists models (`agent-distro --models agy`) leaves ~/.gemini/config
-    # as it is.
-    if [ "''${1:-}" != models ]; then
-      ${runtime.script "harness/agy.ts"} link ${pkgs.flock}/bin/flock "$$" "$launched"
-    fi
+    # This shell's pid is the session's: `exec` hands it to agy. `link` sees
+    # agy's arguments too, so a run that only lists models
+    # (`agent-distro --models agy`) leaves ~/.gemini/config as it is.
+    ${runtime.script "harness/agy.ts"} link ${pkgs.flock}/bin/flock "$$" "$launched" "$@"
     exec ${lib.getExe agy} "$@"
   '';
 }

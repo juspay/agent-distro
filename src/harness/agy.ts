@@ -1,7 +1,7 @@
 /**
  * The Antigravity CLI's side of a launch's plugins.
  *
- * Usage: node agy.ts link FLOCK SESSION_PID WANTED_JSON
+ * Usage: node agy.ts link FLOCK SESSION_PID WANTED_JSON [AGY_ARGS...]
  *
  * Google documents no flag that loads a plugin for one launch: it documents
  * `~/.gemini/config/plugins/` as where `agy` reads plugin folders, a directory
@@ -42,7 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../log.ts';
-import { hold, release, type Adapter, type Holder, type Report } from '../plugin/launch.ts';
+import { hold, isHolder, isRunning, release, translationKey, type Adapter, type Holder, type Report } from '../plugin/launch.ts';
 import type { ModelSource } from '../models.ts';
 import type { Description } from '../plugin/read.ts';
 import { copySkills, launchable, writeLauncher, type Inputs } from '../plugin/resources.ts';
@@ -59,7 +59,7 @@ type Links = Record<string, string>;
  * It names no directory: a claims directory serves exactly one plugins
  * directory (`locations`), however either is spelled.
  */
-type Claim = { pid: number; identity: string; links: Links };
+type Claim = Holder & { links: Links };
 
 /** How long a launch waits for another to finish linking before it skips its own links. */
 const LOCK_SECONDS = 30;
@@ -113,13 +113,6 @@ export function writeAntigravityPlugin(description: Description, out: string, { 
 }
 
 /**
- * A translation for this adapter, as src/plugin/launch.ts lays out its cache:
- * `<key>` names the plugin's content, `<translator>` the agent-distro that
- * translated it.
- */
-const TRANSLATION = /^\/.*\/agent-distro\/plugins\/([^/]+)\/agy\/[^/]+\/out$/;
-
-/**
  * How a translation is put where `agy` reads plugins, and how an entry of ours
  * is known again: the one place that decides between a link and a copy. A
  * link to a translation in agent-distro's cache is ours by its target alone.
@@ -136,7 +129,7 @@ export const ENTRIES = {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw error;
     }
-    return TRANSLATION.test(target) ? target : null;
+    return translationKey(target, 'agy') !== null ? target : null;
   },
   /** Place `translation` at `path`, atomically; false when something is there already. */
   place(translation: string, path: string): boolean {
@@ -157,11 +150,10 @@ export const ENTRIES = {
 const isName = (name: string) => name !== '' && name !== '.' && name !== '..' && !name.includes('/');
 
 function isClaim(value: unknown): value is Claim {
-  const claim = value as Claim | null;
-  return typeof claim === 'object' && claim !== null && Number.isInteger(claim.pid)
-    && typeof claim.identity === 'string'
-    && typeof claim.links === 'object' && claim.links !== null && !Array.isArray(claim.links)
-    && Object.entries(claim.links).every(([name, target]) => isName(name) && typeof target === 'string' && TRANSLATION.test(target));
+  const links = (value as Partial<Claim>)?.links;
+  return isHolder(value) && typeof links === 'object' && links !== null && !Array.isArray(links)
+    && Object.entries(links).every(([name, target]) => isName(name) && typeof target === 'string'
+      && translationKey(target, 'agy') !== null);
 }
 
 /**
@@ -206,7 +198,7 @@ function liveClaims(claims: string, self: number): Map<string, Map<string, numbe
       continue;
     }
     if (claim.pid === self) continue;
-    if (processIdentity(claim.pid) !== claim.identity) {
+    if (!isRunning(claim)) {
       for (const target of Object.values(claim.links)) release(target, claim.pid);
       rmSync(path, { force: true });
       continue;
@@ -262,17 +254,17 @@ export function settle(directory: string, claims: string, session: Holder, wante
       const source = ENTRIES.source(path);
       if (source !== null && source !== translation && held.get(name)?.has(source)) {
         const pids = [...held.get(name)!.get(source)!].sort((a, b) => a - b);
-        const sessions = pids.length === 1 ? `session (pid ${pids[0]})` : `sessions (pids ${pids.join(', ')})`;
+        const one = pids.length === 1;
+        const sessions = one ? `session (pid ${pids[0]}) uses` : `sessions (pids ${pids.join(', ')}) use`;
         // The same content translated by another agent-distro build: this
         // launch runs that build's translation until those sessions end.
         // Worth a trace, not a line on every launch.
-        if (TRANSLATION.exec(source)?.[1] === TRANSLATION.exec(translation)?.[1]) {
-          logger.debug(`plugin ${JSON.stringify(name)}: the running agy ${sessions} use${pids.length === 1 ? 's' : ''} it as `
-            + 'another agent-distro build translated it; this launch uses that translation until no running session holds it');
+        if (translationKey(source, 'agy') === translationKey(translation, 'agy')) {
+          logger.debug(`plugin ${JSON.stringify(name)}: the running agy ${sessions} it as another agent-distro build `
+            + 'translated it; this launch uses that translation until no running session holds it');
         } else {
-          report(`plugin ${JSON.stringify(name)}: the running agy ${sessions} use${pids.length === 1 ? 's' : ''} another `
-            + `copy or version of this plugin, so this launch uses it too; end ${pids.length === 1 ? 'that session' : 'those sessions'} `
-            + 'and launch again to use this one');
+          report(`plugin ${JSON.stringify(name)}: the running agy ${sessions} another copy or version of this plugin, `
+            + `so this launch uses it too; end ${one ? 'that session' : 'those sessions'} and launch again to use this one`);
         }
         using[name] = source;
       } else if (source === null && lexists(path)) {
@@ -340,50 +332,54 @@ export const adapter: Adapter<Inputs, Inputs> = {
 };
 
 /**
- * `link`: `settle` for the session, under the lock; `settle-locked` is what it
- * runs there. Every failure is a warning: the harness still starts.
+ * `link FLOCK PID WANTED ARGS…`, which the launcher runs before it `exec`s agy
+ * with ARGS: `settle` for session PID, under the lock. A run that only lists
+ * models (`models.list.args`) changes nothing. Every failure is a warning: the
+ * harness still starts.
  */
-function run(argv: string[]): number {
-  const [command, ...rest] = argv;
+function link(flock: string, pid: string, wanted: string, args: string[]) {
+  if (models.list!.args.every((arg, i) => args[i] === arg)) return;
   const where = locations();
-  if (command === 'link') {
-    const [flock, pid, wanted] = rest;
-    const any = Object.keys(JSON.parse(wanted)).length > 0;
-    if (!where) {
-      if (any) logger.warn('HOME is unset; skipping plugin links');
-      return 0;
-    }
-    const { claims } = where;
-    try {
-      mkdirSync(claims, { recursive: true });
-    } catch (error) {
-      if (!isSystemError(error)) throw error;
-      // Nothing wanted: nothing to place, and nothing is taken back without the claims.
-      if (any) logger.warn(`cannot create ${claims}: ${error.message}; nothing placed or taken back`);
-      return 0;
-    }
-    const lock = join(claims, 'lock');
-    const locked = spawnSync(flock, ['-w', String(LOCK_SECONDS), lock,
-      process.execPath, import.meta.filename, 'settle-locked', pid, wanted], { stdio: 'inherit' });
-    if (locked.status !== 0) {
-      logger.warn(`plugin links skipped: another agy launch held ${lock} for ${LOCK_SECONDS}s, or linking failed above`);
-    }
-    return 0;
-  }
-  if (command !== 'settle-locked') throw new Error(`unknown command: ${command}`);
-  const pid = Number(rest[0]);
-  const identity = processIdentity(pid);
-  if (identity === null) {
-    logger.warn(`session ${rest[0]} has already ended; nothing placed or taken back`);
-    return 0;
+  const any = Object.keys(JSON.parse(wanted)).length > 0;
+  if (!where) {
+    if (any) logger.warn('HOME is unset; skipping plugin links');
+    return;
   }
   try {
-    settle(where!.plugins, where!.claims, { pid, identity }, JSON.parse(rest[1]), (message) => logger.warn(message));
+    mkdirSync(where.claims, { recursive: true });
+  } catch (error) {
+    if (!isSystemError(error)) throw error;
+    // Nothing wanted: nothing to place, and nothing is taken back without the claims.
+    if (any) logger.warn(`cannot create ${where.claims}: ${error.message}; nothing placed or taken back`);
+    return;
+  }
+  const lock = join(where.claims, 'lock');
+  const locked = spawnSync(flock, ['-w', String(LOCK_SECONDS), lock,
+    process.execPath, import.meta.filename, 'settle-locked', pid, wanted], { stdio: 'inherit' });
+  if (locked.status !== 0) {
+    logger.warn(`plugin links skipped: another agy launch held ${lock} for ${LOCK_SECONDS}s, or linking failed above`);
+  }
+}
+
+/** `settle-locked PID WANTED`: what `link` runs under the lock. */
+function settleLocked(pid: string, wanted: string) {
+  const identity = processIdentity(Number(pid));
+  if (identity === null) {
+    logger.warn(`session ${pid} has already ended; nothing placed or taken back`);
+    return;
+  }
+  const where = locations()!;
+  try {
+    settle(where.plugins, where.claims, { pid: Number(pid), identity }, JSON.parse(wanted), (message) => logger.warn(message));
   } catch (error) {
     if (!(error instanceof Skipped)) throw error;
     logger.warn(error.message);
   }
-  return 0;
 }
 
-if (import.meta.main) process.exitCode = run(process.argv.slice(2));
+if (import.meta.main) {
+  const [command, ...rest] = process.argv.slice(2);
+  if (command === 'link') link(rest[0], rest[1], rest[2], rest.slice(3));
+  else if (command === 'settle-locked') settleLocked(rest[0], rest[1]);
+  else throw new Error(`unknown command: ${command}`);
+}
