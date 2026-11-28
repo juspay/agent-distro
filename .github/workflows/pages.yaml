@@ -13,10 +13,9 @@ on:
       - ".github/workflows/pages.yaml"
   workflow_dispatch:
 
+# Read-only by default; only `deploy` writes, and only to Pages.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -27,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
 
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
@@ -47,6 +49,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # What deploy-pages needs: write to Pages, and an OIDC token to prove the
+    # deployment came from this workflow.
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
