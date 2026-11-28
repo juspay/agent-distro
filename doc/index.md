@@ -54,16 +54,17 @@ Here the terminal is in a repository whose profile is Juspay's `plugin.json`, an
 [^chooser-rows]: The panel shows the highlighted harness's tagline and its auth status. Versions reflect the packages pinned at build time, shown without revision suffixes.
 
 ```
-╭─ agent-distro · juspay-skills ─────────────────────────────── 5 harnesses ─╮
+╭─ agent-distro · juspay-skills ─────────────────────────────── 6 harnesses ─╮
 │ juspay-skills · Juspay skills + Kolu, via Juspay's LiteLLM gateway · from  │
 │ /home/me/src/skills/plugin.json                                            │
-├──────────────────────────────┬─────────────────────────────────────────────┤
-│     ✓ Oh My Pi       18.7.0  │ Pi 1.0.4                                    │
-│     ✓ Codex         0.160.1  │ OMP's upstream · plugins per home           │
-│     ✓ Claude Code   2.1.292  │                                             │
-│     ✓ OpenCode       2.0.29  │ Signed in                                   │
-│ ❯ • ✓ Pi              1.0.4  │   LITELLM_API_KEY                           │
-├──────────────────────────────┴─────────────────────────────────────────────┤
+├──────────────────────────────────┬─────────────────────────────────────────┤
+│     ✓ Oh My Pi           18.7.0  │ Pi 1.0.4                                │
+│     ✓ Codex             0.160.1  │ OMP's upstream · plugins per home       │
+│     ✓ Claude Code       2.1.292  │                                         │
+│     ✓ OpenCode           2.0.29  │ Signed in                               │
+│ ❯ • ✓ Pi                  1.0.4  │   LITELLM_API_KEY                       │
+│       Antigravity CLI    1.5.19  │                                         │
+├──────────────────────────────────┴─────────────────────────────────────────┤
 │ / filter…                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────╯
 ↑↓ jk move   Enter launch   / filter   q quit

@@ -44,6 +44,10 @@ documents: `GEMINI_API_KEY` with `"modelProvider": "gemini"` in
 `~/.gemini/antigravity-cli/settings.json`, or `AGY_ADC_AUTH=true`. Otherwise
 the row shows neither a mark nor "Not signed in".
 
+Like Claude Code and Codex, `agy` has a login of its own, so the launcher never
+prompts for the profile's `secret` variables. It exports the profile's other
+`env` entries and puts its packages on `PATH`, as every launcher does.
+
 Unproven, since no check here can sign in: what `agy models` prints signed in
 (the reader follows Google's documented sample), whether `agy` loads a plugin
 folder that is a symlink, and whether a moved `HOME` moves `~/.gemini`. The VM
