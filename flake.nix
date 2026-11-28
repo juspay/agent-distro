@@ -48,6 +48,21 @@
         pkgs.callPackage ./lib/mk-check-profile.nix {
           info = (import ./lib/runtime.nix pkgs).info nixpkgs;
         });
+      # A harness's own Home Manager modules (lib/harness-modules.nix), each
+      # exported as `<harness>-<feature>` and given a key, so importing it
+      # beside `default`, which composes them all, declares nothing twice.
+      harnessModules = lib.mapAttrs
+        (exported: found: {
+          key = "agent-distro#homeManagerModules.${exported}";
+          imports = [ (import found.module { packages = lib.mapAttrs (_: set: set.${found.harness}) harnesses; }) ];
+        })
+        (import ./lib/harness-modules.nix);
+      core = import ./modules/home-manager.nix {
+        packages = agentDistro;
+        mkProfile = api.mkProfile;
+        defaultFlake = "github:juspay/agent-distro";
+        inherit cache caIndex;
+      };
     in
     {
       packages = lib.genAttrs systems (system: lib.removeAttrs launchers.${system} [ "picker" "package" ] // {
@@ -59,19 +74,23 @@
         vanilla = agentDistro.${system};
         check-profile = checkers.${system};
       });
-      homeManagerModules.default = import ./modules/home-manager.nix {
-        packages = agentDistro;
-        mkProfile = api.mkProfile;
-        defaultFlake = "github:juspay/agent-distro";
-        inherit cache caIndex;
+      homeManagerModules = harnessModules // {
+        # The core module itself, at the level a consumer imports it, so its
+        # definitions keep their place; keyed, and importing every harness
+        # module.
+        default = lib.mirrorFunctionArgs core (args: core args // {
+          key = "agent-distro#homeManagerModules.default";
+          imports = lib.attrValues harnessModules;
+        });
       };
       apps = lib.genAttrs systems (system: {
         default = { type = "app"; program = lib.getExe agentDistro.${system}; };
         check-profile = { type = "app"; program = lib.getExe checkers.${system}; };
       });
 
-      # Upstream's own packages, for the daily update to report: a harness
-      # version is a property of the lock, not of any profile.
+      # Upstream's own packages, for the daily update to report (a harness
+      # version is a property of the lock, not of any profile) and for the
+      # harnesses' Home Manager modules, which run them without a launcher.
       inherit harnesses;
       harnessMeta = versions: lib.mapAttrs
         (name: meta: {
